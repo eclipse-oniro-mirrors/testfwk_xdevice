@@ -485,9 +485,9 @@ class Device(IDevice):
 
     def start_get_crash_log(self, task_name):
         log_array = list()
-        native_crash_cmd = "ls /data/log/faultlog/temp"
-        js_crash_cmd = '"ls /data/log/faultlog/faultlogger | grep jscrash"'
-        block_crash_cmd = '"ls /data/log/faultlog/"'
+        native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
+        js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
+        block_crash_cmd = '"ls {}"'.format(ROOT_PATH)
         # 获取crash日志文件
         log_array.extend(self._get_log(native_crash_cmd, "cppcrash"))
         log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
@@ -499,10 +499,10 @@ class Device(IDevice):
             self.get_cur_crash_log(crash_path, log_name)
 
     def clear_crash_log(self):
-        clear_block_crash_cmd = "rm -f /data/log/faultlog/*"
-        clear_native_crash_cmd = "rm -f /data/log/faultlog/temp/*"
-        clear_debug_crash_cmd = "rm -f /data/log/faultlog/debug/*"
-        clear_js_crash_cmd = "rm -f /data/log/faultlog/faultlogger/*"
+        clear_block_crash_cmd = "rm -f {}/*".format(ROOT_PATH)
+        clear_native_crash_cmd = "rm -f {}/*".format(NATIVE_CRASH_PATH)
+        clear_debug_crash_cmd = "rm -f {}/debug/*".format(ROOT_PATH)
+        clear_js_crash_cmd = "rm -f {}/*".format(JS_CRASH_PATH)
         self.execute_shell_command(clear_block_crash_cmd)
         self.execute_shell_command(clear_native_crash_cmd)
         self.execute_shell_command(clear_debug_crash_cmd)
