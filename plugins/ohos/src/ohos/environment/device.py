@@ -37,6 +37,7 @@ from xdevice import get_cst_time
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
+from ohos.parser.parser import _ACE_LOG_MARKER
 
 __all__ = ["Device"]
 TIMEOUT = 300 * 1000
@@ -395,9 +396,11 @@ class Device(IDevice):
         if self.hilog_file_pipe:
             command = "hilog"
             if self.host != "127.0.0.1":
-                cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port), "shell", command]
+                cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port),
+                       "shell", command, "|", "grep", "-i", _ACE_LOG_MARKER]
             else:
-                cmd = ['hdc_std', "-t", self.device_sn, "shell", command]
+                cmd = ['hdc_std', "-t", self.device_sn, "shell", command,
+                       "|", "grep", "-i", _ACE_LOG_MARKER]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
                 self.device_sn, convert_serial(self.device_sn)))
             self.device_hilog_proc = start_standing_subprocess(
