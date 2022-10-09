@@ -19,9 +19,6 @@
 import time
 import os
 import threading
-from datetime import datetime
-from datetime import timezone
-from datetime import timedelta
 from xdevice import DeviceOsType
 from xdevice import ProductForm
 from xdevice import ReportException
@@ -36,6 +33,7 @@ from xdevice import convert_serial
 from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
+from xdevice import get_cst_time
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
@@ -512,13 +510,8 @@ class Device(IDevice):
 
     def _sync_device_time(self):
         # 先同步PC和设备的时间
-        sha_tz = timezone(
-            timedelta(hours=8),
-            name='Asia/Shanghai',
-        )
         iso_time_format = '%Y-%m-%d %H:%M:%S'
-        cur_time = datetime.now(tz=timezone.utc).astimezone(sha_tz)\
-            .strftime(iso_time_format)
+        cur_time = get_cst_time().strftime(iso_time_format)
         self.execute_shell_command("date '{}'".format(cur_time))
         self.execute_shell_command("hwclock --systohc")
 

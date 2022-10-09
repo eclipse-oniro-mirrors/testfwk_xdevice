@@ -29,6 +29,7 @@ from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.testkit.json_parser import JsonParser
 from _core.utils import get_kit_instances
+from _core.utils import get_cst_time
 
 __all__ = ["Descriptor", "Task", "Request"]
 LOG = platform_logger("Request")
@@ -71,7 +72,7 @@ class Task:
     def init(self, config):
         from xdevice import Variables
         from xdevice import Scheduler
-        start_time = datetime.datetime.now()
+        start_time = get_cst_time()
         LOG.debug("StartTime=%s" % start_time.strftime("%Y-%m-%d %H:%M:%S"))
 
         self.config.update(config.__dict__)

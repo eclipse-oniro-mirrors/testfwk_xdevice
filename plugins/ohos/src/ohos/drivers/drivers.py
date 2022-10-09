@@ -59,6 +59,7 @@ from xdevice import reset_junit_para
 from xdevice import disable_keyguard
 from xdevice import unlock_screen
 from xdevice import unlock_device
+from xdevice import get_cst_time
 
 from ohos.environment.dmlib import process_command_ret
 from ohos.environment.dmlib import DisplayOutputReceiver
@@ -945,8 +946,7 @@ class JUnitTestDriver(IDriver):
         else:
             test_list = [ele.strip() for ele in self.config.include_tests]
         if test_list:
-            import datetime
-            prefix = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+            prefix = get_cst_time().strftime('%Y%m%d%H%M%S%f')
 
             save_file = \
                 os.path.join(self.config.report_path, "temp_%s.txt" % prefix)

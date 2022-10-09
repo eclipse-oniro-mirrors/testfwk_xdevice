@@ -33,6 +33,7 @@ from _core.utils import convert_serial
 from _core.utils import get_instance_name
 from _core.utils import is_config_str
 from _core.utils import check_result_report
+from _core.utils import get_cst_time
 from _core.environment.manager_env import EnvironmentManager
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.exception import ParamError
@@ -729,10 +730,10 @@ class Scheduler(object):
 
     @classmethod
     def _get_thread_id(cls, current_driver_threads):
-        thread_id = datetime.datetime.now().strftime(
+        thread_id = get_cst_time().strftime(
             '%Y-%m-%d-%H-%M-%S-%f')
         while thread_id in current_driver_threads.keys():
-            thread_id = datetime.datetime.now().strftime(
+            thread_id = get_cst_time().strftime(
                 '%Y-%m-%d-%H-%M-%S-%f')
         return thread_id
 

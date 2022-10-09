@@ -28,6 +28,9 @@ import signal
 import uuid
 import json
 import stat
+from datetime import timezone
+from datetime import timedelta
+from datetime import datetime
 from tempfile import NamedTemporaryFile
 
 from _core.executor.listener import SuiteResult
@@ -688,3 +691,9 @@ def do_module_kit_teardown(request):
             if check_device_name(device, kit, step="teardown"):
                 kit.__teardown__(device)
         setattr(device, ConfigConst.module_kits, [])
+
+
+def get_cst_time():
+    cn_tz = timezone(timedelta(hours=8),
+                     name='Asia/ShangHai')
+    return datetime.now(tz=cn_tz)
