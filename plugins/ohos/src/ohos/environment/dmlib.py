@@ -1033,6 +1033,7 @@ class HdcHelper:
         length = struct.unpack("!I", reply)[0]
         data_buf = HdcHelper.read(sock, length)
         HdcHelper.reply_to_string(data_buf)
+        LOG.debug("result is {}".format(data_buf))
 
     @staticmethod
     def is_hdc_std():
