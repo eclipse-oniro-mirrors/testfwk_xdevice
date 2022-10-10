@@ -19,7 +19,6 @@
 import copy
 import re
 import time
-import datetime
 import json
 from enum import Enum
 
@@ -32,6 +31,7 @@ from xdevice import StateRecorder
 from xdevice import TestDescription
 from xdevice import ResultCode
 from xdevice import CommonParserType
+from xdevice import get_cst_time
 
 __all__ = ["CppTestParser", "CppTestListParser", "JunitParser", "JSUnitParser",
            "OHKernelTestParser", "OHJSUnitTestParser",
@@ -410,7 +410,7 @@ class JunitParser(IParser):
         self.listeners = []
         self.current_key = None
         self.current_value = None
-        self.start_time = datetime.datetime.now()
+        self.start_time = get_cst_time()
         self.test_time = 0
         self.test_run_finished = False
 
@@ -513,14 +513,14 @@ class JunitParser(IParser):
         test_info.is_completed = True
         self.report_test_run_started(test_info)
         if test_info.code == StatusCodes.START.value:
-            self.start_time = datetime.datetime.now()
+            self.start_time = get_cst_time()
             for listener in self.get_listeners():
                 result = copy.copy(test_info)
                 listener.__started__(LifeCycle.TestCase, result)
         elif test_info.code == StatusCodes.FAILURE.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -530,7 +530,7 @@ class JunitParser(IParser):
         elif test_info.code == StatusCodes.ERROR.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -540,7 +540,7 @@ class JunitParser(IParser):
         elif test_info.code == StatusCodes.SUCCESS.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -548,7 +548,7 @@ class JunitParser(IParser):
                 result.code = ResultCode.PASSED.value
                 listener.__ended__(LifeCycle.TestCase, result)
         elif test_info.code == StatusCodes.IGNORE.value:
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -557,7 +557,7 @@ class JunitParser(IParser):
                 listener.__skipped__(LifeCycle.TestCase, result)
         elif test_info.code == StatusCodes.BLOCKED.value:
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -1030,7 +1030,7 @@ class OHJSUnitTestParser(IParser):
         self.listeners = []
         self.current_key = None
         self.current_value = None
-        self.start_time = datetime.datetime.now()
+        self.start_time = get_cst_time()
         self.test_time = 0
         self.test_run_finished = False
         self.cur_sum = -1
@@ -1136,7 +1136,7 @@ class OHJSUnitTestParser(IParser):
             LOG.info("Invalid instrumentation status bundle")
             return
         if test_info.code == StatusCodes.START.value:
-            self.start_time = datetime.datetime.now()
+            self.start_time = get_cst_time()
             for listener in self.get_listeners():
                 result = copy.copy(test_info)
                 listener.__started__(LifeCycle.TestCase, result)
@@ -1144,7 +1144,7 @@ class OHJSUnitTestParser(IParser):
         if test_info.code == StatusCodes.FAILURE.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -1159,7 +1159,7 @@ class OHJSUnitTestParser(IParser):
         elif test_info.code == StatusCodes.ERROR.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():
@@ -1174,7 +1174,7 @@ class OHJSUnitTestParser(IParser):
         elif test_info.code == StatusCodes.SUCCESS.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = datetime.datetime.now()
+            end_time = get_cst_time()
             run_time = (end_time - self.start_time).total_seconds()
             test_info.run_time = int(run_time * 1000)
             for listener in self.get_listeners():

@@ -102,6 +102,7 @@ from _core.utils import check_path_legal
 from _core.utils import modify_props
 from _core.utils import get_shell_handler
 from _core.utils import get_decode
+from _core.utils import get_cst_time
 from _core.utils import start_standing_subprocess
 from _core.utils import stop_standing_subprocess
 from _core.environment.manager_env import DeviceSelectionOption
@@ -222,6 +223,7 @@ __all__ = [
     "modify_props",
     "get_shell_handler",
     "get_decode",
+    "get_cst_time",
     "start_standing_subprocess",
     "stop_standing_subprocess",
     "ExecInfo",

@@ -19,7 +19,6 @@
 import copy
 import re
 import time
-import datetime
 from queue import Queue
 
 from xdevice import IParser
@@ -30,6 +29,7 @@ from xdevice import LifeCycle
 from xdevice import ResultCode
 from xdevice import platform_logger
 from xdevice import check_pub_key_exist
+from xdevice import get_cst_time
 
 from ohos.constants import ParserType
 
@@ -809,7 +809,7 @@ class OpenSourceParser(IParser):
 
     def __process__(self, lines):
         if not self.start_time:
-            self.start_time = datetime.datetime.now()
+            self.start_time = get_cst_time()
         self.lines.extend(lines)
 
     def __done__(self):
@@ -832,7 +832,7 @@ class OpenSourceParser(IParser):
             if _TEST_PASSED_LOWER in line.lower():
                 test_result.code = ResultCode.PASSED.value
                 if self.start_time:
-                    end_time = datetime.datetime.now()
+                    end_time = get_cst_time()
                     run_time = (end_time - self.start_time).total_seconds()
                     test_result.run_time = int(run_time * 1000)
                 for listener in self.get_listeners():
@@ -843,7 +843,7 @@ class OpenSourceParser(IParser):
             test_result.code = ResultCode.FAILED.value
             test_result.stacktrace = "\\n".join(self.lines)
             if self.start_time:
-                end_time = datetime.datetime.now()
+                end_time = get_cst_time()
                 run_time = (end_time - self.start_time).total_seconds()
                 test_result.run_time = int(run_time * 1000)
             for listener in self.get_listeners():

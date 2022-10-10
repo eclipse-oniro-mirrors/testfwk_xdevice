@@ -59,6 +59,7 @@ from xdevice import reset_junit_para
 from xdevice import disable_keyguard
 from xdevice import unlock_screen
 from xdevice import unlock_device
+from xdevice import get_cst_time
 
 from ohos.environment.dmlib import process_command_ret
 from ohos.environment.dmlib import DisplayOutputReceiver
@@ -945,8 +946,7 @@ class JUnitTestDriver(IDriver):
         else:
             test_list = [ele.strip() for ele in self.config.include_tests]
         if test_list:
-            import datetime
-            prefix = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+            prefix = get_cst_time().strftime('%Y%m%d%H%M%S%f')
 
             save_file = \
                 os.path.join(self.config.report_path, "temp_%s.txt" % prefix)
@@ -2487,10 +2487,11 @@ class JSUnitTestDriver(IDriver):
             raise exception
         finally:
             serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
-            log_tar_file_name = "{}_{}".format(str(serial).replace(
-                ":", "_"), request.get_module_name())
+            log_tar_file_name = "{}_{}".format(request.get_module_name(),
+                                               str(serial).replace(":", "_"))
             self.config.device.start_get_crash_log(log_tar_file_name)
             self.config.device.stop_catch_device_log()
+            self.config.device.stop_hilog_task(log_tar_file_name)
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
@@ -2526,6 +2527,7 @@ class JSUnitTestDriver(IDriver):
                     hilog_file_pipe=hilog_file_pipe)
 
             # execute test case
+            self.config.device.start_hilog_task()
             command = "shell aa start -d 123 -a %s -b %s" \
                       % (ability_name, package)
             result_value = self.config.device.connector_command(command)

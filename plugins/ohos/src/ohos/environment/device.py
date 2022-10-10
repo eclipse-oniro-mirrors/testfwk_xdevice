@@ -19,9 +19,6 @@
 import time
 import os
 import threading
-from datetime import datetime
-from datetime import timezone
-from datetime import timedelta
 from xdevice import DeviceOsType
 from xdevice import ProductForm
 from xdevice import ReportException
@@ -36,9 +33,11 @@ from xdevice import convert_serial
 from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
+from xdevice import get_cst_time
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
+from ohos.parser.parser import _ACE_LOG_MARKER
 
 __all__ = ["Device"]
 TIMEOUT = 300 * 1000
@@ -397,9 +396,11 @@ class Device(IDevice):
         if self.hilog_file_pipe:
             command = "hilog"
             if self.host != "127.0.0.1":
-                cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port), "shell", command]
+                cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port),
+                       "shell", command, "|", "grep", "-i", _ACE_LOG_MARKER]
             else:
-                cmd = ['hdc_std', "-t", self.device_sn, "shell", command]
+                cmd = ['hdc_std', "-t", self.device_sn, "shell", command,
+                       "|", "grep", "-i", _ACE_LOG_MARKER]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
                 self.device_sn, convert_serial(self.device_sn)))
             self.device_hilog_proc = start_standing_subprocess(
@@ -435,13 +436,21 @@ class Device(IDevice):
     def stop_hilog_task(self, log_name):
         cmd = "hilog -w stop"
         out = self.execute_shell_command(cmd)
-        # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
-        cmd = "cd /data/log/hilog && tar -zcvf /data/log/hilog_{}.tar.gz *".format(log_name)
-        out = self.execute_shell_command(cmd)
-        LOG.info("Execute command: {}, result is {}".format(cmd, out))
-        self.pull_file("/data/log/hilog_{}.tar.gz".format(log_name), "{}/log/".format(self._device_log_path))
-        cmd = "rm -rf /data/log/hilog_{}.tar.gz".format(log_name)
-        out = self.execute_shell_command(cmd)
+        self.pull_file("/data/log/hilog/", "{}/log/".format(self._device_log_path))
+        try:
+            os.rename("{}/log/hilog".format(self._device_log_path),
+                      "{}/log/{}_hilog".format(self._device_log_path, log_name))
+        except Exception as e:
+            self.log.error("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
+            # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
+            cmd = "cd /data/log/hilog && tar -zcvf /data/log/hilog_{}.tar.gz *".format(log_name)
+            out = self.execute_shell_command(cmd)
+            LOG.info("Execute command: {}, result is {}".format(cmd, out))
+            if "No space left on device" not in out:
+                self.pull_file("/data/log/{}_hilog.tar.gz".format(log_name),
+                               "{}/log/".format(self._device_log_path))
+                cmd = "rm -rf /data/log/hilog_{}.tar.gz".format(log_name)
+                out = self.execute_shell_command(cmd)
         # 获取crash日志
         self.start_get_crash_log(log_name)
 
@@ -487,9 +496,9 @@ class Device(IDevice):
 
     def start_get_crash_log(self, task_name):
         log_array = list()
-        native_crash_cmd = "ls /data/log/faultlog/temp"
-        js_crash_cmd = '"ls /data/log/faultlog/faultlogger | grep jscrash"'
-        block_crash_cmd = '"ls /data/log/faultlog/"'
+        native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
+        js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
+        block_crash_cmd = '"ls {}"'.format(ROOT_PATH)
         # 获取crash日志文件
         log_array.extend(self._get_log(native_crash_cmd, "cppcrash"))
         log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
@@ -501,10 +510,10 @@ class Device(IDevice):
             self.get_cur_crash_log(crash_path, log_name)
 
     def clear_crash_log(self):
-        clear_block_crash_cmd = "rm -f /data/log/faultlog/*"
-        clear_native_crash_cmd = "rm -f /data/log/faultlog/temp/*"
-        clear_debug_crash_cmd = "rm -f /data/log/faultlog/debug/*"
-        clear_js_crash_cmd = "rm -f /data/log/faultlog/faultlogger/*"
+        clear_block_crash_cmd = "rm -f {}/*".format(ROOT_PATH)
+        clear_native_crash_cmd = "rm -f {}/*".format(NATIVE_CRASH_PATH)
+        clear_debug_crash_cmd = "rm -f {}/debug/*".format(ROOT_PATH)
+        clear_js_crash_cmd = "rm -f {}/*".format(JS_CRASH_PATH)
         self.execute_shell_command(clear_block_crash_cmd)
         self.execute_shell_command(clear_native_crash_cmd)
         self.execute_shell_command(clear_debug_crash_cmd)
@@ -512,13 +521,8 @@ class Device(IDevice):
 
     def _sync_device_time(self):
         # 先同步PC和设备的时间
-        sha_tz = timezone(
-            timedelta(hours=8),
-            name='Asia/Shanghai',
-        )
         iso_time_format = '%Y-%m-%d %H:%M:%S'
-        cur_time = datetime.now(tz=timezone.utc).astimezone(sha_tz)\
-            .strftime(iso_time_format)
+        cur_time = get_cst_time().strftime(iso_time_format)
         self.execute_shell_command("date '{}'".format(cur_time))
         self.execute_shell_command("hwclock --systohc")
 
@@ -552,12 +556,14 @@ class Device(IDevice):
         self.reconnecttimes = 0
 
     def reset(self):
-        self.log.debug("start stop rpc")
-        if self._proxy is not None:
-            self._proxy.close()
-        self._proxy = None
-        self.remove_ports()
-        self.stop_harmony_rpc()
+        if self.device_allocation_state != \
+                DeviceAllocationState.ignored:
+            self.log.debug("start stop rpc")
+            if self._proxy is not None:
+                self._proxy.close()
+            self._proxy = None
+            self.remove_ports()
+            self.stop_harmony_rpc()
 
     @property
     def proxy(self):
