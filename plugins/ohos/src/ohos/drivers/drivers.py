@@ -2148,77 +2148,7 @@ class JSUnitTestDriver(IDriver):
         exe_out = device.execute_shell_command(
             "param get const.product.software.version")
         LOG.debug("Software version is {}".format(exe_out))
-        if "OpenHarmony" in exe_out:
-            self.run_js_outer(request)
-        else:
-            self.run_js_inner(request)
-
-    def run_js_inner(self, request):
-        try:
-            LOG.debug("Start execute xdevice extension JSUnit Test")
-
-            self.config = request.config
-            self.config.device = request.config.environment.devices[0]
-
-            self.result = os.path.join(
-                request.config.report_path, "result",
-                '.'.join((request.get_module_name(), "xml")))
-
-            config_file = request.root.source.config_file
-            suite_file = request.root.source.source_file
-
-            if not suite_file:
-                raise ParamError(
-                    "test source '%s' not exists" %
-                    request.root.source.source_string, error_no="00110")
-
-            LOG.debug("Test case file path: %s" % suite_file)
-            device_log = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__(),
-                "device_log")
-
-            hilog = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__() + "_" + request.
-                get_module_name(),
-                "device_hilog")
-
-            device_log_open = os.open(device_log, os.O_WRONLY | os.O_CREAT |
-                                      os.O_APPEND, FilePermission.mode_755)
-            hilog_open = os.open(hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                                 FilePermission.mode_755)
-            with os.fdopen(device_log_open, "a") as log_file_pipe, \
-                    os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.config.device.start_catch_device_log(log_file_pipe,
-                                                          hilog_file_pipe)
-                # unlock device
-                disable_keyguard(self.config.device)
-                self._run_jsunit(config_file, hilog, request)
-
-                log_file_pipe.flush()
-                hilog_file_pipe.flush()
-            if self.xml_output == "false":
-                self.start_time = time.time()
-                json_config = JsonParser(config_file)
-                timeout_config = get_config_value('test-timeout',
-                                                  json_config.get_driver(),
-                                                  False, 60000)
-                timeout = int(timeout_config) / 1000
-                self.generate_console_output(hilog, request, timeout)
-
-        except Exception as exception:
-            self.error_message = exception
-            if not getattr(exception, "error_no", ""):
-                setattr(exception, "error_no", "03409")
-            LOG.exception(self.error_message, exc_info=False, error_no="03409")
-            raise
-        finally:
-            do_module_kit_teardown(request)
-            _lock_screen(self.config.device)
-            self.config.device.stop_catch_device_log()
-            self.result = check_result_report(
-                request.config.report_path, self.result, self.error_message)
+        self.run_js_outer(request)
 
     def generate_console_output(self, device_log_file, request, timeout):
         LOG.info("prepare to read device log, may wait some time")
@@ -2297,30 +2227,6 @@ class JSUnitTestDriver(IDriver):
                   (len(tests_dict), test_count))
         return tests_dict
 
-    def read_device_log(self, device_log_file, result_message):
-        device_log_file_open = os.open(device_log_file, os.O_RDONLY,
-                                       stat.S_IWUSR | stat.S_IRUSR)
-        if not result_message:
-            result_message = ""
-        self.start_time = time.time()
-        with os.fdopen(device_log_file_open, "r", encoding='utf-8') \
-                as file_read_pipe:
-            while True:
-                try:
-                    data = file_read_pipe.readline()
-                    result_message += data
-                    report_name = ""
-                    if re.match(r'.*\[create report]*', data):
-                        _, index = re.match(r'.*\[create report]*', data).\
-                            span()
-                    if result_message.find("[create report]") != -1 or \
-                            int(time.time() - int(self.start_time)) > \
-                            self.timeout:
-                        break
-                except (UnicodeDecodeError, UnicodeError) as error:
-                    LOG.warning("While read log file: %s" % error)
-        return result_message, report_name
-
     def read_device_log_timeout(self, device_log_file,
                                 message_list, timeout):
         LOG.info("The timeout is {} seconds".format(timeout))
@@ -2377,78 +2283,6 @@ class JSUnitTestDriver(IDriver):
             pid = matcher.group(1)
             return pid, True
         return pid, False
-
-    def _run_jsunit(self, config_file, device_log_file, request):
-
-        if not os.path.exists(config_file):
-            LOG.error("Error: Test cases don't exist %s." % config_file)
-            raise ParamError(
-                "Error: Test cases don't exist %s." % config_file,
-                error_no="00102")
-
-        json_config = JsonParser(config_file)
-        self.kits = get_kit_instances(json_config,
-                                      self.config.resource_path,
-                                      self.config.testcases_path)
-
-        driver_config = self._get_driver_config(json_config)
-        # bms not check release type
-        self.config.device.execute_shell_command("bm set -d enable")
-        # turn auto rotation off
-        self.config.device.execute_shell_command("settings put system "
-                                                 "accelerometer_rotation 0")
-        do_module_kit_setup(request, self.kits)
-
-        # execute test case
-        command = "aa start -p %s -n %s " \
-                  "-s unittest %s -s rawLog true -s timeout %s" \
-                  % (driver_config.package, driver_config.ability_name,
-                     driver_config.runner, driver_config.testcase_timeout)
-        result_value = self.config.device.execute_shell_command(
-            command, timeout=self.timeout)
-        if self.xml_output == "true":
-            _, report_name = self.read_device_log(device_log_file, "")
-            if report_name:
-                self.config.target_test_path = "/%s/%s/%s/%s/%s/" \
-                                               % ("sdcard", "Android",
-                                                  "data", driver_config.package, "cache")
-                result = ResultManager(report_name,
-                                       self.config.report_path,
-                                       self.config.device,
-                                       self.config.target_test_path)
-                self.result = result.get_test_results(
-                    result_value)
-
-    def _jsunit_clear(self):
-        self.config.device.execute_shell_command(
-            "rm -r /%s/%s/%s/%s" % ("data", "local", "tmp", "ajur"))
-
-    def _get_driver_config(self, json_config):
-        package = get_config_value('package', json_config.get_driver(), False)
-        runner = "ohos.testkit.runner.Runner"
-
-        default_ability = "ohos.testkit.runner.EntryAbility"
-        ability_name = get_config_value('abilityName', json_config.
-                                        get_driver(), False, default_ability)
-
-        self.xml_output = get_xml_output(self.config, json_config)
-        timeout_config = get_config_value('native-test-timeout',
-                                          json_config.get_driver(), False)
-        #  for historical reasons, this strategy is adopted
-        #  priority: native-test-timeout higher than shell-timeout
-        if not timeout_config:
-            timeout_config = get_config_value('shell-timeout',
-                                              json_config.get_driver(), False)
-        testcase_timeout = get_config_value(
-            'testcase-timeout', json_config.get_driver(), False, 5000)
-        if timeout_config:
-            self.timeout = int(timeout_config)
-
-        if not package:
-            raise ParamError("Can't find package in config file.",
-                             error_no="03201")
-        DriverConfig = namedtuple('DriverConfig', 'package ability_name runner testcase_timeout')
-        return DriverConfig(package, ability_name, runner, testcase_timeout)
 
     def run_js_outer(self, request):
         try:
