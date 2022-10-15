@@ -83,8 +83,8 @@ def perform_device_action(func):
                     ConnectionAbortedError) as error:  # pylint:disable=undefined-variable
                 self.log.error("error type: %s, error: %s" %
                                (error.__class__.__name__, error))
-                cmd = "hdc_std target boot"
-                self.log.info("re-execute hdc reset")
+                cmd = "{} target boot".format(HdcHelper.CONNECTOR_NAME)
+                self.log.info("re-execute {} reset".format(HdcHelper.CONNECTOR_NAME))
                 exec_cmd(cmd)
                 callback_to_outer(self, "error:%s, prepare to recover" % error)
                 if not self.recover_device():
@@ -132,7 +132,6 @@ class Device(IDevice):
     port = None
     usb_type = None
     is_timeout = False
-    device_log_proc = None
     device_hilog_proc = None
     device_os_type = DeviceOsType.default
     test_device_state = None
@@ -157,6 +156,7 @@ class Device(IDevice):
     screenshot_fail = True
     module_package = None
     module_ablity_name = None
+    _device_log_path = None
 
     model_dict = {
         'default': ProductForm.phone,
@@ -231,11 +231,12 @@ class Device(IDevice):
         timeout_msg = '' if timeout == 300.0 else \
             " with timeout %ss" % timeout
         if self.host != "127.0.0.1":
-            cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port)]
+            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port)]
         else:
-            cmd = ["hdc_std", "-t", self.device_sn]
-        LOG.debug("%s execute command hdc %s%s" % (
-            convert_serial(self.device_sn), command, timeout_msg))
+            cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn]
+        LOG.debug("{} execute command {} {}{}".format(convert_serial(self.device_sn),
+                                                      HdcHelper.CONNECTOR_NAME, 
+                                                      command, timeout_msg))
         if isinstance(command, list):
             cmd.extend(command)
         else:
@@ -395,21 +396,16 @@ class Device(IDevice):
         if self.hilog_file_pipe:
             command = "hilog"
             if self.host != "127.0.0.1":
-                cmd = ["hdc_std", "-s", "{}:{}".format(self.host, self.port),
+                cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port),
                        "shell", command]
             else:
-                cmd = ['hdc_std', "-t", self.device_sn, "shell", command]
+                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell", command]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
                 self.device_sn, convert_serial(self.device_sn)))
             self.device_hilog_proc = start_standing_subprocess(
                 cmd, self.hilog_file_pipe)
 
     def _stop_catch_device_log(self):
-        if self.device_log_proc:
-            if not HdcHelper.is_hdc_std():
-                stop_standing_subprocess(self.device_log_proc)
-            self.device_log_proc = None
-            self.log_file_pipe = None
         if self.device_hilog_proc:
             stop_standing_subprocess(self.device_hilog_proc)
             self.device_hilog_proc = None
@@ -532,7 +528,7 @@ class Device(IDevice):
         if stdout:
             LOG.debug(stdout)
             if "fail" in stdout:
-                cmd = ["hdc_std", "list", "targets"]
+                cmd = [HdcHelper.CONNECTOR_NAME, "list", "targets"]
                 result = exec_cmd(cmd)
                 LOG.debug("exec_cmd list targets: {}, current device_sn: {}".format(result, self.device_sn))
                 if self.device_sn in result:
@@ -783,10 +779,7 @@ class Device(IDevice):
 
     @classmethod
     def check_recover_result(cls, recover_result):
-        if HdcHelper.is_hdc_std():
-            return "1" in recover_result
-        else:
-            return "1" == recover_result
+        return "1" in recover_result
 
     def take_picture(self, name):
         '''
