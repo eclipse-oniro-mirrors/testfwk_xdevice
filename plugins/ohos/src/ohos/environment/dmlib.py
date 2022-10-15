@@ -71,9 +71,10 @@ SPECIAL_FILE_MODE = 41471
 FORMAT_BYTES_LENGTH = 4
 DEFAULT_OFFSET_OF_INT = 4
 
-DEFAULT_PORT = 5037
 INVALID_MODE_CODE = -1
 DEFAULT_STD_PORT = 8710
+HDC_NAME = "hdc"
+HDC_STD_NAME = "hdc_std"
 LOG = platform_logger("Hdc")
 
 
@@ -111,8 +112,7 @@ class HdcMonitor:
         Starts the monitoring.
         """
         try:
-            LOG.debug("HdcMonitor usb type is %s" % self.server.usb_type)
-            connector_name = "hdc_std" if HdcHelper.is_hdc_std() else "hdc"
+            connector_name = HDC_STD_NAME if HdcHelper.is_hdc_std() else HDC_NAME
             self.init_hdc(connector_name)
             server_thread = threading.Thread(target=self.loop_monitor,
                                              name="HdcMonitor", args=())
@@ -122,25 +122,15 @@ class HdcMonitor:
             LOG.error("HdcMonitor can't find connector, init device "
                       "environment failed!")
 
-    def init_hdc(self, connector_name="hdc"):
+    def init_hdc(self, connector_name=HDC_NAME):
         env_hdc = shutil.which(connector_name)
         # if not, add xdevice's own hdc path to environ path.
         # tell if hdc has already been in the environ path.
         if env_hdc is None:
-            if os.name == "nt":
-                hdc = get_file_absolute_path(
-                    "%s.exe" % connector_name,
-                    alt_dir=os.path.join("tools", connector_name, "windows"))
-            else:
-                hdc = get_file_absolute_path(
-                    connector_name,
-                    alt_dir=os.path.join("tools", connector_name, "linux"))
-            xdevice_hdc_path = os.path.dirname(hdc)
-            os.environ['PATH'] = os.pathsep.join(
-                (os.environ['PATH'], xdevice_hdc_path)
-            )
+            LOG.error("Can not find {} or {} environment variable, "
+                      "please set it first!".format(HDC_NAME, HDC_STD_NAME))
         if not is_proc_running(connector_name):
-            port = DEFAULT_STD_PORT if HdcHelper.is_hdc_std() else DEFAULT_PORT
+            port = DEFAULT_STD_PORT
             self.start_hdc(
                 connector=connector_name,
                 local_port=self.channel.setdefault(
@@ -289,7 +279,7 @@ class HdcMonitor:
                                                   self.channel.get("port")))
             return sock
 
-    def start_hdc(self, connector="hdc", kill=False, local_port=None):
+    def start_hdc(self, connector=HDC_NAME, kill=False, local_port=None):
         """Starts the hdc host side server.
 
         Args:
@@ -301,11 +291,11 @@ class HdcMonitor:
             None
         """
         if kill:
-            LOG.debug("HdcMonitor hdc kill")
+            LOG.debug("HdcMonitor {} kill".format(connector))
             exec_cmd([connector, "kill"])
-        LOG.debug("HdcMonitor hdc start")
+        LOG.debug("HdcMonitor {} start".format(connector))
         exec_cmd(
-            [connector, "start"],
+            [connector, "-l5", "start"],
             error_print=False, redirect=True)
 
     def list_targets(self):
@@ -346,13 +336,13 @@ class HdcMonitor:
     @staticmethod
     def peek_hdc():
         LOG.debug("Peek running process to check expect connector.")
-        #先找环境变量中是否有hdc_std,若没有则默认为hdc
-        connector_name = "hdc_std"
+        # if not find hdc_std, try find hdc
+        connector_name = HDC_STD_NAME
         env_hdc = shutil.which(connector_name)
         # if not, add xdevice's own hdc path to environ path.
         # tell if hdc has already been in the environ path.
         if env_hdc is None:
-            connector_name = "hdc"
+            connector_name = HDC_NAME
         LOG.debug("Peak end")
         return connector_name
 
@@ -731,18 +721,18 @@ class HdcHelper:
     @staticmethod
     def push_file(device, local, remote, is_create=False,
                   timeout=DEFAULT_TIMEOUT):
-        device.log.info("%s execute command: hdc file send %s %s" %
-                        (convert_serial(device.device_sn), local, remote))
-        HdcHelper._operator_file("file send", device, local, remote,
-                                     timeout)
+        device.log.info("{} execute command: {} file send {} to {}".format(convert_serial(device.device_sn),
+                                                                           HdcHelper.CONNECTOR_NAME,
+                                                                           local, remote))
+        HdcHelper._operator_file("file send", device, local, remote, timeout)
 
     @staticmethod
     def pull_file(device, remote, local, is_create=False,
                   timeout=DEFAULT_TIMEOUT):
-        device.log.info("%s execute command: hdc file recv %s to %s" %
-                        (convert_serial(device.device_sn), remote, local))
-        HdcHelper._operator_file("file recv", device, remote, local,
-                                     timeout)
+        device.log.info("{} execute command: {} file recv {} to {}".format(convert_serial(device.device_sn),
+                                                                           HdcHelper.CONNECTOR_NAME,
+                                                                           remote, local))
+        HdcHelper._operator_file("file recv", device, remote, local, timeout)
 
     @staticmethod
     def _install_remote_package(device, remote_file_path, command):
@@ -783,8 +773,8 @@ class HdcHelper:
 
     @staticmethod
     def reboot(device, into=None):
-        device.log.info("%s execute command: hdc target boot" %
-                        convert_serial(device.device_sn))
+        device.log.info("{} execute command: {} target boot".format(convert_serial(device.device_sn),
+                                                                    HdcHelper.CONNECTOR_NAME))
         with HdcHelper.socket(host=device.host, port=device.port) as sock:
             HdcHelper.handle_shake(sock, device.device_sn)
             request = HdcHelper.form_hdc_request("target boot")
@@ -814,9 +804,9 @@ class HdcHelper:
                                   timeout=timeout) as sock:
                 output_flag = kwargs.get("output_flag", True)
                 timeout_msg = " with timeout %ss" % str(timeout / 1000)
-                message = "%s execute command: hdc shell %s%s" % \
-                          (convert_serial(device.device_sn), command,
-                           timeout_msg)
+                message = "{} execute command: {} shell {}{}".format(convert_serial(device.device_sn),
+                                                                     HdcHelper.CONNECTOR_NAME,
+                                                                     command, timeout_msg)
                 if output_flag:
                     LOG.info(message)
                 else:
@@ -1037,7 +1027,7 @@ class HdcHelper:
 
     @staticmethod
     def is_hdc_std():
-        return "hdc_std" in HdcHelper.CONNECTOR_NAME
+        return HDC_STD_NAME in HdcHelper.CONNECTOR_NAME
 
 
 class DeviceConnector(object):
@@ -1052,15 +1042,11 @@ class DeviceConnector(object):
         self.host = host if host else "127.0.0.1"
         self.usb_type = usb_type
         connector_name = HdcMonitor.peek_hdc()
-        if not connector_name.endswith("hdc"):
-            HdcHelper.CONNECTOR_NAME = connector_name
+        HdcHelper.CONNECTOR_NAME = connector_name
         if port:
             self.port = int(port)
         else:
-            if HdcHelper.is_hdc_std():
-                self.port = int(os.getenv("HDC_SERVER_PORT", DEFAULT_STD_PORT))
-            else:
-                self.port = int(os.getenv("HDC_SERVER_PORT", 5037))
+            self.port = int(os.getenv("HDC_SERVER_PORT", DEFAULT_STD_PORT))
 
     def start(self):
         self.device_monitor = HdcMonitor.get_instance(
