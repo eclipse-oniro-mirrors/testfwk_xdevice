@@ -44,6 +44,7 @@ from xdevice import disable_keyguard
 from xdevice import get_class
 
 from ohos.constants import CKit
+from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 
 __all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
@@ -785,15 +786,9 @@ class AppInstallKit(ITestKit):
 
     @classmethod
     def retry_install_hap(cls, device, command):
-        if hasattr(device, "is_harmony") and device.is_harmony:
-            real_command = ["hdc_std", "-t", str(device.device_sn), "-s",
-                            "tcp:%s:%s" % (str(device.host), str(device.port)),
-                            "shell", command]
-        else:
-            # hdc -t UID -s tcp:IP:PORT
-            real_command = ["hdc", "-t", str(device.device_sn), "-s",
-                            "tcp:%s:%s" % (str(device.host), str(device.port)),
-                            "shell", command]
+        real_command = [HdcHelper.CONNECTOR_NAME, "-t", str(device.device_sn), "-s",
+                        "tcp:%s:%s" % (str(device.host), str(device.port)),
+                        "shell", command]
         message = "%s execute command: %s" % \
                   (convert_serial(device.device_sn), " ".join(real_command))
         LOG.info(message)
