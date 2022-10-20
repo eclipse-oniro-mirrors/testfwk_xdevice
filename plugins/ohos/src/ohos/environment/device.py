@@ -16,9 +16,12 @@
 # limitations under the License.
 #
 
+import re
 import time
 import os
 import threading
+import platform
+import subprocess
 from xdevice import DeviceOsType
 from xdevice import ProductForm
 from xdevice import ReportException
@@ -34,6 +37,7 @@ from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
 from xdevice import get_cst_time
+from xdevice import get_device_proc_pid
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
@@ -46,6 +50,9 @@ BACKGROUND_TIME = 2 * 60 * 1000
 LOG = platform_logger("Device")
 DEVICETEST_HAP_PACKAGE_NAME = "com.ohos.devicetest"
 UITEST_NAME = "uitest"
+UITEST_PATH = "/system/bin/uitest"
+UITEST_SHMF = "/data/app/el2/100/base/{}/cache/shmf".format(DEVICETEST_HAP_PACKAGE_NAME)
+UITEST_COMMAND = "{} start-daemon 0123456789 &".format(UITEST_PATH)
 NATIVE_CRASH_PATH = "/data/log/faultlog/temp"
 JS_CRASH_PATH = "/data/log/faultlog/faultlogger"
 ROOT_PATH = "/data/log/faultlog"
@@ -61,7 +68,7 @@ def perform_device_action(func):
         if not self.get_recover_state():
             LOG.debug("Device %s %s is false" % (self.device_sn,
                                                  ConfigConst.recover_state))
-            return
+            return None
         # avoid infinite recursion, such as device reboot
         abort_on_exception = bool(kwargs.get("abort_on_exception", False))
         if abort_on_exception:
@@ -111,6 +118,7 @@ def perform_device_action(func):
                 self.log.exception("error type: %s, error: %s" % (
                     error.__class__.__name__, error), exc_info=False)
                 exception = error
+        raise exception
 
     return device_action
 
@@ -146,7 +154,7 @@ class Device(IDevice):
     _proxy = None
     _is_harmony = None
     initdevice = True
-    d_port = 8009
+    d_port = 8011
     _uitestdeamon = None
     rpc_timeout = 300
     device_id = None
@@ -156,7 +164,7 @@ class Device(IDevice):
     screenshot_fail = True
     module_package = None
     module_ablity_name = None
-    _device_log_path = None
+    _device_log_path = ""
 
     model_dict = {
         'default': ProductForm.phone,
@@ -176,6 +184,7 @@ class Device(IDevice):
     def is_hw_root(self):
         if self.is_harmony:
             return True
+        return False
 
     def __eq__(self, other):
         return self.device_sn == other.__get_serial__() and \
@@ -201,7 +210,7 @@ class Device(IDevice):
         if not self.get_recover_state():
             LOG.debug("Device %s %s is false, cannot recover device" % (
                 self.device_sn, ConfigConst.recover_state))
-            return
+            return False
 
         LOG.debug("Wait device %s to recover" % self.device_sn)
         return self.device_state_monitor.wait_for_device_available()
@@ -235,7 +244,7 @@ class Device(IDevice):
         else:
             cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn]
         LOG.debug("{} execute command {} {}{}".format(convert_serial(self.device_sn),
-                                                      HdcHelper.CONNECTOR_NAME, 
+                                                      HdcHelper.CONNECTOR_NAME,
                                                       command, timeout_msg))
         if isinstance(command, list):
             cmd.extend(command)
@@ -437,13 +446,12 @@ class Device(IDevice):
         except Exception as e:
             self.log.error("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
             # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
-            cmd = "cd /data/log/hilog && tar -zcvf /data/log/hilog_{}.tar.gz *".format(log_name)
+            cmd = "cd /data/log/hilog && tar -zcvf /data/log/{}_hilog.tar.gz *".format(log_name)
             out = self.execute_shell_command(cmd)
             LOG.info("Execute command: {}, result is {}".format(cmd, out))
             if "No space left on device" not in out:
-                self.pull_file("/data/log/{}_hilog.tar.gz".format(log_name),
-                               "{}/log/".format(self._device_log_path))
-                cmd = "rm -rf /data/log/hilog_{}.tar.gz".format(log_name)
+                self.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), "{}/log/".format(self._device_log_path))
+                cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
                 out = self.execute_shell_command(cmd)
         # 获取crash日志
         self.start_get_crash_log(log_name)
@@ -498,7 +506,7 @@ class Device(IDevice):
         log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
         log_array.extend(self._get_log(block_crash_cmd, "SERVICE_BLOCK", "appfreeze"))
         LOG.debug("crash log file {}, length is {}".format(str(log_array), str(len(log_array))))
-        crash_path = "{}/log/crash_log_{}/".format(self._device_log_path, task_name)
+        crash_path = "{}/log/{}_crash_log/".format(self._device_log_path, task_name)
         for log_name in log_array:
             log_name = log_name.strip()
             self.get_cur_crash_log(crash_path, log_name)
@@ -613,6 +621,28 @@ class Device(IDevice):
             self.log.error(' proxy init error: {}.'.format(str(error)))
         return self._proxy
 
+    def start_uitest(self):
+        share_mem_mode = False
+        # uitest基础版本号，比该版本号大的用共享内存方式进行启动
+        base_version = [3, 2, 2, 2]
+        uitest_version = self.execute_shell_command("{} --version".format(UITEST_PATH))
+        if uitest_version and re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}', uitest_version):
+            uitest_version = uitest_version.split(".")
+            for index, _ in enumerate(uitest_version):
+                if int(uitest_version[index]) > base_version[index]:
+                    share_mem_mode = True
+                    break
+        result = ""
+        if share_mem_mode:
+            if not self.is_file_exist(UITEST_SHMF):
+                self.log.debug('Path {} not exist, create it.'.format(UITEST_SHMF))
+                self.execute_shell_command("echo abc > {}".format(UITEST_SHMF))
+                self.execute_shell_command("chmod -R 666 {}".format(UITEST_SHMF))
+            result = self.execute_shell_command("{} start-daemon {} &".format(UITEST_PATH, UITEST_SHMF))
+        else:
+            result = self.execute_shell_command(UITEST_COMMAND)
+        self.log.debug('start uitest, {}'.format(result))
+
     def start_harmony_rpc(self, port=8080, re_install_rpc=False):
         from devicetest.core.error_message import ErrorMessage
         if re_install_rpc:
@@ -628,12 +658,10 @@ class Device(IDevice):
                 self.log.error('root device init RPC error.')
                 raise Exception(ErrorMessage.Error_01437.Topic)
         self.stop_harmony_rpc()
-        self.execute_shell_command("param set testName 123")
-        result = self.execute_shell_command("/system/bin/uitest start-daemon 0123456789 &")
-        self.log.debug('start uitest, {}'.format(result))
         cmd = "aa start -a {}.ServiceAbility -b {}".format(DEVICETEST_HAP_PACKAGE_NAME, DEVICETEST_HAP_PACKAGE_NAME)
         result = self.execute_shell_command(cmd)
         self.log.debug('start devicetest ability, {}'.format(result))
+        self.start_uitest()
         time.sleep(1)
         if not self.is_harmony_rpc_running():
             raise Exception("harmony rpc not running")
@@ -649,50 +677,31 @@ class Device(IDevice):
         else:
             # 由于RK上有字段截断问题，因此做出该适配
             bundle_name = "com.ohos.device"
-        cmd = 'ps -A | grep %s' % bundle_name
-        rpc_running = self.execute_shell_command(cmd).strip()
-        self.log.debug('is_rpc_running out:{}'.format(rpc_running))
-        cmd = 'ps -A | grep %s' % UITEST_NAME
-        uitest_running = self.execute_shell_command(cmd).strip()
-        self.log.debug('is_uitest_running out:{}'.format(uitest_running))
-        if bundle_name in rpc_running and UITEST_NAME in uitest_running:
+        agent_pid = get_device_proc_pid(device=self, proc_name=bundle_name, double_check=True)
+        uitest_pid = get_device_proc_pid(device=self, proc_name=UITEST_NAME, double_check=True)
+        self.log.debug('is_proc_running: agent pid: {}, uitest pid: {}'.format(agent_pid, uitest_pid))
+        if agent_pid != "" and agent_pid != "":
             return True
         return False
 
     def kill_all_uitest(self):
-        cmd = 'ps -A | grep %s' % UITEST_NAME
-        out = self.execute_shell_command(cmd).strip()
-        self.log.debug('is_rpc_running out:{}'.format(out))
-        out = out.split("\n")
-        for data in out:
-            if UITEST_NAME in data:
-                data = data.split()
-                if hasattr(self, "oh_type") and getattr(self, "oh_type") == "other":
-                    cmd = 'kill %s' % data[1]
-                else:
-                    cmd = 'kill %s' % data[0]
-                self.execute_shell_command(cmd).strip()
-                return
+        uitest_pid = get_device_proc_pid(device=self, proc_name=UITEST_NAME, double_check=True)
+        self.log.debug('is_proc_running: uitest pid: {}'.format(uitest_pid))
+        if uitest_pid != "":
+            cmd = 'kill %s' % uitest_pid
+            self.execute_shell_command(cmd).strip()
 
     def kill_devicetest_agent(self):
         if hasattr(self, "oh_type") and getattr(self, "oh_type") == "other":
             bundle_name = DEVICETEST_HAP_PACKAGE_NAME
-            index = 1
         else:
             # 由于RK上有字段截断问题，因此做出该适配
             bundle_name = "com.ohos.device"
-            index = 0
-        cmd = 'ps -A | grep %s' % bundle_name
-        out = self.execute_shell_command(cmd).strip()
-        self.log.debug('is_rpc_running out:{}'.format(out))
-        out = out.split("\n")
-        for name in out:
-            if bundle_name in name:
-                name = name.split()
-                cmd = 'kill %s' % name[index]
-                self.execute_shell_command(cmd).strip()
-                self.log.debug('stop devicetest ability success.')
-                return
+        agent_pid = get_device_proc_pid(device=self, proc_name=bundle_name, double_check=True)
+        self.log.debug('is_proc_running: agent_pid pid: {}'.format(agent_pid))
+        if agent_pid != "":
+            cmd = 'kill %s' % agent_pid
+            self.execute_shell_command(cmd).strip()
 
     def install_app(self, remote_path, command):
         try:
@@ -706,6 +715,7 @@ class Device(IDevice):
         except Exception as error:
             self.log.error("%s, maybe there has a warning box appears "
                            "when installing RPC." % error)
+            return False
 
     def uninstall_app(self, package_name):
         try:
@@ -714,6 +724,7 @@ class Device(IDevice):
             return ret
         except Exception as err:
             self.log.error('DeviceTest-20013 uninstall: %s' % str(err))
+            return False
 
     def reconnect(self, waittime=60):
         '''
@@ -799,3 +810,24 @@ class Device(IDevice):
 
     def set_device_report_path(self, path):
         self._device_log_path = path
+
+    def execute_shell_in_daemon(self, command):
+        if self.host != "127.0.0.1":
+            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(
+                self.host, self.port), "shell"]
+        else:
+            cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell"]
+        LOG.debug("{} execute command {} {} in daemon".format(
+            convert_serial(self.device_sn), HdcHelper.CONNECTOR_NAME, command))
+        if isinstance(command, list):
+            cmd.extend(command)
+        else:
+            command = command.strip()
+            cmd.extend(command.split(" "))
+        sys_type = platform.system()
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                   shell=False,
+                                   preexec_fn=None if sys_type == "Windows"
+                                   else os.setsid,
+                                   close_fds=True)
+        return process
