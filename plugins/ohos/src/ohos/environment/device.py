@@ -20,6 +20,8 @@ import re
 import time
 import os
 import threading
+import platform
+import subprocess
 from xdevice import DeviceOsType
 from xdevice import ProductForm
 from xdevice import ReportException
@@ -808,3 +810,24 @@ class Device(IDevice):
 
     def set_device_report_path(self, path):
         self._device_log_path = path
+
+    def execute_shell_in_daemon(self, command):
+        if self.host != "127.0.0.1":
+            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(
+                self.host, self.port), "shell"]
+        else:
+            cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell"]
+        LOG.debug("{} execute command {} {} in daemon".format(
+            convert_serial(self.device_sn), HdcHelper.CONNECTOR_NAME, command))
+        if isinstance(command, list):
+            cmd.extend(command)
+        else:
+            command = command.strip()
+            cmd.extend(command.split(" "))
+        sys_type = platform.system()
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                   shell=False,
+                                   preexec_fn=None if sys_type == "Windows"
+                                   else os.setsid,
+                                   close_fds=True)
+        return process

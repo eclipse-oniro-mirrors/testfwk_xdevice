@@ -949,6 +949,8 @@ def run_command(device, command):
         device.reboot()
     elif command.strip() == "reboot-delay":
         pass
+    elif command.strip().endswith("&"):
+        device.execute_shell_in_daemon(command.strip())
     else:
         stdout = device.execute_shell_command(command)
     LOG.debug("Run command result: %s" % (stdout if stdout else ""))
