@@ -60,6 +60,10 @@ class IDeviceManager(ABC):
     def release_device(self, device):
         pass
 
+    @abstractmethod
+    def reset_device(self, device):
+        pass
+
     @classmethod
     def __subclasshook__(cls, class_info):
         if cls is IDevice:
@@ -72,10 +76,6 @@ class IDeviceManager(ABC):
 
     @abstractmethod
     def env_stop(self):
-        pass
-
-    @classmethod
-    def env_reset(self):
         pass
 
     @abstractmethod

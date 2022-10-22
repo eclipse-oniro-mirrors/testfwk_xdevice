@@ -558,14 +558,12 @@ class Device(IDevice):
         self.reconnecttimes = 0
 
     def reset(self):
-        if self.device_allocation_state != \
-                DeviceAllocationState.ignored:
-            self.log.debug("start stop rpc")
-            if self._proxy is not None:
-                self._proxy.close()
-            self._proxy = None
-            self.remove_ports()
-            self.stop_harmony_rpc()
+        self.log.debug("start stop rpc")
+        if self._proxy is not None:
+            self._proxy.close()
+        self._proxy = None
+        self.remove_ports()
+        self.stop_harmony_rpc()
 
     @property
     def proxy(self):
