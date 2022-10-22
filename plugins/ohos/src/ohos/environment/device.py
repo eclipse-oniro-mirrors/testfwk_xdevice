@@ -240,7 +240,8 @@ class Device(IDevice):
         timeout_msg = '' if timeout == 300.0 else \
             " with timeout %ss" % timeout
         if self.host != "127.0.0.1":
-            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port)]
+            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port),
+                   "-t", self.device_sn]
         else:
             cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn]
         LOG.debug("{} execute command {} {}{}".format(convert_serial(self.device_sn),
@@ -406,7 +407,7 @@ class Device(IDevice):
             command = "hilog"
             if self.host != "127.0.0.1":
                 cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port),
-                       "shell", command]
+                       "-t", self.device_sn, "shell", command]
             else:
                 cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell", command]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
@@ -812,7 +813,7 @@ class Device(IDevice):
     def execute_shell_in_daemon(self, command):
         if self.host != "127.0.0.1":
             cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(
-                self.host, self.port), "shell"]
+                self.host, self.port), "-t", self.device_sn, "shell"]
         else:
             cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell"]
         LOG.debug("{} execute command {} {} in daemon".format(
