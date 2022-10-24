@@ -153,7 +153,7 @@ class EnvironmentManager(object):
             self.release_device(device)
 
     def reset_environment(self, used_devices):
-        for _, device in used_devices:
+        for _, device in used_devices.items():
             self.reset_device(device)
 
     def apply_device(self, device_option, timeout=10):
