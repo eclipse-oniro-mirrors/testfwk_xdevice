@@ -116,10 +116,11 @@ def get_decode(stream):
 
 def is_proc_running(pid, name=None):
     if platform.system() == "Windows":
+        pid = "{}.exe".format(pid)
         proc_sub = subprocess.Popen(["C:\\Windows\\System32\\tasklist"],
                                     stdout=subprocess.PIPE,
                                     shell=False)
-        proc = subprocess.Popen(["C:\\Windows\\System32\\findstr", "%s" % pid],
+        proc = subprocess.Popen(["C:\\Windows\\System32\\findstr", "/B", "%s" % pid],
                                 stdin=proc_sub.stdout,
                                 stdout=subprocess.PIPE, shell=False)
     elif platform.system() == "Linux":
