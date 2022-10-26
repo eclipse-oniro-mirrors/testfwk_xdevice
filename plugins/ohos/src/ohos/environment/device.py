@@ -297,6 +297,7 @@ class Device(IDevice):
         self.device_state_monitor.wait_for_device_available(
             self.reboot_timeout)
         self.enable_hdc_root()
+        self.start_catch_device_log()
 
     @perform_device_action
     def install_package(self, package_path, command=""):

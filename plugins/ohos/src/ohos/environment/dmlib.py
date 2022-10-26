@@ -279,7 +279,8 @@ class HdcMonitor:
                                                   self.channel.get("port")))
             return sock
 
-    def start_hdc(self, connector=HDC_NAME, kill=False, local_port=None):
+    @classmethod
+    def start_hdc(cls, connector=HDC_NAME, kill=False, local_port=None):
         """Starts the hdc host side server.
 
         Args:
