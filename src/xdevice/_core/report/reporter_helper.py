@@ -73,6 +73,7 @@ class ReportConstant:
     failures = "failures"
     blocked = "blocked"
     ignored = "ignored"
+    completed = "completed"
     unavailable = "unavailable"
     not_run = "notrun"
     message = "message"
@@ -361,7 +362,8 @@ class Suite:
             for key, value in child.items():
                 setattr(case, key, value)
             if len(child) > 0:
-                if not getattr(case, ReportConstant.result, ""):
+                if not getattr(case, ReportConstant.result, "") or \
+                        getattr(case, ReportConstant.result, "") == ReportConstant.completed:
                     setattr(case, ReportConstant.result, ReportConstant.false)
                 message = child[0].get(ReportConstant.message, "")
                 if child[0].text and message != child[0].text:
