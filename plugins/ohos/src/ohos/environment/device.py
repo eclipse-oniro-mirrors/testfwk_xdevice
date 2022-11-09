@@ -537,14 +537,6 @@ class Device(IDevice):
                                             abort_on_exception=True).strip()
         if stdout:
             LOG.debug(stdout)
-            if "fail" in stdout:
-                cmd = [HdcHelper.CONNECTOR_NAME, "list", "targets"]
-                result = exec_cmd(cmd)
-                LOG.debug("exec_cmd list targets: {}, current device_sn: {}".format(result, self.device_sn))
-                if self.device_sn in result:
-                    return "true"
-                else:
-                    return "false"
         return stdout
 
     def set_recover_state(self, state):
