@@ -531,7 +531,7 @@ class Device(IDevice):
         self.execute_shell_command("hwclock --systohc")
 
     def get_recover_result(self, retry=RETRY_ATTEMPTS):
-        command = "param get sys.boot_completed"
+        command = "param get bootevent.boot.completed"
         stdout = self.execute_shell_command(command, timeout=5 * 1000,
                                             output_flag=False, retry=retry,
                                             abort_on_exception=True).strip()
@@ -542,9 +542,9 @@ class Device(IDevice):
                 result = exec_cmd(cmd)
                 LOG.debug("exec_cmd list targets: {}, current device_sn: {}".format(result, self.device_sn))
                 if self.device_sn in result:
-                    return "1"
+                    return "true"
                 else:
-                    return "0"
+                    return "false"
         return stdout
 
     def set_recover_state(self, state):
@@ -790,7 +790,7 @@ class Device(IDevice):
 
     @classmethod
     def check_recover_result(cls, recover_result):
-        return "1" in recover_result
+        return "true" in recover_result
 
     def take_picture(self, name):
         '''
