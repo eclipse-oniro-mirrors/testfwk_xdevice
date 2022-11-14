@@ -670,7 +670,7 @@ class AppInstallKit(ITestKit):
         self.alt_dir = get_config_value('alt-dir', options, False)
         if self.alt_dir and self.alt_dir.startswith("resource/"):
             self.alt_dir = self.alt_dir[len("resource/"):]
-        self.ex_args = get_config_value('install-arg', options)
+        self.ex_args = get_config_value('install-arg', options, False)
         self.installed_app = set()
         self.paths = get_config_value('paths', options)
         self.is_pri_app = get_config_value('install-as-privapp', options,

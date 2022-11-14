@@ -373,8 +373,9 @@ class Console(object):
         device_log = UserConfigManager(
             config_file=options.config, env=options.test_environment). \
             get_device_log_status()
-        if device_log is None or (device_log != "ON" and device_log != "OFF"):
-            device_log = "OFF"
+        if device_log is None or (device_log != ConfigConst.device_log_on
+                                  and device_log != ConfigConst.device_log_off):
+            device_log = ConfigConst.device_log_on
         setattr(options, ConfigConst.device_log, device_log)
         if options.subsystems:
             subsystem_list = str(options.subsystems).split(";")

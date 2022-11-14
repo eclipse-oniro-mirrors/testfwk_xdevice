@@ -24,9 +24,9 @@ import shutil
 import zipfile
 import tempfile
 import stat
-from collections import namedtuple
 from dataclasses import dataclass
 
+from xdevice import ConfigConst
 from xdevice import ParamError
 from xdevice import ExecuteTerminate
 from xdevice import IDriver
@@ -2323,7 +2323,8 @@ class JSUnitTestDriver(IDriver):
             serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
             log_tar_file_name = "{}_{}".format(request.get_module_name(),
                                                str(serial).replace(":", "_"))
-            self.config.device.start_get_crash_log(log_tar_file_name)
+            if self.config.device_log == ConfigConst.device_log_on:
+                self.config.device.start_get_crash_log(log_tar_file_name)
             self.config.device.stop_catch_device_log()
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
@@ -2355,7 +2356,8 @@ class JSUnitTestDriver(IDriver):
                                  0o755)
 
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.config.device.clear_crash_log()
+                if self.config.device_log == ConfigConst.device_log_on:
+                    self.config.device.clear_crash_log()
                 self.config.device.start_catch_device_log(
                     hilog_file_pipe=hilog_file_pipe)
 

@@ -277,6 +277,8 @@ class ConfigConst(object):
 
     # Device log
     device_log = "device_log"
+    device_log_on = "ON"
+    device_log_off = "OFF"
 
 
 @dataclass
