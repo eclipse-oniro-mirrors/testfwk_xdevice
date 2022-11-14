@@ -281,6 +281,8 @@ class Console(object):
                                 )
             parser.add_argument("--session",
                                 action=SplicingAction,
+                                type=str,
+                                nargs='+',
                                 dest=ConfigConst.session,
                                 help="retry task by session id")
             parser.add_argument("--dryrun",
