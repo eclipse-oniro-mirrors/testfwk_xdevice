@@ -48,7 +48,7 @@ from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 
 __all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
-           "ConfigKit", "AppInstallKit", "ComponentKit",
+           "ConfigKit", "AppInstallKit", "ComponentKit", "PermissionKit",
            "junit_dex_para_parse", "oh_jsunit_para_parse"]
 
 MAX_WAIT_COUNT = 4
@@ -675,7 +675,7 @@ class AppInstallKit(ITestKit):
         self.alt_dir = get_config_value('alt-dir', options, False)
         if self.alt_dir and self.alt_dir.startswith("resource/"):
             self.alt_dir = self.alt_dir[len("resource/"):]
-        self.ex_args = get_config_value('install-arg', options)
+        self.ex_args = get_config_value('install-arg', options, False)
         self.installed_app = set()
         self.paths = get_config_value('paths', options)
         self.is_pri_app = get_config_value('install-as-privapp', options,
@@ -919,7 +919,8 @@ class PermissionKit(ITestKit):
             for permission in self.permission_list[index]:
                 command = "atm perm -g -i {} -p {}".format(token_id,
                                                            permission)
-                device.execute_shell_command(command)
+                out = device.execute_shell_command(command)
+                LOG.debug("Set permission result: {}".format(out))
 
     def __teardown__(self, device):
         pass
