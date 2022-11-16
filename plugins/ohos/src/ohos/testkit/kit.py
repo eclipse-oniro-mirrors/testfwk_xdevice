@@ -376,6 +376,7 @@ class ShellKit(ITestKit):
     def __check_config__(self, config):
         self.command_list = get_config_value('run-command', config)
         self.tear_down_command = get_config_value('teardown-command', config)
+        self.tear_down_local_command = get_config_value('teardown-localcommand', config)
         self.paths = get_config_value('paths', config)
 
     def __setup__(self, device, **kwargs):
@@ -391,10 +392,14 @@ class ShellKit(ITestKit):
         LOG.debug("ShellKit teardown: device:{}".format(device.device_sn))
         if len(self.tear_down_command) == 0:
             LOG.info("No teardown_command to run, skipping!")
-            return
-        for command in self.tear_down_command:
-            run_command(device, command)
-
+        else:
+            for command in self.tear_down_command:
+                run_command(device, command)
+        if len(self.tear_down_local_command) == 0:
+            LOG.info("No teardown-localcommand to run, skipping!")
+        else:
+            for command in self.tear_down_local_command:
+                os.system(command)
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.wifi)
 class WifiKit(ITestKit):
