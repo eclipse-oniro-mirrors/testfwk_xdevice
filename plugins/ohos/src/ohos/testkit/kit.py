@@ -48,7 +48,7 @@ from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 
 __all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
-           "ConfigKit", "AppInstallKit", "ComponentKit",
+           "ConfigKit", "AppInstallKit", "ComponentKit", "PermissionKit",
            "junit_dex_para_parse", "oh_jsunit_para_parse"]
 
 MAX_WAIT_COUNT = 4
@@ -919,7 +919,8 @@ class PermissionKit(ITestKit):
             for permission in self.permission_list[index]:
                 command = "atm perm -g -i {} -p {}".format(token_id,
                                                            permission)
-                device.execute_shell_command(command)
+                out = device.execute_shell_command(command)
+                LOG.debug("Set permission result: {}".format(out))
 
     def __teardown__(self, device):
         pass
