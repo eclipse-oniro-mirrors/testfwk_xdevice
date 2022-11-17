@@ -25,7 +25,7 @@ import shutil
 import platform
 import glob
 import time
-
+import sys
 from xdevice import Plugin
 from xdevice import platform_logger
 from xdevice import DeviceAllocationState
@@ -193,12 +193,12 @@ class MountKit(ITestKit):
         liteos_commands = ["cd /", "umount device_directory",
                            "mount nfs_ip:nfs_directory  device"
                            "_directory nfs"]
-        linux_commands = ["cd /%s" % "storage",
-                          "umount -f /%s/%s" % ("storage", "device_directory"),
+        linux_commands = ["cd /{}".format("storage"),
+                          "umount -f /{}/{}".format("storage", "device_directory"),
                           "toybox mount -t nfs -o nolock,addr=nfs_ip nfs_ip:nfs_directory "
-                          "/%s/%s" % ("storage", "device_directory"),
-                          "chmod 755 -R /%s/%s" % (
-                          "storage", "device_directory")]
+                          "/{}/{}".format("storage", "device_directory"),
+                          "chmod 755 -R /{}/{}".format(
+                              "storage", "device_directory")]
         if not linux_host or not linux_directory:
             raise LiteDeviceMountError(
                 "nfs server miss ip or directory[00108]", error_no="00108")
@@ -701,28 +701,55 @@ class DeployToolKit(ITestKit):
         self.config = None
         self.auto_deploy = None
         self.device_label = None
-        self.timeout = None
+        self.time_out = None
+        self.paths = None
+        self.upgrade_file_path = None
+        self.burn_tools = None
 
     def __check_config__(self, config):
         self.config = config
+        self.paths = get_config_value("paths", config)
+        self.burn_file = get_config_value("burn_file", config, is_list=False)
         self.auto_deploy = get_config_value('auto_deploy',
                                             config, is_list=False)
         self.device_label = get_config_value("device_label", config,
                                              is_list=False)
-        self.timeout = get_config_value("time_out", config,
+        self.time_out = get_config_value("timeout", config,
                                          is_list=False)
+        self.upgrade_file_path = get_config_value("upgrade_file_path", config, is_list=False)
+        self.burn_tools = get_config_value("burn_tools", config, is_list=False)
 
-        if not self.auto_deploy or not self.device_label or not self.time_out:
+        if not self.auto_deploy or not self.upgrade_file_path or not self.time_out:
             msg = "The config for deploy tool kit is" \
-                  "invalid: device label :{} time out:{}".format(
-                   self.device_label, self.time_out)
+                  "invalid: upgrade_file_path :{} time out:{}".format(
+                self.upgrade_file_path, self.time_out)
             LOG.error(msg, error_no="00108")
             return TypeError(msg)
 
     def __setup__(self, device, **kwargs):
-        args = kwargs
-        request = args.get("request", None)
-        request.config.deploy_tool_kit = self.config
+        LOG.info("Upgrade file path:{}".format(self.upgrade_file_path))
+        upgrade_file_name = os.path.basename(self.upgrade_file_path)
+        if self.upgrade_file_path.startswith("resource"):
+            self.upgrade_file_path = get_file_absolute_path(
+                os.path.join("tools", upgrade_file_name), self.paths)
+        sys.path.insert(0, os.path.dirname(self.upgrade_file_path))
+        serial_port = device.device.com_dict.get(ComType.deploy_com).serial_port
+        LOG.debug("Serial port:{}".format(serial_port))
+        baud_rate = device.device.com_dict.get(ComType.deploy_com).baud_rate
+        usb_port = device.device.com_dict.get(ComType.cmd_com).usb_port
+        patch_file = get_file_absolute_path(self.burn_file, self.paths)
+        upgrade_name = upgrade_file_name.split(".py")[0]
+        import_cmd_str = "from {} import {} as upgrade_device".format(
+            upgrade_name, upgrade_name)
+        scope = {}
+        exec(import_cmd_str, scope)
+        upgrade_device = scope.get("upgrade_device", "None")
+        upgrade = upgrade_device(serial_port=serial_port, baud_rate=baud_rate,
+                                 patch_file=patch_file, usb_port=usb_port)
+        upgrade_result = upgrade.burn()
+        if upgrade_result:
+            return upgrade.reset_device()
+        return None
 
     def __teardown__(self, device):
         pass
