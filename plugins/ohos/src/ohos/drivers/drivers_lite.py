@@ -206,7 +206,7 @@ class CppTestDriver(IDriver):
             command = "./%s" % self.execute_bin
 
         report_path = "/%s/%s/" % ("reports", self.execute_bin.split(".")[0])
-        self.config.device_xml_path = (self.linux_directory + report_path).\
+        self.config.device_xml_path = (self.linux_directory + report_path). \
             replace("//", "/")
         self.config.device_report_path = execute_dir + report_path
 
@@ -232,7 +232,7 @@ class CppTestDriver(IDriver):
             self.rerun = True
 
         timeout_config = get_config_value('timeout',
-                                              json_config.get_driver(), False)
+                                          json_config.get_driver(), False)
         if timeout_config:
             self.config.timeout = int(timeout_config) // 1000
         else:
@@ -619,6 +619,9 @@ class CTestDriver(IDriver):
 
     def __init__(self):
         self.file_name = ""
+        self.run_third = False
+        self.kit_type = None
+        self.auto_deploy = None
 
     def __check_environment__(self, device_options):
         if len(device_options) != 1 or \
@@ -649,19 +652,23 @@ class CTestDriver(IDriver):
             kit_instances = get_kit_instances(json_config,
                                               request.config.resource_path,
                                               request.config.testcases_path)
-            for (kit_instance, kit_info) in zip(kit_instances,
-                                                json_config.get_kits()):
-                if isinstance(kit_instance, DeployToolKit):
-                    LOG.debug("Run ctest third party")
-                    self._run_ctest_third_party(source=source, request=request,
-                                                time_out=int(
-                                                    kit_instance.timeout))
-                    break
+            for (_, kit_info) in zip(kit_instances, json_config.get_kits()):
+                self.auto_deploy = kit_info.get("auto_deploy", "")
+                self.kit_type = kit_info.get("type", "")
+                if self.kit_type == CKit.deploytool:
+                    self.run_third = True
+            LOG.info("Kit type:{}".format(self.kit_type))
+            LOG.info("Auto deploy:{}".format(self.auto_deploy))
+            LOG.info("Run third:{}".format(self.run_third))
+            if self.run_third:
+                LOG.info("Run the third-party vendor part")
+                if self.auto_deploy in ["False", "flase"]:
+                    self._run_ctest_third_party(source=source, request=request)
                 else:
-                    LOG.debug("Run ctest")
-                    self._run_ctest(source=source, request=request,
-                                    timeout=int(kit_instance.timeout))
-                    break
+                    self._run_ctest_upgrade_party(source=source, request=request)
+            else:
+                LOG.debug("Run ctest")
+                self._run_ctest(source=source, request=request)
 
         except (LiteDeviceExecuteCommandError, Exception) as exception:
             LOG.error(exception, error_no=getattr(exception, "error_no",
@@ -777,6 +784,52 @@ class CTestDriver(IDriver):
             self.config.device.device.com_dict.get(
                 ComType.deploy_com).close()
 
+    def _run_ctest_upgrade_party(self, source=None, request=None, timeout=90):
+        parser_instances = []
+        parsers = get_plugin(Plugin.PARSER, ParserType.ctest_lite)
+        try:
+            if not source:
+                LOG.error("Error: source don't exist %s." % source,
+                          error_no="00101")
+                return
+
+            version = get_test_component_version(self.config)
+
+            for parser in parsers:
+                parser_instance = parser.__class__()
+                parser_instance.suites_name = self.file_name
+                parser_instance.product_info.setdefault("Version", version)
+                parser_instance.listeners = request.listeners
+                parser_instances.append(parser_instance)
+            handler = ShellHandler(parser_instances)
+            result = self._reset_third_device(request, source)
+            self.result = "%s.xml" % os.path.join(
+                request.config.report_path, "result", self.file_name)
+            if isinstance(result, list):
+                self.config.device.device.com_dict.get(
+                    ComType.deploy_com).connect()
+                LOG.debug("Device com:{}".format(self.config.device.device))
+                result, _, error = self.config.device.device. \
+                    execute_command_with_timeout(
+                    command=request, case_type=DeviceTestType.ctest_lite,
+                    key=ComType.deploy_com, timeout=timeout, receiver=handler)
+            else:
+                handler.__read__(result)
+                handler.__done__()
+            device_log_file = get_device_log_file(request.config.report_path,
+                                                  request.config.device.
+                                                  __get_serial__())
+            device_log_file_open = \
+                os.open(device_log_file, os.O_WRONLY | os.O_CREAT |
+                        os.O_APPEND, FilePermission.mode_755)
+            with os.fdopen(device_log_file_open, "a") as file_name:
+                file_name.write("{}{}".format(
+                    "\n".join(result.split("\n")[0:-1]), "\n"))
+                file_name.flush()
+        finally:
+            self.config.device.device.com_dict.get(
+                ComType.deploy_com).close()
+
     def _reset_device(self, request, source):
         json_config = JsonParser(source)
         reset_cmd = []
@@ -798,6 +851,27 @@ class CTestDriver(IDriver):
             kit_instance.__setup__(
                 self.config.device)
         reset_cmd = [int(item, 16) for item in reset_cmd]
+        return reset_cmd
+
+    def _reset_third_device(self, request, source):
+        json_config = JsonParser(source)
+        reset_cmd = []
+        kit_instances = get_kit_instances(json_config,
+                                          request.config.resource_path,
+                                          request.config.testcases_path)
+        from xdevice import Scheduler
+        for (kit_instance, kit_info) in zip(kit_instances,
+                                            json_config.get_kits()):
+            if not isinstance(kit_instance, DeployToolKit):
+                continue
+            if not self.file_name:
+                self.file_name = get_config_value(
+                    'burn_file', kit_info)[0].split("\\")[-1].split(".")[0]
+            if not Scheduler.is_execute:
+                raise ExecuteTerminate("ExecuteTerminate",
+                                       error_no="00300")
+            reset_cmd = kit_instance.__setup__(
+                self.config.device)
         return reset_cmd
 
     def __result__(self):
