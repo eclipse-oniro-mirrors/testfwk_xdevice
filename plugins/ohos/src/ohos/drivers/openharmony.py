@@ -251,7 +251,8 @@ class OHJSUnitTestDriver(IDriver):
                                  0o755)
             self.config.device.execute_shell_command(command="hilog -r")
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                if self.config.device_log == ConfigConst.device_log_on \
+                if hasattr(self.config, "device_log") \
+                        and self.config.device_log == ConfigConst.device_log_on \
                         and hasattr(self.config.device, "clear_crash_log"):
                     self.config.device.clear_crash_log()
                 self.config.device.start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
@@ -266,7 +267,8 @@ class OHJSUnitTestDriver(IDriver):
             serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
             log_tar_file_name = "{}_{}".format(request.get_module_name(),
                                                str(serial).replace(":", "_"))
-            if self.config.device_log == ConfigConst.device_log_on \
+            if hasattr(self.config, "device_log") and \
+                    self.config.device_log == ConfigConst.device_log_on \
                     and hasattr(self.config.device, "start_get_crash_log"):
                 self.config.device.start_get_crash_log(log_tar_file_name)
             self.config.device.stop_catch_device_log()
