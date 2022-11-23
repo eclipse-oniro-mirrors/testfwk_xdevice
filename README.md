@@ -25,15 +25,14 @@ XDevice consists of the following sub-modules:
 
 ```
 xdevice
-├── config                    # XDevice configuration
-│     ├── user_config.xml    # XDevice environment configuration
-├── resource                  # XDevice resources
-│     ├── tools              # Burning tools
-├── src                       # Source code
+├── config                        # XDevice configuration
+│     ├── user_config.xml         # XDevice environment configuration
+├── src                           # Source code
 │     ├── xdevice
-├── extension                 # XDevice extension
-│     ├── src                # Source code of the extension
-│     └── setup.py           # Installation script of the extension
+├── plugins                       # XDevice plugins
+│     ├── ohos                    # OpenHarmony plugins
+|          ├── src                # OpenHarmony plugins source code
+│          └── setup.py           # Installation script of the plugins
 ```
 
 ## Constraints<a name="section118067583303"></a>
@@ -86,15 +85,15 @@ The environment requirements for using this module are as follows:
         >-   **serial/com**: serial port for local connection, for example,  **COM20**
         >-   **serial/type**: serial port type. The value can be  **cmd**  \(serial port for test case execution\) or  **deploy**  \(serial port for system upgrade\).
         >    For the open-source project, the  **cmd**  and  **deploy**  serial ports are the same, and their  **com**  values are the same too.
-        >**serial/baud\_rate, data\_bits, stop\_bits**  and  **timeout**: serial port parameters. You can use the default values.
+        >   **serial/baud\_rate, data\_bits, stop\_bits**  and  **timeout**: serial port parameters. You can use the default values.
 
 
     **2. Set the test case directory.**
-
+    
     **dir**: test case directory
-
+    
     **3. Mount the NFS.**
-
+    
     >![](figures/icon-note.gif) **NOTE:** 
     >**server**: NFS mounting configuration. Set the value to  **NfsServer**.
     >**server/ip**: IP address of the mounting environment

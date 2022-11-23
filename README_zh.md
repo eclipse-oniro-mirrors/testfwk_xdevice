@@ -26,14 +26,13 @@ xdevice主要包括以下几个主要模块：
 ```
 xdevice
 ├── config                    # xdevice组件配置
-│     ├── user_config.xml    # xdevice环境配置
-├── resource                  # xdevice组件资源
-│     ├── tools              # 版本烧录工具
+│     ├── user_config.xml     # xdevice环境配置
 ├── src                       # 组件源码目录
 │     ├── xdevice
-├── extension                 # xdevice扩展模块
-│     ├── src                # 扩展模块源码
-│     └── setup.py           # xdevice扩展模块安装脚本
+├── plugins                   # xdevice扩展模块
+|     |—— ohos                # openharmony测试驱动插件
+│           ├── src           # 扩展模块源码
+│           └── setup.py      # ohos扩展模块安装脚本
 ```
 
 ## 约束<a name="section118067583303"></a>
@@ -88,11 +87,11 @@ xdevice
 
 
     **2、测试用例目录设置**
-
+    
     dir: 指定测试用例目录。
-
+    
     **3、nfs挂载**
-
+    
     >![](figures/icon-note.gif) **说明：** 
     >server: nfs挂载配置，label取值为NfsServer。
     >server/ip: 挂载环境IP地址。
