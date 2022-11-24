@@ -18,6 +18,7 @@
 
 import os
 import re
+import subprocess
 import zipfile
 import stat
 import time
@@ -399,7 +400,8 @@ class ShellKit(ITestKit):
             LOG.info("No teardown-localcommand to run, skipping!")
         else:
             for command in self.tear_down_local_command:
-                os.system(command)
+                subprocess.run(command)
+
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.wifi)
