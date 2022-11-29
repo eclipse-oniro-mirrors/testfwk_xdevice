@@ -1214,8 +1214,8 @@ class OHJSUnitTestParser(IParser):
 
     def handle_suites_end(self):
         suite_result = self.state_machine.suite()
-        suite_result.run_time = self.test_time
-        suite_result.is_completed = True
+        if not suite_result.is_completed:
+            self.handle_suite_end()
         for listener in self.get_listeners():
             if listener.__class__.__name__ == "ReportListener":
                 self._cal_result(listener)
