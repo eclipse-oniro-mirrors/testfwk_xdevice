@@ -799,7 +799,6 @@ class HdcHelper:
             command output, the method will throw
             ShellCommandUnresponsiveException (ms).
         """
-        input_data = b''
         try:
             if not timeout:
                 timeout = DEFAULT_TIMEOUT
@@ -822,13 +821,17 @@ class HdcHelper:
                 resp.okay = True
                 while True:
                     len_buf = sock.recv(DATA_UNIT_LENGTH)
-                    input_data += len_buf
                     if len_buf:
                         length = struct.unpack("!I", len_buf)[0]
                     else:
                         break
                     data = sock.recv(length)
-                    input_data += data
+                    ret = HdcHelper.reply_to_string(data)
+                    if ret:
+                        if receiver:
+                            receiver.__read__(ret)
+                        else:
+                            LOG.debug(ret)
                     if not Scheduler.is_execute:
                         raise ExecuteTerminate()
                 return resp
@@ -837,22 +840,6 @@ class HdcHelper:
                 convert_serial(device.device_sn), command, str(timeout / 1000)))
             raise ShellCommandUnresponsiveException()
         finally:
-            while input_data:
-                len_buf = input_data[:4]
-                if len_buf:
-                    length = struct.unpack("!I", len_buf)[0]
-                else:
-                    break
-                data = input_data[4: 4 + length]
-                input_data = input_data[4 + length:]
-                ret = HdcHelper.reply_to_string(data)
-                if ret:
-                    if receiver:
-                        receiver.__read__(ret)
-                    else:
-                        LOG.debug(ret)
-                if not Scheduler.is_execute:
-                    raise ExecuteTerminate()
             if receiver:
                 receiver.__done__()
 
