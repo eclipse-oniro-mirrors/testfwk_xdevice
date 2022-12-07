@@ -360,6 +360,7 @@ class SyncService:
     Sync service class to push/pull to/from devices/emulators,
     through the debug bridge.
     """
+
     def __init__(self, device, host=None, port=None):
         self.device = device
         self.host = host
@@ -511,7 +512,7 @@ class SyncService:
                 file_path = os.path.join(local, child)
                 if os.path.isdir(file_path):
                     self.push_file(
-                        file_path,  "%s/%s" % (remote, child),
+                        file_path, "%s/%s" % (remote, child),
                         is_create=False)
                 else:
                     self.do_push_file(file_path, "%s/%s" % (remote, child))
@@ -798,6 +799,7 @@ class HdcHelper:
             command output, the method will throw
             ShellCommandUnresponsiveException (ms).
         """
+        input_data = b''
         try:
             if not timeout:
                 timeout = DEFAULT_TIMEOUT
@@ -814,31 +816,43 @@ class HdcHelper:
                     LOG.debug(message)
                 from xdevice import Scheduler
                 HdcHelper.handle_shake(sock, device.device_sn)
-                request = HdcHelper.form_hdc_request("shell %s" % command)
+                request = HdcHelper.form_hdc_request("shell {}".format(command))
                 HdcHelper.write(sock, request)
                 resp = HdcResponse()
                 resp.okay = True
                 while True:
-                    len_buf = HdcHelper.read(sock, DATA_UNIT_LENGTH)
+                    len_buf = sock.recv(DATA_UNIT_LENGTH)
+                    input_data += len_buf
                     if len_buf:
                         length = struct.unpack("!I", len_buf)[0]
                     else:
                         break
                     data = sock.recv(length)
-                    ret = HdcHelper.reply_to_string(data)
-                    if ret:
-                        if receiver:
-                            receiver.__read__(ret)
-                        else:
-                            LOG.debug(ret)
+                    input_data += data
                     if not Scheduler.is_execute:
                         raise ExecuteTerminate()
                 return resp
         except socket.timeout as _:
-            device.log.error("%s shell %s timeout[%sS]" % (
+            device.log.error("ShellCommandUnresponsiveException: %s shell %s timeout[%sS]" % (
                 convert_serial(device.device_sn), command, str(timeout / 1000)))
             raise ShellCommandUnresponsiveException()
         finally:
+            while input_data:
+                len_buf = input_data[:4]
+                if len_buf:
+                    length = struct.unpack("!I", len_buf)[0]
+                else:
+                    break
+                data = input_data[4: 4 + length]
+                input_data = input_data[4 + length:]
+                ret = HdcHelper.reply_to_string(data)
+                if ret:
+                    if receiver:
+                        receiver.__read__(ret)
+                    else:
+                        LOG.debug(ret)
+                if not Scheduler.is_execute:
+                    raise ExecuteTerminate()
             if receiver:
                 receiver.__done__()
 

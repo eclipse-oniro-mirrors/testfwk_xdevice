@@ -702,7 +702,10 @@ def get_cst_time():
 
 def get_device_proc_pid(device, proc_name, double_check=False):
     if not hasattr(device, "execute_shell_command") or \
-            not hasattr(device, "log"):
+            not hasattr(device, "log") or \
+            not hasattr(device, "get_recover_state"):
+        return ""
+    if not device.get_recover_state():
         return ""
     cmd = 'ps -ef | grep %s' % proc_name
     proc_running = device.execute_shell_command(cmd).strip()

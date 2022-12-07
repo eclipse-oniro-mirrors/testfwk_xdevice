@@ -681,7 +681,7 @@ class Device(IDevice):
         self.log.debug('is_proc_running: uitest pid: {}'.format(uitest_pid))
         if uitest_pid != "":
             cmd = 'kill %s' % uitest_pid
-            self.execute_shell_command(cmd).strip()
+            self.execute_shell_command(cmd)
 
     def kill_devicetest_agent(self):
         if hasattr(self, "oh_type") and getattr(self, "oh_type") == "other":
@@ -693,7 +693,7 @@ class Device(IDevice):
         self.log.debug('is_proc_running: agent_pid pid: {}'.format(agent_pid))
         if agent_pid != "":
             cmd = 'kill %s' % agent_pid
-            self.execute_shell_command(cmd).strip()
+            self.execute_shell_command(cmd)
 
     def install_app(self, remote_path, command):
         try:
