@@ -32,6 +32,7 @@ from xdevice import exec_cmd
 from xdevice import ConfigConst
 from xdevice import HdcError
 from xdevice import DeviceAllocationState
+from xdevice import TestDeviceState
 from xdevice import convert_serial
 from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
@@ -542,6 +543,9 @@ class Device(IDevice):
     def set_recover_state(self, state):
         with self.device_lock:
             setattr(self, ConfigConst.recover_state, state)
+            if not state:
+                self.test_device_state = TestDeviceState.NOT_AVAILABLE
+                self.device_allocation_state = DeviceAllocationState.unavailable
 
     def get_recover_state(self, default_state=True):
         with self.device_lock:
