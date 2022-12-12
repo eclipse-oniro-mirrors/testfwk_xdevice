@@ -162,7 +162,7 @@ class LogListener(IListener):
             return
         if lifecycle == LifeCycle.TestSuite:
             self.log_queue.debug(log_data="Start test suite [{}] with {} tests"
-                                 .format(test_result.suite_name, test_result.test_num), clear=True)
+                                 .format(test_result.suite_name, test_result.test_num))
             self.test_num = test_result.test_num
         elif lifecycle == LifeCycle.TestCase:
             self.log_queue.debug(log_data="TestStarted({}#{})"
@@ -176,7 +176,8 @@ class LogListener(IListener):
         del kwargs
         if lifecycle == LifeCycle.TestSuite:
             self.log_queue.debug(log_data="End test suite [{}] and cost {}ms."
-                                 .format(test_result.suite_name, test_result.run_time), clear=True)
+                                 .format(test_result.suite_name, test_result.run_time))
+            self.log_queue.clear()
         elif lifecycle == LifeCycle.TestCase:
             self.log_queue.debug(log_data="TestEnded({}#{})"
                                  .format(test_result.test_class, test_result.test_name))
