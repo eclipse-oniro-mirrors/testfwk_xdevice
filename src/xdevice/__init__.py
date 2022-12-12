@@ -106,6 +106,7 @@ from _core.utils import get_cst_time
 from _core.utils import get_device_proc_pid
 from _core.utils import start_standing_subprocess
 from _core.utils import stop_standing_subprocess
+from _core.logger import LogQueue
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.environment.manager_env import EnvironmentManager
 from _core.environment.device_state import DeviceEvent
@@ -231,7 +232,8 @@ __all__ = [
     "ExecInfo",
     "ResultReporter",
     "DataHelper",
-    "main_report"
+    "main_report",
+    "LogQueue"
 ]
 
 
