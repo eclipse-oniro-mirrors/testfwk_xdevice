@@ -225,6 +225,7 @@ class PushKit(ITestKit):
         for command in self.pre_push:
             run_command(device, command)
         dst = None
+        remount(device)
         for push_info in self.push_list:
             files = re.split('->|=>', push_info)
             if len(files) != 2:
@@ -245,7 +246,6 @@ class PushKit(ITestKit):
                 else:
                     LOG.warning(error, error_no=error.error_no)
                     continue
-            remount(device)
             # hdc don't support push directory now
             if os.path.isdir(real_src_path):
                 device.connector_command("shell mkdir {}".format(dst))

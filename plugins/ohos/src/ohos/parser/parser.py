@@ -18,6 +18,7 @@
 
 import copy
 import re
+import threading
 import time
 import json
 from enum import Enum
@@ -32,7 +33,6 @@ from xdevice import TestDescription
 from xdevice import ResultCode
 from xdevice import CommonParserType
 from xdevice import get_cst_time
-from xdevice import LogQueue
 
 __all__ = ["CppTestParser", "CppTestListParser", "JunitParser", "JSUnitParser",
            "OHKernelTestParser", "OHJSUnitTestParser",
@@ -72,7 +72,6 @@ TIMEOUT_EXCLAMATION = "TIMEOUT!"
 
 
 LOG = platform_logger("Parser")
-MAX_LOG_CACHE_SIZE = 200
 
 
 @Plugin(type=Plugin.PARSER, id=CommonParserType.cpptest)
@@ -83,7 +82,7 @@ class CppTestParser(IParser):
         self.listeners = []
         self.product_info = {}
         self.is_params = False
-        self.log_queue = LogQueue(log=LOG, max_size=MAX_LOG_CACHE_SIZE)
+        self.result_data = ""
 
     def get_suite_name(self):
         return self.suite_name
@@ -95,7 +94,7 @@ class CppTestParser(IParser):
         if not self.state_machine.suites_is_started():
             self.state_machine.trace_logs.extend(lines)
         for line in lines:
-            self.log_queue.debug(log_data=line)
+            self.result_data = "{}[{}] {}\n".format(self.result_data, threading.currentThread().ident, line)
             self.parse(line)
 
     def __done__(self):
@@ -108,10 +107,12 @@ class CppTestParser(IParser):
                                suites_name=suites.suites_name,
                                product_info=suites.product_info)
         self.state_machine.current_suites = None
-        # make sure print all log
-        self.log_queue.clear()
+        LOG.debug("CppParser data:")
+        LOG.debug(self.result_data)
+        self.result_data = ""
 
     def parse(self, line):
+
         if self.state_machine.suites_is_started() or line.startswith(
                 _TEST_RUN_MARKER):
             if line.startswith(_START_TEST_RUN_MARKER):
@@ -141,7 +142,7 @@ class CppTestParser(IParser):
             message = line[line.index(_SKIPPED_TEST_MARKER) + len(
                 _SKIPPED_TEST_MARKER):].strip()
             if not self.state_machine.test_is_running():
-                self.log_queue.error(
+                LOG.error(
                     "Found {} without {} before, wrong GTest log format".
                     format(line, _START_TEST_MARKER))
                 return
@@ -150,7 +151,7 @@ class CppTestParser(IParser):
             message = line[line.index(_OK_TEST_MARKER) + len(
                 _OK_TEST_MARKER):].strip()
             if not self.state_machine.test_is_running():
-                self.log_queue.error(
+                LOG.error(
                     "Found {} without {} before, wrong GTest log format".
                     format(line, _START_TEST_MARKER))
                 return
@@ -178,7 +179,7 @@ class CppTestParser(IParser):
 
     def handle_test_suite_failed(self, error_msg):
         error_msg = "Unknown error" if error_msg is None else error_msg
-        self.log_queue.info("Test run failed: {}".format(error_msg))
+        LOG.info("Test run failed: {}".format(error_msg))
         if self.state_machine.test_is_running():
             self.state_machine.test().is_completed = True
             for listener in self.get_listeners():
@@ -221,17 +222,17 @@ class CppTestParser(IParser):
         test_result.code = test_status.value
         test_result.current = self.state_machine.running_test_index + 1
         if not test_result.is_running():
-            self.log_queue.error(
+            LOG.error(
                 "Test has no start tag when trying to end test: %s", message)
             return
         found_unexpected_test = False
         if test_result.test_class != test_class:
-            self.log_queue.error(
+            LOG.error(
                 "Expected class: {} but got:{} ".format(test_result.test_class,
                                                         test_class))
             found_unexpected_test = True
         if test_result.test_name != test_name:
-            self.log_queue.error(
+            LOG.error(
                 "Expected test: {} but got: {}".format(test_result.test_name,
                                                        test_name))
             found_unexpected_test = True
@@ -309,12 +310,12 @@ class CppTestParser(IParser):
             self.state_machine.test().stacktrace += "\r\n"
         self.state_machine.test().stacktrace += message
 
-    @classmethod
-    def handle_test_run_failed(cls, error_msg):
+    @staticmethod
+    def handle_test_run_failed(error_msg):
         if not error_msg:
             error_msg = "Unknown error"
         if not check_pub_key_exist():
-            cls.log_queue.debug("Error msg:%s" % error_msg)
+            LOG.debug("Error msg:%s" % error_msg)
 
     def mark_test_as_blocked(self, test):
         if not self.state_machine.current_suite and not test.class_name:
@@ -1040,7 +1041,7 @@ class OHJSUnitTestParser(IParser):
         self.test_run_finished = False
         self.cur_sum = -1
         self.runner = None
-        self.log_queue = LogQueue(log=LOG, max_size=MAX_LOG_CACHE_SIZE)
+        self.result_data = ""
 
     def get_suite_name(self):
         return self.suites_name
@@ -1050,7 +1051,7 @@ class OHJSUnitTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
-            self.log_queue.debug(log_data=line)
+            self.result_data = "{}[{}] {}\n".format(self.result_data, threading.currentThread().ident, line)
             self.parse(line)
 
     def parse(self, line):
@@ -1138,7 +1139,7 @@ class OHJSUnitTestParser(IParser):
 
     def report_result(self, test_info):
         if not test_info.test_name or not test_info.test_class:
-            self.log_queue.info("Invalid instrumentation status bundle")
+            LOG.info("Invalid instrumentation status bundle")
             return
         if test_info.code == StatusCodes.START.value:
             self.start_time = get_cst_time()
@@ -1194,11 +1195,11 @@ class OHJSUnitTestParser(IParser):
             return
         if test_info.stacktrace:
             stack_lines = test_info.stacktrace.split(r"\r\n")
-            cls.log_queue.error("Stacktrace information is:")
+            LOG.error("Stacktrace information is:")
             for line in stack_lines:
                 line.strip()
                 if line:
-                    cls.log_queue.error(line)
+                    LOG.error(line)
 
     @staticmethod
     def check_legality(name):
@@ -1207,8 +1208,9 @@ class OHJSUnitTestParser(IParser):
         return True
 
     def __done__(self):
-        # make sure print all log
-        self.log_queue.clear()
+        LOG.debug("OHJSParser data:")
+        LOG.debug(self.result_data)
+        self.result_data = ""
 
     def handle_suite_end(self):
         suite_result = self.state_machine.suite()
@@ -1252,13 +1254,13 @@ class OHJSUnitTestParser(IParser):
                 continue
             interval = len(test_des_list) - len(report_listener.result[pos][1])
             if len(test_des_list) > 0:
-                self.log_queue.info("{} tests in {} had missed.".format(
+                LOG.info("{} tests in {} had missed.".format(
                     interval, suite.suite_name))
             else:
-                self.log_queue.info("The count of tests in '{}' is incorrect! "
-                                    "{} test form dry run and {} tests have run."
-                                    .format(suite.suite_name, len(test_des_list),
-                                            len(report_listener.result[pos][1])))
+                LOG.info("The count of tests in '{}' is incorrect! {} test "
+                         "form dry run and {} tests have run."
+                         "".format(suite.suite_name, len(test_des_list),
+                                   len(report_listener.result[pos][1])))
             for test_des in test_des_list:
                 is_contain = False
                 for case in report_listener.result[pos][1]:
@@ -1276,7 +1278,7 @@ class OHJSUnitTestParser(IParser):
                         self.state_machine.running_test_index + 1
                     test_result.code = ResultCode.BLOCKED.value
                     report_listener.result[pos][1].append(test_result)
-                    self.log_queue.debug("Add {}#{}".format(test_des.class_name,
+                    LOG.debug("Add {}#{}".format(test_des.class_name,
                                                  test_des.test_name))
 
     def _handle_lacking_whole_suite(self, report_listener):
@@ -1288,7 +1290,7 @@ class OHJSUnitTestParser(IParser):
                 suite_name_set.add(suite.suite_name)
             un_suite_set = all_suite_set.difference(suite_name_set)
             if un_suite_set:
-                self.log_queue.info("{} suites have missed.".format(len(un_suite_set)))
+                LOG.info("{} suites have missed.".format(len(un_suite_set)))
         for name in un_suite_set:
             self.state_machine.running_test_index = 0
             test_des_list = self.runner.expect_tests_dict.get(
