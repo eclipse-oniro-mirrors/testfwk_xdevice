@@ -27,6 +27,7 @@ from _core.constants import TestType
 from _core.interface import LifeCycle
 from _core.interface import IListener
 from _core.logger import platform_logger
+from _core.logger import LogQueue
 from _core.report.suite_reporter import SuiteReporter
 from _core.report.suite_reporter import ResultCode
 from _core.report.encrypt import check_pub_key_exist
@@ -154,17 +155,18 @@ class LogListener(IListener):
     """
     test_num = 0
     device_sn = ""
+    log_queue = LogQueue(log=LOG)
 
     def __started__(self, lifecycle, test_result):
         if check_pub_key_exist():
             return
         if lifecycle == LifeCycle.TestSuite:
-            LOG.debug("Start test suite [%s] with %s tests"
-                      % (test_result.suite_name, test_result.test_num))
+            self.log_queue.debug(log_data="Start test suite [{}] with {} tests"
+                                 .format(test_result.suite_name, test_result.test_num))
             self.test_num = test_result.test_num
         elif lifecycle == LifeCycle.TestCase:
-            LOG.debug("TestStarted(%s#%s)" % (test_result.test_class,
-                                              test_result.test_name))
+            self.log_queue.debug(log_data="TestStarted({}#{})"
+                                 .format(test_result.test_class, test_result.test_name))
 
     def __ended__(self, lifecycle, test_result, **kwargs):
         if check_pub_key_exist():
@@ -173,22 +175,22 @@ class LogListener(IListener):
         from _core.utils import convert_serial
         del kwargs
         if lifecycle == LifeCycle.TestSuite:
-            LOG.debug("End test suite [%s] and cost %sms."
-                      % (test_result.suite_name, test_result.run_time))
+            self.log_queue.debug(log_data="End test suite [{}] and cost {}ms."
+                                 .format(test_result.suite_name, test_result.run_time))
+            self.log_queue.clear()
         elif lifecycle == LifeCycle.TestCase:
-            LOG.debug("TestEnded(%s#%s)" % (test_result.test_class,
-                                            test_result.test_name))
+            self.log_queue.debug(log_data="TestEnded({}#{})"
+                                 .format(test_result.test_class, test_result.test_name))
             ret = ResultCode(test_result.code).name
             if self.test_num:
-                LOG.info("[%s/%s %s] %s#%s %s" %
-                         (test_result.current, self.test_num,
-                          convert_serial(self.device_sn),
-                          test_result.test_class, test_result.test_name, ret))
+                self.log_queue.info(log_data="[{}/{} {}] {}#{} {}"
+                                    .format(test_result.current, self.test_num,
+                                            convert_serial(self.device_sn), test_result.test_class,
+                                            test_result.test_name, ret))
             else:
-                LOG.info("[%s/- %s] %s#%s %s" %
-                         (test_result.current, convert_serial(self.device_sn),
-                          test_result.test_class, test_result.test_name,
-                          ret))
+                self.log_queue.info(log_data="[{}/- {}] {}#{} {}"
+                                    .format(test_result.current, convert_serial(self.device_sn),
+                                            test_result.test_class, test_result.test_name, ret))
 
     @staticmethod
     def __skipped__(lifecycle, test_result, **kwargs):

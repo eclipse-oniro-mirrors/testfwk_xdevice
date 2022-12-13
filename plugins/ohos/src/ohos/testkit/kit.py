@@ -225,6 +225,7 @@ class PushKit(ITestKit):
         for command in self.pre_push:
             run_command(device, command)
         dst = None
+        remount(device)
         for push_info in self.push_list:
             files = re.split('->|=>', push_info)
             if len(files) != 2:
@@ -245,7 +246,6 @@ class PushKit(ITestKit):
                 else:
                     LOG.warning(error, error_no=error.error_no)
                     continue
-            remount(device)
             # hdc don't support push directory now
             if os.path.isdir(real_src_path):
                 device.connector_command("shell mkdir {}".format(dst))
@@ -1022,33 +1022,30 @@ def junit_dex_para_parse(device, junit_paras, prefix_char="--"):
 def get_app_name(hap_app):
     hap_name = os.path.basename(hap_app).replace(".hap", "")
     app_name = ""
-    with TemporaryDirectory(prefix=hap_name) as temp_dir:
-        zif_file = zipfile.ZipFile(hap_app)
-        zif_file.extractall(path=temp_dir)
-        config_json_file = ""
+    hap_file_info = None
+    config_json_file = ""
+    try:
+        hap_file_info = zipfile.ZipFile(hap_app)
         name_list = ["module.json", "config.json"]
-        for f_name in os.listdir(temp_dir):
-            if f_name in name_list:
-                config_json_file = os.path.join(temp_dir, f_name)
+        for _, name in enumerate(hap_file_info.namelist()):
+            if name in name_list:
+                config_json_file = name
                 break
-        if not os.path.exists(config_json_file):
-            LOG.debug("Neither config.json nor module.json in %s.hap"
-                      % hap_name)
+        config_info = hap_file_info.read(config_json_file).decode('utf-8')
+        attrs = json.loads(config_info)
+        if "app" in attrs.keys() and \
+                "bundleName" in attrs.get("app", dict()).keys():
+            app_name = attrs["app"]["bundleName"]
+            LOG.info("Obtain the app name {} from json "
+                     "successfully".format(app_name))
         else:
-            flags = os.O_RDONLY
-            modes = stat.S_IWUSR | stat.S_IRUSR
-            with os.fdopen(os.open(config_json_file, flags, modes),
-                           "r") as file_desc:
-                attrs = json.loads(file_desc.read())
-                if "app" in attrs.keys() and \
-                        "bundleName" in attrs.get("app", dict()).keys():
-                    app_name = attrs["app"]["bundleName"]
-                    LOG.info("Obtain the app name {} from json "
-                             "successfully".format(app_name))
-                else:
-                    LOG.debug("Tip: 'app' or 'bundleName' not "
-                              "in %s.hap/config.json" % hap_name)
-        zif_file.close()
+            LOG.debug("Tip: 'app' or 'bundleName' not "
+                      "in %s.hap/config.json" % hap_name)
+    except Exception as e:
+        LOG.error("get app name from hap error: {}".format(e))
+    finally:
+        if hap_file_info:
+            hap_file_info.close()
     return app_name
 
 
