@@ -161,7 +161,6 @@ class Scheduler(object):
 
         finally:
             Scheduler._clear_test_dict_source()
-            self._reset_env()
             if getattr(task.config, ConfigConst.test_environment, "") or \
                     getattr(task.config, ConfigConst.configfile, ""):
                 self._restore_environment()
@@ -175,6 +174,7 @@ class Scheduler(object):
         try:
             self._dynamic_concurrent_execute(task, used_devices)
         finally:
+            Scheduler.__reset_environment__(used_devices)
             # generate reports
             self._generate_task_report(task, used_devices)
 
@@ -416,6 +416,11 @@ class Scheduler(object):
     def __free_environment__(environment):
         env_manager = EnvironmentManager()
         env_manager.release_environment(environment)
+
+    @staticmethod
+    def __reset_environment__(used_devices):
+        env_manager = EnvironmentManager()
+        env_manager.reset_environment(used_devices)
 
     @classmethod
     def _check_device_spt(cls, kit, driver_request, device):
@@ -802,11 +807,6 @@ class Scheduler(object):
         env_manager = EnvironmentManager()
         env_manager.env_stop()
         EnvironmentManager()
-
-    @classmethod
-    def _reset_env(cls):
-        env_manager = EnvironmentManager()
-        env_manager.env_reset()
 
     @classmethod
     def start_task_log(cls, log_path):

@@ -149,7 +149,7 @@ def is_proc_running(pid, name=None):
     else:
         raise Exception("Unknown system environment")
 
-    (out, _) = proc.communicate()
+    (out, _) = proc.communicate(timeout=60)
     out = get_decode(out).strip()
     LOG.debug("Check %s proc running output: %s", pid, out)
     if out == "":
@@ -698,3 +698,30 @@ def get_cst_time():
     cn_tz = timezone(timedelta(hours=8),
                      name='Asia/ShangHai')
     return datetime.now(tz=cn_tz)
+
+
+def get_device_proc_pid(device, proc_name, double_check=False):
+    if not hasattr(device, "execute_shell_command") or \
+            not hasattr(device, "log") or \
+            not hasattr(device, "get_recover_state"):
+        return ""
+    if not device.get_recover_state():
+        return ""
+    cmd = 'ps -ef | grep %s' % proc_name
+    proc_running = device.execute_shell_command(cmd).strip()
+    proc_running = proc_running.split("\n")
+    for data in proc_running:
+        if proc_name in data and "grep" not in data:
+            device.log.debug('{} running status:{}'.format(proc_name, data))
+            data = data.split()
+            return data[1]
+    if double_check:
+        cmd = 'ps -A | grep %s' % proc_name
+        proc_running = device.execute_shell_command(cmd).strip()
+        proc_running = proc_running.split("\n")
+        for data in proc_running:
+            if proc_name in data:
+                device.log.debug('{} running status double_check:{}'.format(proc_name, data))
+                data = data.split()
+                return data[0]
+    return ""

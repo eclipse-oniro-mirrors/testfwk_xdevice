@@ -500,11 +500,10 @@ class ComController:
         """
         self.is_open = False
         self.com = None
-        self.serial_port = device.get("com") if device.get("com") else None
-        self.baud_rate = int(device.get("baud_rate")) if device.get(
-            "baud_rate") else DEFAULT_BAUD_RATE
-        self.timeout = int(device.get("timeout")) if device.get(
-            "timeout") else TIMEOUT
+        self.serial_port = device.get("com", None)
+        self.baud_rate = int(device.get("baud_rate", DEFAULT_BAUD_RATE))
+        self.timeout = int(device.get("timeout", TIMEOUT))
+        self.usb_port = device.get("usb_port", None)
 
     def connect(self):
         """
