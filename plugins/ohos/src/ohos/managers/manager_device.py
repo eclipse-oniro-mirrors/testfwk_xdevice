@@ -67,11 +67,6 @@ class ManagerDevice(IDeviceManager):
     def env_stop(self):
         self._stop_device_monitor()
 
-    def env_reset(self):
-        for device in self.devices_list:
-            if device and hasattr(device, "reset"):
-                device.reset()
-
     def _start_device_monitor(self, environment="", user_config_file=""):
         self.managed_device_listener = ManagedDeviceListener(self)
         device = UserConfigManager(
@@ -181,6 +176,10 @@ class ManagerDevice(IDeviceManager):
         finally:
             LOG.debug("Release_device: release list con lock")
             self.list_con.release()
+
+    def reset_device(self, device):
+        if device and hasattr(device, "reset"):
+            device.reset()
 
     def find_device(self, device_sn, device_os_type):
         for device in self.devices_list:

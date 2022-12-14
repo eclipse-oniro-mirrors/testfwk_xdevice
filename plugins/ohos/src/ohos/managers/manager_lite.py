@@ -111,6 +111,9 @@ class ManagerLite(IDeviceManager):
             LOG.debug("Lite release device: release lock")
             self.list_con.release()
 
+    def reset_device(self, device):
+        pass
+
     def list_devices(self):
         print("Lite devices:")
         print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".

@@ -20,6 +20,7 @@ import logging
 import sys
 import time
 import threading
+import queue
 from logging.handlers import RotatingFileHandler
 
 from _core.constants import LogType
@@ -31,13 +32,15 @@ from _core.exception import ParamError
 __all__ = ["Log", "platform_logger", "device_logger", "shutdown",
            "add_task_file_handler", "remove_task_file_handler",
            "change_logger_level", "add_encrypt_file_handler",
-           "remove_encrypt_file_handler"]
+           "remove_encrypt_file_handler", "LogQueue"]
 
 _HANDLERS = []
 _LOGGERS = []
 MAX_LOG_LENGTH = 20 * 1024 * 1024
 MAX_ENCRYPT_LOG_LENGTH = 5 * 1024 * 1024
 MAX_LOG_NUMS = 1000
+MAX_LOG_CACHE_SIZE = 10
+
 
 
 class Log:
@@ -440,3 +443,58 @@ class EncryptFileHandler(RotatingFileHandler):
                 name, "ERROR", error, error_no_str)
             self.encrypt_error = bytes(info, "utf-8")
             return self.encrypt_error
+
+
+class LogQueue:
+    log = None
+    max_size = 0
+    queue_info = None
+    queue_debug = None
+    queue_error = None
+
+    def __init__(self, log, max_size=MAX_LOG_CACHE_SIZE):
+        self.log = log
+        self.max_size = max_size
+        self.queue_info = queue.Queue(maxsize=self.max_size)
+        self.queue_debug = queue.Queue(maxsize=self.max_size)
+        self.queue_error = queue.Queue(maxsize=self.max_size)
+
+    def _put(self, log_queue, log_data, clear):
+        is_print = False
+        result_data = ""
+        if log_queue.full() or clear:
+            # make sure the last one print
+            if log_queue.qsize() > 0:
+                is_print = True
+                result_data = "{}\n".format(log_queue.get())
+            else:
+                result_data = ""
+            if log_data != "":
+                log_queue.put(log_data)
+            while not log_queue.empty():
+                is_print = True
+                result_data = "{} [{}] {}\n".format(result_data, threading.currentThread().ident, log_queue.get())
+        else:
+            if log_data != "":
+                log_queue.put(log_data)
+        return is_print, result_data
+
+    def info(self, log_data, clear=False):
+        is_print, result_data = self._put(self.queue_info, log_data, clear)
+        if is_print:
+            self.log.info(result_data)
+
+    def debug(self, log_data, clear=False):
+        is_print, result_data = self._put(self.queue_debug, log_data, clear)
+        if is_print:
+            self.log.debug(result_data)
+
+    def error(self, log_data, clear=False):
+        is_print, result_data = self._put(self.queue_error, log_data, clear)
+        if is_print:
+            self.log.error(result_data)
+
+    def clear(self):
+        self.info(log_data="", clear=True)
+        self.debug(log_data="", clear=True)
+        self.error(log_data="", clear=True)

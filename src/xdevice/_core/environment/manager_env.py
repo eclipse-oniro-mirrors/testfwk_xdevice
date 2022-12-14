@@ -131,10 +131,6 @@ class EnvironmentManager(object):
 
         EnvironmentManager.__init_flag = False
 
-    def env_reset(self):
-        for manager in self.managers.values():
-            manager.env_reset()
-
     def apply_environment(self, device_options):
         environment = Environment()
         for device_option in device_options:
@@ -155,6 +151,10 @@ class EnvironmentManager(object):
         for device in environment.devices:
             device.extend_value = {}
             self.release_device(device)
+
+    def reset_environment(self, used_devices):
+        for _, device in used_devices.items():
+            self.reset_device(device)
 
     def apply_device(self, device_option, timeout=10):
         LOG.debug("Apply device from managers:%s" % self.managers)
@@ -232,6 +232,11 @@ class EnvironmentManager(object):
         for manager in self.managers.values():
             if device in manager.devices_list:
                 manager.release_device(device)
+
+    def reset_device(self, device):
+        for manager in self.managers.values():
+            if device in manager.devices_list:
+                manager.reset_device(device)
 
     def list_devices(self):
         LOG.info("List devices.")

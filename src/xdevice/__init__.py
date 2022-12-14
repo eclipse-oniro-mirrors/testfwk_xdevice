@@ -103,8 +103,10 @@ from _core.utils import modify_props
 from _core.utils import get_shell_handler
 from _core.utils import get_decode
 from _core.utils import get_cst_time
+from _core.utils import get_device_proc_pid
 from _core.utils import start_standing_subprocess
 from _core.utils import stop_standing_subprocess
+from _core.logger import LogQueue
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.environment.manager_env import EnvironmentManager
 from _core.environment.device_state import DeviceEvent
@@ -224,12 +226,14 @@ __all__ = [
     "get_shell_handler",
     "get_decode",
     "get_cst_time",
+    "get_device_proc_pid",
     "start_standing_subprocess",
     "stop_standing_subprocess",
     "ExecInfo",
     "ResultReporter",
     "DataHelper",
-    "main_report"
+    "main_report",
+    "LogQueue"
 ]
 
 
