@@ -47,7 +47,8 @@ TEST_TYPE_DICT = {"DEX": DeviceTestType.dex_test,
                   "JST": DeviceTestType.jsunit_test,
                   "OHJST": DeviceTestType.oh_jsunit_test,
                   "CXX": DeviceTestType.cpp_test,
-                  "BIN": DeviceTestType.lite_cpp_test}
+                  "BIN": DeviceTestType.lite_cpp_test,
+                  "LTPPosix": DeviceTestType.ltp_posix_test}
 EXT_TYPE_DICT = {".dex": DeviceTestType.dex_test,
                  ".hap": DeviceTestType.hap_test,
                  ".apk": DeviceTestType.hap_test,
