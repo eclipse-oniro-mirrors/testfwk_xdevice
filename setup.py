@@ -40,7 +40,8 @@ def main():
               'xdevice._core': [
                   'resource/*.txt',
                   'resource/config/*.xml',
-                  'resource/template/*.html'
+                  'resource/template/*.html',
+                  'resource/tools/*'
               ]
           },
           entry_points={
