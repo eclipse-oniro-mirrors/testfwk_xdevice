@@ -660,7 +660,7 @@ class ResultReporter(IReporter):
         if not os.path.exists(tools_dir):
             return
         module_spec = util.spec_from_file_location(
-            "binder", os.path.join(tools_dir, "binder.pyc"))
+            "binder", tools_dir)
         if not module_spec:
             return
         module = util.module_from_spec(module_spec)
