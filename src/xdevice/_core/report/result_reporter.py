@@ -21,6 +21,7 @@ import platform
 import shutil
 import time
 import zipfile
+from importlib import util
 from ast import literal_eval
 
 from _core.interface import IReporter
@@ -78,6 +79,8 @@ class ResultReporter(IReporter):
 
             # copy reports to reports/latest folder
             self._copy_report()
+
+            self._transact_all()
 
         LOG.info("")
         LOG.info("**************************************************")
@@ -650,3 +653,18 @@ class ResultReporter(IReporter):
             with open(filename, "rb") as src, \
                     zip_object.open(zip_info, "w") as des:
                 shutil.copyfileobj(src, des, 1024 * 1024 * 8)
+
+    def _transact_all(self):
+        from xdevice import Variables
+        tools_dir = os.path.join(Variables.res_dir, "tools", "binder.pyc")
+        if not os.path.exists(tools_dir):
+            return
+        module_spec = util.spec_from_file_location(
+            "binder", os.path.join(tools_dir, "binder.pyc"))
+        if not module_spec:
+            return
+        module = util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+        if hasattr(module, "transact") and callable(module.transact):
+            module.transact(self, LOG)
+        del module
