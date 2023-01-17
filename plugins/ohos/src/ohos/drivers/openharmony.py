@@ -61,6 +61,11 @@ class OHKernelTestDriver(IDriver):
         self.kits = []
         self.config = None
         self.runner = None
+        # log
+        self.device_log = None
+        self.hilog = None
+        self.log_proc = None
+        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -80,24 +85,25 @@ class OHKernelTestDriver(IDriver):
             self.result = "%s.xml" % \
                           os.path.join(request.config.report_path,
                                        "result", request.get_module_name())
-            device_log = get_device_log_file(
+            self.device_log = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
                 "device_log")
 
-            hilog = get_device_log_file(
+            self.hilog = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
                 "device_hilog")
 
-            device_log_open = os.open(device_log, os.O_WRONLY | os.O_CREAT |
+            device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT |
                                       os.O_APPEND, FilePermission.mode_755)
-            hilog_open = os.open(hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  FilePermission.mode_755)
+            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
             with os.fdopen(device_log_open, "a") as log_file_pipe, \
                     os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.config.device.start_catch_device_log(log_file_pipe,
-                                                          hilog_file_pipe)
+                self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
+                    start_catch_device_log(log_file_pipe, hilog_file_pipe)
                 self._run_oh_kernel(config_file, request.listeners, request)
                 log_file_pipe.flush()
                 hilog_file_pipe.flush()
@@ -109,7 +115,9 @@ class OHKernelTestDriver(IDriver):
             raise exception
         finally:
             do_module_kit_teardown(request)
-            self.config.device.stop_catch_device_log()
+            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
+            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
+            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
@@ -217,6 +225,11 @@ class OHJSUnitTestDriver(IDriver):
         self.runner = None
         self.rerun = True
         self.rerun_all = True
+        # log
+        self.device_log = None
+        self.hilog = None
+        self.log_proc = None
+        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -242,20 +255,22 @@ class OHJSUnitTestDriver(IDriver):
                     request.root.source.source_string, error_no="00110")
             LOG.debug("Test case file path: %s" % suite_file)
             self.config.device.set_device_report_path(request.config.report_path)
-            hilog = get_device_log_file(request.config.report_path,
+            self.hilog = get_device_log_file(request.config.report_path,
                                         request.config.device.__get_serial__() + "_" + request.
                                         get_module_name(),
                                         "device_hilog")
 
-            hilog_open = os.open(hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  0o755)
+            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
             self.config.device.execute_shell_command(command="hilog -r")
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
                 if hasattr(self.config, "device_log") \
                         and self.config.device_log == ConfigConst.device_log_on \
                         and hasattr(self.config.device, "clear_crash_log"):
-                    self.config.device.clear_crash_log()
-                self.config.device.start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+                    self.config.device.device_log_collector.clear_crash_log()
+                self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
+                    start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
                 self._run_oh_jsunit(config_file, request)
         except Exception as exception:
             self.error_message = exception
@@ -270,8 +285,10 @@ class OHJSUnitTestDriver(IDriver):
             if hasattr(self.config, "device_log") and \
                     self.config.device_log == ConfigConst.device_log_on \
                     and hasattr(self.config.device, "start_get_crash_log"):
-                self.config.device.start_get_crash_log(log_tar_file_name)
-            self.config.device.stop_catch_device_log()
+                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
+            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
+            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
+            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
