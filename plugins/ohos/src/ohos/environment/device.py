@@ -862,3 +862,16 @@ class DeviceLogCollector:
         cur_time = get_cst_time().strftime(iso_time_format)
         self.device.execute_shell_command("date '{}'".format(cur_time))
         self.device.execute_shell_command("hwclock --systohc")
+
+    def add_log_address(self, log_file_address, hilog_file_address):
+        # record to restart catch log when reboot device
+        if log_file_address:
+            self.log_file_address.append(log_file_address)
+        if hilog_file_address:
+            self.hilog_file_address.append(hilog_file_address)
+
+    def remove_log_address(self, log_file_address, hilog_file_address):
+        if log_file_address:
+            self.log_file_address.remove(log_file_address)
+        if hilog_file_address:
+            self.hilog_file_address.remove(hilog_file_address)
