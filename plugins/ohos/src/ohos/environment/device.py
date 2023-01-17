@@ -149,8 +149,7 @@ class Device(IDevice):
     log = platform_logger("Device")
     device_state_monitor = None
     reboot_timeout = 2 * 60 * 1000
-    log_file_pipe = None
-    hilog_file_pipe = None
+    _device_log_collector = None
 
     _proxy = None
     _is_harmony = None
@@ -166,6 +165,7 @@ class Device(IDevice):
     module_package = None
     module_ablity_name = None
     _device_log_path = ""
+    _device_report_path = ""
 
     model_dict = {
         'default': ProductForm.phone,
@@ -285,7 +285,7 @@ class Device(IDevice):
         self.device_state_monitor.wait_for_device_available(BACKGROUND_TIME)
         cmd = "target mount"
         self.connector_command(cmd)
-        self.start_catch_device_log()
+        self.device_log_collector.restart_catch_device_log()
         return status
 
     def wait_for_device_not_available(self, wait_time):
@@ -308,7 +308,7 @@ class Device(IDevice):
         self.device_state_monitor.wait_for_device_available(
             self.reboot_timeout)
         self.enable_hdc_root()
-        self.start_catch_device_log()
+        self.device_log_collector.restart_catch_device_log()
 
     @perform_device_action
     def install_package(self, package_path, command=""):
@@ -385,152 +385,6 @@ class Device(IDevice):
             return True
         return False
 
-    def start_catch_device_log(self, log_file_pipe=None,
-                               hilog_file_pipe=None):
-        """
-        Starts hdc log for each device in separate subprocesses and save
-        the logs in files.
-        """
-        self._sync_device_time()
-        if log_file_pipe:
-            self.log_file_pipe = log_file_pipe
-        if hilog_file_pipe:
-            self.hilog_file_pipe = hilog_file_pipe
-        self._start_catch_device_log()
-
-    def stop_catch_device_log(self):
-        """
-        Stops all hdc log subprocesses.
-        """
-        self._stop_catch_device_log()
-
-    def _start_catch_device_log(self):
-        if self.hilog_file_pipe:
-            command = "hilog"
-            if self.host != "127.0.0.1":
-                cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port),
-                       "-t", self.device_sn, "shell", command]
-            else:
-                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device_sn, "shell", command]
-            LOG.info("execute command: %s" % " ".join(cmd).replace(
-                self.device_sn, convert_serial(self.device_sn)))
-            self.device_hilog_proc = start_standing_subprocess(
-                cmd, self.hilog_file_pipe)
-
-    def _stop_catch_device_log(self):
-        if self.device_hilog_proc:
-            stop_standing_subprocess(self.device_hilog_proc)
-            self.device_hilog_proc = None
-            self.hilog_file_pipe = None
-
-    def start_hilog_task(self, log_size="50M"):
-        self._sync_device_time()
-        self.clear_crash_log()
-        # 先停止一下
-        cmd = "hilog -w stop"
-        out = self.execute_shell_command(cmd)
-        # 清空日志
-        cmd = "hilog -r"
-        out = self.execute_shell_command(cmd)
-        cmd = "rm -rf /data/log/hilog/*"
-        out = self.execute_shell_command(cmd)
-        # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
-        cmd = "hilog -w start -l {} -n 1000".format(log_size)
-        out = self.execute_shell_command(cmd)
-        LOG.info("Execute command: {}, result is {}".format(cmd, out))
-
-    def stop_hilog_task(self, log_name):
-        cmd = "hilog -w stop"
-        out = self.execute_shell_command(cmd)
-        self.pull_file("/data/log/hilog/", "{}/log/".format(self._device_log_path))
-        try:
-            os.rename("{}/log/hilog".format(self._device_log_path),
-                      "{}/log/{}_hilog".format(self._device_log_path, log_name))
-        except Exception as e:
-            self.log.error("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
-            # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
-            cmd = "cd /data/log/hilog && tar -zcvf /data/log/{}_hilog.tar.gz *".format(log_name)
-            out = self.execute_shell_command(cmd)
-            LOG.info("Execute command: {}, result is {}".format(cmd, out))
-            if "No space left on device" not in out:
-                self.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), "{}/log/".format(self._device_log_path))
-                cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
-                out = self.execute_shell_command(cmd)
-        # 获取crash日志
-        self.start_get_crash_log(log_name)
-
-    def _get_log(self, log_cmd, *params):
-        def filter_by_name(log_name, args):
-            for starts_name in args:
-                if log_name.startswith(starts_name):
-                    return True
-            return False
-
-        data_list = list()
-        log_name_array = list()
-        log_result = self.execute_shell_command(log_cmd)
-        if log_result is not None and len(log_result) != 0:
-            log_name_array = log_result.strip().replace("\r", "").split("\n")
-        for log_name in log_name_array:
-            log_name = log_name.strip()
-            if len(params) == 0 or \
-                    filter_by_name(log_name, params):
-                data_list.append(log_name)
-        return data_list
-
-    def get_cur_crash_log(self, crash_path, log_name):
-        log_name_map = {'cppcrash': NATIVE_CRASH_PATH,
-                        "jscrash": JS_CRASH_PATH,
-                        "SERVICE_BLOCK": ROOT_PATH,
-                        "appfreeze": ROOT_PATH}
-        if not os.path.exists(crash_path):
-            os.makedirs(crash_path)
-        if "Not support std mode" in log_name:
-            return
-
-        def get_log_path(logname):
-            name_array = logname.split("-")
-            if len(name_array) <= 1:
-                return ROOT_PATH
-            return log_name_map.get(name_array[0])
-
-        log_path = get_log_path(log_name)
-        temp_path = "%s/%s" % (log_path, log_name)
-        self.pull_file(temp_path, crash_path)
-        LOG.debug("Finish pull file: %s" % log_name)
-
-    def start_get_crash_log(self, task_name):
-        log_array = list()
-        native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
-        js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
-        block_crash_cmd = '"ls {}"'.format(ROOT_PATH)
-        # 获取crash日志文件
-        log_array.extend(self._get_log(native_crash_cmd, "cppcrash"))
-        log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
-        log_array.extend(self._get_log(block_crash_cmd, "SERVICE_BLOCK", "appfreeze"))
-        LOG.debug("crash log file {}, length is {}".format(str(log_array), str(len(log_array))))
-        crash_path = "{}/log/{}_crash_log/".format(self._device_log_path, task_name)
-        for log_name in log_array:
-            log_name = log_name.strip()
-            self.get_cur_crash_log(crash_path, log_name)
-
-    def clear_crash_log(self):
-        clear_block_crash_cmd = "rm -f {}/*".format(ROOT_PATH)
-        clear_native_crash_cmd = "rm -f {}/*".format(NATIVE_CRASH_PATH)
-        clear_debug_crash_cmd = "rm -f {}/debug/*".format(ROOT_PATH)
-        clear_js_crash_cmd = "rm -f {}/*".format(JS_CRASH_PATH)
-        self.execute_shell_command(clear_block_crash_cmd)
-        self.execute_shell_command(clear_native_crash_cmd)
-        self.execute_shell_command(clear_debug_crash_cmd)
-        self.execute_shell_command(clear_js_crash_cmd)
-
-    def _sync_device_time(self):
-        # 先同步PC和设备的时间
-        iso_time_format = '%Y-%m-%d %H:%M:%S'
-        cur_time = get_cst_time().strftime(iso_time_format)
-        self.execute_shell_command("date '{}'".format(cur_time))
-        self.execute_shell_command("hwclock --systohc")
-
     def get_recover_result(self, retry=RETRY_ATTEMPTS):
         command = "param get bootevent.boot.completed"
         stdout = self.execute_shell_command(command, timeout=5 * 1000,
@@ -562,6 +416,7 @@ class Device(IDevice):
         self._proxy = None
         self.remove_ports()
         self.stop_harmony_rpc()
+        self.device_log_collector.stop_restart_catch_device_log()
 
     @property
     def proxy(self):
@@ -796,16 +651,20 @@ class Device(IDevice):
         path = ""
         try:
             temp_path = os.path.join(self._device_log_path, "temp")
+            if not os.path.exists(temp_path):
+                os.makedirs(temp_path)
             path = os.path.join(temp_path, name)
-            self.execute_shell_command(
-                "snapshot_display -f /data/local/tmp/screen.png")
-            self.pull_file("/data/local/tmp/screen.png", path)
+            picture_name = os.path.basename(name)
+            out = self.execute_shell_command(
+                "snapshot_display -f /data/local/tmp/{}".format(picture_name))
+            self.log.debug("result: {}".format(out))
+            if "error" in out and "success" not in out:
+                return False
+            else:
+                self.pull_file("/data/local/tmp/{}".format(picture_name), path)
         except Exception as error:
             self.log.error("devicetest take_picture: {}".format(str(error)))
         return path
-
-    def set_device_report_path(self, path):
-        self._device_log_path = path
 
     def execute_shell_in_daemon(self, command):
         if self.host != "127.0.0.1":
@@ -827,3 +686,179 @@ class Device(IDevice):
                                    else os.setsid,
                                    close_fds=True)
         return process
+
+    @property
+    def device_log_collector(self):
+        if self._device_log_collector is None:
+            self._device_log_collector = DeviceLogCollector(self)
+        return self._device_log_collector
+
+    def set_device_report_path(self, path):
+        self._device_log_path = path
+
+    def get_device_report_path(self):
+        return self._device_log_path
+
+
+class DeviceLogCollector:
+    hilog_file_address = []
+    log_file_address = []
+    device = None
+    restart_proc = []
+
+    def __init__(self, device):
+        self.device = device
+
+    def restart_catch_device_log(self):
+        from xdevice import FilePermission
+        for _, path in enumerate(self.hilog_file_address):
+            hilog_open = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                                 FilePermission.mode_755)
+            with os.fdopen(hilog_open, "a") as hilog_file_pipe:
+                _, proc = self.start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+                self.restart_proc.append(proc)
+
+    def stop_restart_catch_device_log(self):
+        # when device free stop restart log proc
+        for _, proc in enumerate(self.restart_proc):
+            self.stop_catch_device_log(proc)
+        self.restart_proc.clear()
+        self.hilog_file_address.clear()
+        self.log_file_address.clear()
+
+    def start_catch_device_log(self, log_file_pipe=None,
+                               hilog_file_pipe=None):
+        """
+        Starts hdc log for each device in separate subprocesses and save
+        the logs in files.
+        """
+        self._sync_device_time()
+        device_hilog_proc = None
+        if hilog_file_pipe:
+            command = "hilog"
+            if self.device.host != "127.0.0.1":
+                cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.device.host, self.device.port),
+                       "-t", self.device.device_sn, "shell", command]
+            else:
+                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device.device_sn, "shell", command]
+            LOG.info("execute command: %s" % " ".join(cmd).replace(
+                self.device.device_sn, convert_serial(self.device.device_sn)))
+            device_hilog_proc = start_standing_subprocess(
+                cmd, hilog_file_pipe)
+        return None, device_hilog_proc
+
+    def stop_catch_device_log(self, proc):
+        """
+        Stops all hdc log subprocesses.
+        """
+        if proc:
+            stop_standing_subprocess(proc)
+            self.device.log.debug("Stop catch device hilog.")
+
+    def start_hilog_task(self, log_size="50M"):
+        self._sync_device_time()
+        self.clear_crash_log()
+        # 先停止一下
+        cmd = "hilog -w stop"
+        out = self.device.execute_shell_command(cmd)
+        # 清空日志
+        cmd = "hilog -r"
+        out = self.device.execute_shell_command(cmd)
+        cmd = "rm -rf /data/log/hilog/*"
+        out = self.device.execute_shell_command(cmd)
+        # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
+        cmd = "hilog -w start -l {} -n 1000".format(log_size)
+        out = self.device.execute_shell_command(cmd)
+        LOG.info("Execute command: {}, result is {}".format(cmd, out))
+
+    def stop_hilog_task(self, log_name):
+        cmd = "hilog -w stop"
+        out = self.device.execute_shell_command(cmd)
+        self.device.pull_file("/data/log/hilog/", "{}/log/".format(self.device.get_device_report_path()))
+        try:
+            os.rename("{}/log/hilog".format(self.device.get_device_report_path()),
+                      "{}/log/{}_hilog".format(self.device.get_device_report_path(), log_name))
+        except Exception as e:
+            self.device.log.error("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
+            # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
+            cmd = "cd /data/log/hilog && tar -zcvf /data/log/{}_hilog.tar.gz *".format(log_name)
+            out = self.device.execute_shell_command(cmd)
+            LOG.info("Execute command: {}, result is {}".format(cmd, out))
+            if "No space left on device" not in out:
+                self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), "{}/log/".format(self._device_log_path))
+                cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
+                out = self.device.execute_shell_command(cmd)
+        # 获取crash日志
+        self.start_get_crash_log(log_name)
+
+    def _get_log(self, log_cmd, *params):
+        def filter_by_name(log_name, args):
+            for starts_name in args:
+                if log_name.startswith(starts_name):
+                    return True
+            return False
+
+        data_list = list()
+        log_name_array = list()
+        log_result = self.device.execute_shell_command(log_cmd)
+        if log_result is not None and len(log_result) != 0:
+            log_name_array = log_result.strip().replace("\r", "").split("\n")
+        for log_name in log_name_array:
+            log_name = log_name.strip()
+            if len(params) == 0 or \
+                    filter_by_name(log_name, params):
+                data_list.append(log_name)
+        return data_list
+
+    def get_cur_crash_log(self, crash_path, log_name):
+        log_name_map = {'cppcrash': NATIVE_CRASH_PATH,
+                        "jscrash": JS_CRASH_PATH,
+                        "SERVICE_BLOCK": ROOT_PATH,
+                        "appfreeze": ROOT_PATH}
+        if not os.path.exists(crash_path):
+            os.makedirs(crash_path)
+        if "Not support std mode" in log_name:
+            return
+
+        def get_log_path(logname):
+            name_array = logname.split("-")
+            if len(name_array) <= 1:
+                return ROOT_PATH
+            return log_name_map.get(name_array[0])
+
+        log_path = get_log_path(log_name)
+        temp_path = "%s/%s" % (log_path, log_name)
+        self.device.pull_file(temp_path, crash_path)
+        LOG.debug("Finish pull file: %s" % log_name)
+
+    def start_get_crash_log(self, task_name):
+        log_array = list()
+        native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
+        js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
+        block_crash_cmd = '"ls {}"'.format(ROOT_PATH)
+        # 获取crash日志文件
+        log_array.extend(self._get_log(native_crash_cmd, "cppcrash"))
+        log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
+        log_array.extend(self._get_log(block_crash_cmd, "SERVICE_BLOCK", "appfreeze"))
+        LOG.debug("crash log file {}, length is {}".format(str(log_array), str(len(log_array))))
+        crash_path = "{}/log/{}_crash_log/".format(self.device.get_device_report_path(), task_name)
+        for log_name in log_array:
+            log_name = log_name.strip()
+            self.get_cur_crash_log(crash_path, log_name)
+
+    def clear_crash_log(self):
+        clear_block_crash_cmd = "rm -f {}/*".format(ROOT_PATH)
+        clear_native_crash_cmd = "rm -f {}/*".format(NATIVE_CRASH_PATH)
+        clear_debug_crash_cmd = "rm -f {}/debug/*".format(ROOT_PATH)
+        clear_js_crash_cmd = "rm -f {}/*".format(JS_CRASH_PATH)
+        self.device.execute_shell_command(clear_block_crash_cmd)
+        self.device.execute_shell_command(clear_native_crash_cmd)
+        self.device.execute_shell_command(clear_debug_crash_cmd)
+        self.device.execute_shell_command(clear_js_crash_cmd)
+
+    def _sync_device_time(self):
+        # 先同步PC和设备的时间
+        iso_time_format = '%Y-%m-%d %H:%M:%S'
+        cur_time = get_cst_time().strftime(iso_time_format)
+        self.device.execute_shell_command("date '{}'".format(cur_time))
+        self.device.execute_shell_command("hwclock --systohc")
