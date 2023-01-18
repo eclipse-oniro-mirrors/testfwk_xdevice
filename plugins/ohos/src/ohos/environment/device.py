@@ -779,13 +779,14 @@ class DeviceLogCollector:
             os.rename("{}/log/hilog".format(self.device.get_device_report_path()),
                       "{}/log/{}_hilog".format(self.device.get_device_report_path(), log_name))
         except Exception as e:
-            self.device.log.error("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
+            self.device.log.warning("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
             # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
             cmd = "cd /data/log/hilog && tar -zcvf /data/log/{}_hilog.tar.gz *".format(log_name)
             out = self.device.execute_shell_command(cmd)
             LOG.info("Execute command: {}, result is {}".format(cmd, out))
             if "No space left on device" not in out:
-                self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), "{}/log/".format(self._device_log_path))
+                self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name),
+                                      "{}/log/".format(self.device.get_device_report_path()))
                 cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
                 out = self.device.execute_shell_command(cmd)
         # 获取crash日志
