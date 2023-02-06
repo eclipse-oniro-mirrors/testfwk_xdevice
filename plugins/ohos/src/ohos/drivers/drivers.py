@@ -615,6 +615,7 @@ class JSUnitTestDriver(IDriver):
                 label_list[1][j] += 1  # move the index to next
 
     def _analyse_tests(self, request, result_message, expect_tests_dict):
+        exclude_list = self._make_exclude_list_file(request)
         listener_copy = request.listeners.copy()
         parsers = get_plugin(
             Plugin.PARSER, CommonParserType.jsunit)
@@ -630,6 +631,7 @@ class JSUnitTestDriver(IDriver):
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
         handler.parsers[0].expect_tests_dict = expect_tests_dict
+        handler.parsers[0].exclude_list = exclude_list
         process_command_ret(result_message, handler)
 
     @classmethod
@@ -836,6 +838,32 @@ class JSUnitTestDriver(IDriver):
             raise ParamError("Can't find package in config file.",
                              error_no="03201")
         return package, ability_name
+
+    def _make_exclude_list_file(self, request):
+        filter_list = []
+        if "all-test-file-exclude-filter" in self.config.testargs:
+            json_file_list = self.config.testargs.get(
+                "all-test-file-exclude-filter")
+            self.config.testargs.pop("all-test-file-exclude-filter")
+            if not json_file_list:
+                LOG.debug("all-test-file-exclude-filter value is empty!")
+            else:
+                if not os.path.isfile(json_file_list[0]):
+                    LOG.warning(
+                        "[{}] is not a valid file".format(json_file_list[0]))
+                    return []
+                file_open = os.open(json_file_list[0], os.O_RDONLY,
+                                    stat.S_IWUSR | stat.S_IRUSR)
+                with os.fdopen(file_open, "r") as file_handler:
+                    json_data = json.load(file_handler)
+                exclude_list = json_data.get(
+                    DeviceTestType.jsunit_test, [])
+
+                for exclude in exclude_list:
+                    if request.get_module_name() not in exclude:
+                        continue
+                    filter_list.extend(exclude.get(request.get_module_name()))
+        return filter_list
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""

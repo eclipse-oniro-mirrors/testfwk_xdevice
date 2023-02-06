@@ -638,6 +638,7 @@ class JSUnitParser(IParser):
         self.listeners = []
         self.expect_tests_dict = dict()
         self.marked_suite_set = set()
+        self.exclude_list = list()
 
     def get_listeners(self):
         return self.listeners
@@ -653,8 +654,8 @@ class JSUnitParser(IParser):
 
     def parse(self, line):
         if (self.state_machine.suites_is_started() or line.find(
-                _START_JSUNIT_RUN_MARKER) != -1) and line.lower().find(
-                _ACE_LOG_MARKER) != -1:
+                _START_JSUNIT_RUN_MARKER) != -1) and \
+                line.lower().find(_ACE_LOG_MARKER) != -1:
             if line.find(_START_JSUNIT_RUN_MARKER) != -1:
                 self.handle_suites_started_tag()
             elif line.endswith(_END_JSUNIT_RUN_MARKER):
@@ -724,8 +725,14 @@ class JSUnitParser(IParser):
     def handle_one_test_tag(self, message):
         test_name, status, run_time = \
             self.parse_test_description(message)
-        test_result = self.state_machine.test(reset=True)
         test_suite = self.state_machine.suite()
+        if self.exclude_list:
+            qualified_name = "{}#{}".format(test_suite.suite_name, test_name)
+            if qualified_name in self.exclude_list:
+                LOG.debug("{} will be discard!".format(qualified_name))
+                test_suite.test_num -= 1
+                return
+        test_result = self.state_machine.test(reset=True)
         test_result.test_class = test_suite.suite_name
         test_result.test_name = test_name
         test_result.run_time = run_time
@@ -818,6 +825,10 @@ class JSUnitParser(IParser):
         self.marked_suite_set.add(suite.suite_name)
         test_in_cur = self.expect_tests_dict.get(suite.suite_name, [])
         for test in test_in_cur:
+            if "{}#{}".format(suite.suite_name, test.test_name) \
+                    in self.exclude_list:
+                suite.test_num -= 1
+                continue
             if test.test_name not in test_name_list:
                 self._mock_test_case_life_cycle(listeners, test)
 
@@ -856,6 +867,10 @@ class JSUnitParser(IParser):
                 listener.__started__(LifeCycle.TestSuite, suite_report)
 
             for test in test_list:
+                if "{}#{}".format(test_suite.suite_name, test.test_name) \
+                        in self.exclude_list:
+                    test_suite.test_num -= 1
+                    continue
                 self._mock_test_case_life_cycle(self.get_listeners(), test)
 
             test_suite.is_completed = True

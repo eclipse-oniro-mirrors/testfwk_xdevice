@@ -1076,3 +1076,5 @@ def oh_jsunit_para_parse(runner, junit_paras):
                 continue
             # 0/1/2/3/4
             runner.add_arg(para_name, para_values[0])
+        elif para_name == "stress":
+            runner.add_arg(para_name, para_values[0])
