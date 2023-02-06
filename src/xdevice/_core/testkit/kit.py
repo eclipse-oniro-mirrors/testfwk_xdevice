@@ -170,7 +170,7 @@ def gtest_para_parse(gtest_paras, runner, request):
                 with os.fdopen(os.open(json_file_list[0], flags, modes),
                                "r") as file_handler:
                     json_data = json.load(file_handler)
-                exclude_list = json_data.get(DeviceTestType.cpp_test)
+                exclude_list = json_data.get(DeviceTestType.cpp_test, [])
                 for exclude in exclude_list:
                     if request.get_module_name() in exclude:
                         case_list = exclude.get(request.get_module_name())
