@@ -534,15 +534,13 @@ class OHJSUnitTestRunner:
     def _get_run_command(self):
         command = ""
         if self.config.package_name:
-            # aa test -p ${packageName} -b ${bundleName}-s
-            # unittest OpenHarmonyTestRunner
+            # aa test -p ${packageName} -b ${bundleName}-s unittest OpenHarmonyTestRunner
             command = "aa test -p %s -b %s -s unittest OpenHarmonyTestRunner" \
                       " %s" % (self.config.package_name,
                                self.config.bundle_name,
                                self.get_args_command())
         elif self.config.module_name:
-            #  aa test -m ${moduleName}  -b ${bundleName}
-            #  -s unittest OpenHarmonyTestRunner
+            #  aa test -m ${moduleName}  -b ${bundleName} -s unittest OpenHarmonyTestRunner
             command = "aa test -m %s -b %s -s unittest OpenHarmonyTestRunner" \
                       " %s" % (self.config.module_name,
                                self.config.bundle_name,
