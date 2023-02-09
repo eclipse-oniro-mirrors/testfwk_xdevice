@@ -18,6 +18,8 @@
 
 import os
 import time
+import json
+import stat
 
 from xdevice import ConfigConst
 from xdevice import ParamError
@@ -37,7 +39,7 @@ from xdevice import do_module_kit_teardown
 from xdevice import DeviceTestType
 from xdevice import CommonParserType
 from xdevice import FilePermission
-from xdevice import ShellCommandUnresponsiveException
+from xdevice import ResourceManager
 
 from ohos.testkit.kit import oh_jsunit_para_parse
 from ohos.executor.listener import CollectingPassListener
@@ -351,12 +353,17 @@ class OHJSUnitTestDriver(IDriver):
             do_module_kit_setup(request, self.kits)
             self.runner = OHJSUnitTestRunner(self.config)
             self.runner.suites_name = request.get_module_name()
-            if self.rerun:
-                self.runner.retry_times = self.runner.MAX_RETRY_TIMES
-            # execute test case
             self._get_runner_config(json_config)
-            oh_jsunit_para_parse(self.runner, self.config.testargs)
-            self._do_test_run(listener=request.listeners)
+            if hasattr(self.config, "history_report_path") and \
+                    self.config.testargs.get("test"):
+                self._do_test_retry(request.listeners, self.config.testargs)
+            else:
+                if self.rerun:
+                    self.runner.retry_times = self.runner.MAX_RETRY_TIMES
+                    # execute test case
+                self._make_exclude_list_file(request)
+                oh_jsunit_para_parse(self.runner, self.config.testargs)
+                self._do_test_run(listener=request.listeners)
 
         finally:
             do_module_kit_teardown(request)
@@ -467,6 +474,50 @@ class OHJSUnitTestDriver(IDriver):
         LOG.debug("Rerun to rerun third, expect run: %s" % len(expected_tests))
         self._run_tests(listener)
         LOG.debug("Rerun third success")
+        self.runner.notify_finished()
+
+    def _make_exclude_list_file(self, request):
+        if "all-test-file-exclude-filter" in self.config.testargs:
+            json_file_list = self.config.testargs.get(
+                "all-test-file-exclude-filter")
+            self.config.testargs.pop("all-test-file-exclude-filter")
+            if not json_file_list:
+                LOG.warning("all-test-file-exclude-filter value is empty!")
+            else:
+                if not os.path.isfile(json_file_list[0]):
+                    LOG.warning(
+                        "[{}] is not a valid file".format(json_file_list[0]))
+                    return
+                file_open = os.open(json_file_list[0], os.O_RDONLY,
+                                    stat.S_IWUSR | stat.S_IRUSR)
+                with os.fdopen(file_open, "r") as file_handler:
+                    json_data = json.load(file_handler)
+                exclude_list = json_data.get(
+                    DeviceTestType.oh_jsunit_test, [])
+                filter_list = []
+                for exclude in exclude_list:
+                    if request.get_module_name() not in exclude:
+                        continue
+                    filter_list.extend(exclude.get(request.get_module_name()))
+                if not isinstance(self.config.testargs, dict):
+                    return
+                if 'notClass' in self.config.testargs.keys():
+                    filter_list.extend(self.config.testargs.get('notClass', []))
+                self.config.testargs.update({"notClass": filter_list})
+
+    def _do_test_retry(self, listener, testargs):
+        tests_dict = dict()
+        for test in testargs.get("test"):
+            test_item = test.split("#")
+            if len(test_item) != 2:
+                continue
+            if test_item[0] not in tests_dict:
+                tests_dict.update({test_item[0] : []})
+            tests_dict.get(test_item[0]).append(test_item[1])
+            self.runner.add_arg("class", test)
+        self.runner.expect_tests_dict = tests_dict
+        self.config.testargs.pop("test")
+        self.runner.run(listener)
         self.runner.notify_finished()
 
     def __result__(self):
@@ -580,3 +631,93 @@ class OHJSUnitTestRunner:
                                               self.get_args_command())
 
         return command
+
+
+@Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_rust_test)
+class OHRustTestDriver(IDriver):
+    def __init__(self):
+        self.result = ""
+        self.error_message = ""
+        self.config = None
+
+    def __check_environment__(self, device_options):
+        pass
+
+    def __check_config__(self, config):
+        pass
+
+    def __execute__(self, request):
+        try:
+            LOG.debug("Start to execute open harmony rust test")
+            self.config = request.config
+            self.config.device = request.config.environment.devices[0]
+            self.config.target_test_path = "/system/bin"
+
+            suite_file = request.root.source.source_file
+            LOG.debug("Testsuite filepath:{}".format(suite_file))
+
+            if not suite_file:
+                LOG.error("test source '{}' not exists".format(
+                    request.root.source.source_string))
+                return
+
+            self.result = "{}.xml".format(
+                os.path.join(request.config.report_path,
+                             "result", request.get_module_name()))
+            self.config.device.set_device_report_path(request.config.report_path)
+            self.config.device.device_log_collector.start_hilog_task()
+            self._init_oh_rust()
+            self._run_oh_rust(suite_file, request)
+        except Exception as exception:
+            self.error_message = exception
+            if not getattr(exception, "error_no", ""):
+                setattr(exception, "error_no", "03409")
+            LOG.exception(self.error_message, exc_info=False, error_no="03409")
+        finally:
+            serial = "{}_{}".format(str(request.config.device.__get_serial__()),
+                                    time.time_ns())
+            log_tar_file_name = "{}_{}".format(
+                request.get_module_name(), str(serial).replace(":", "_"))
+            self.config.device.device_log_collector.stop_hilog_task(
+                log_tar_file_name)
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message)
+
+    def _init_oh_rust(self):
+        self.config.device.connector_command("target mount")
+        self.config.device.execute_shell_command(
+            "mount -o rw,remount,rw /")
+
+    def _run_oh_rust(self, suite_file, request=None):
+        # push testsuite file
+        self.config.device.pull_file(suite_file, self.config.target_test_path)
+        # push resource file
+        resource_manager = ResourceManager()
+        resource_data_dict, resource_dir = \
+            resource_manager.get_resource_data_dic(suite_file)
+        resource_manager.process_preparer_data(resource_data_dict,
+                                               resource_dir,
+                                               self.config.device)
+        for listener in request.listeners:
+            listener.device_sn = self.config.device.device_sn
+
+        parsers = get_plugin(Plugin.PARSER, CommonParserType.oh_rust)
+        if parsers:
+            parsers = parsers[:1]
+        parser_instances = []
+        for parser in parsers:
+            parser_instance = parser.__class__()
+            parser_instance.suite_name = request.get_module_name()
+            parser_instance.listeners = request.listeners
+            parser_instances.append(parser_instance)
+        handler = ShellHandler(parser_instances)
+
+        command = "cd {}; chmod +x *; ./%{}".format(
+            self.config.target_test_path, os.path.basename(suite_file))
+        self.config.device.execute_shell_command(
+            command, timeout=TIME_OUT, receiver=handler, retry=0)
+        resource_manager.process_cleaner_data(resource_data_dict, resource_dir,
+                                              self.config.device)
+
+    def __result__(self):
+        return self.result if os.path.exists(self.result) else ""

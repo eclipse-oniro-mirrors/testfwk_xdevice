@@ -36,7 +36,7 @@ from xdevice import get_cst_time
 
 __all__ = ["CppTestParser", "CppTestListParser", "JunitParser", "JSUnitParser",
            "OHKernelTestParser", "OHJSUnitTestParser",
-           "OHJSUnitTestListParser", "_ACE_LOG_MARKER"]
+           "OHJSUnitTestListParser", "_ACE_LOG_MARKER", "OHRustTestParser"]
 
 _INFORMATIONAL_MARKER = "[----------]"
 _START_TEST_RUN_MARKER = "[==========] Running"
@@ -638,6 +638,7 @@ class JSUnitParser(IParser):
         self.listeners = []
         self.expect_tests_dict = dict()
         self.marked_suite_set = set()
+        self.exclude_list = list()
 
     def get_listeners(self):
         return self.listeners
@@ -653,8 +654,8 @@ class JSUnitParser(IParser):
 
     def parse(self, line):
         if (self.state_machine.suites_is_started() or line.find(
-                _START_JSUNIT_RUN_MARKER) != -1) and line.lower().find(
-                _ACE_LOG_MARKER) != -1:
+                _START_JSUNIT_RUN_MARKER) != -1) and \
+                line.lower().find(_ACE_LOG_MARKER) != -1:
             if line.find(_START_JSUNIT_RUN_MARKER) != -1:
                 self.handle_suites_started_tag()
             elif line.endswith(_END_JSUNIT_RUN_MARKER):
@@ -724,8 +725,14 @@ class JSUnitParser(IParser):
     def handle_one_test_tag(self, message):
         test_name, status, run_time = \
             self.parse_test_description(message)
-        test_result = self.state_machine.test(reset=True)
         test_suite = self.state_machine.suite()
+        if self.exclude_list:
+            qualified_name = "{}#{}".format(test_suite.suite_name, test_name)
+            if qualified_name in self.exclude_list:
+                LOG.debug("{} will be discard!".format(qualified_name))
+                test_suite.test_num -= 1
+                return
+        test_result = self.state_machine.test(reset=True)
         test_result.test_class = test_suite.suite_name
         test_result.test_name = test_name
         test_result.run_time = run_time
@@ -818,6 +825,10 @@ class JSUnitParser(IParser):
         self.marked_suite_set.add(suite.suite_name)
         test_in_cur = self.expect_tests_dict.get(suite.suite_name, [])
         for test in test_in_cur:
+            if "{}#{}".format(suite.suite_name, test.test_name) \
+                    in self.exclude_list:
+                suite.test_num -= 1
+                continue
             if test.test_name not in test_name_list:
                 self._mock_test_case_life_cycle(listeners, test)
 
@@ -856,6 +867,10 @@ class JSUnitParser(IParser):
                 listener.__started__(LifeCycle.TestSuite, suite_report)
 
             for test in test_list:
+                if "{}#{}".format(test_suite.suite_name, test.test_name) \
+                        in self.exclude_list:
+                    test_suite.test_num -= 1
+                    continue
                 self._mock_test_case_life_cycle(self.get_listeners(), test)
 
             test_suite.is_completed = True
@@ -1375,3 +1390,107 @@ class OHJSUnitTestListParser(IParser):
                             self.tests_dict.get(
                                 class_name.strip()).append(test)
                             self.tests.append(test)
+
+
+@Plugin(type=Plugin.PARSER, id=CommonParserType.oh_rust)
+class OHRustTestParser(IParser):
+
+    def __init__(self):
+        self.test_pattern = "test (?:tests::)?(.+) ... (ok|FAILED)"
+        self.stout_pattern = "---- tests::(.+) stdout ----"
+        self.running_pattern = "running (\\d+) test|tests"
+        self.test_result_pattern = "test result: (ok|FAILED)\\..+finished in (.+)s"
+        self.suite_name = ""
+        self.result_list = list()
+        self.stdout_list = list()
+        self.failures_stdout = list()
+        self.cur_fail_case = ""
+        self.state_machine = StateRecorder()
+        self.listeners = []
+
+    def get_listeners(self):
+        return self.listeners
+
+    def __process__(self, lines):
+        for line in lines:
+            self.parse(line)
+
+    def __done__(self):
+        self.handle_suite_end()
+
+    def parse(self, line):
+        if line.startswith("running"):
+            matcher = re.match(self.running_pattern, line)
+            if not (matcher and matcher.group(1)):
+                return
+            self.handle_suite_start(matcher)
+        elif line.startswith("test result::"):
+            matcher = re.match(self.test_result_pattern, line)
+            if not (matcher and matcher.group(2)):
+                return
+            self.handle_case_lifecycle(matcher)
+
+        elif "..." in line:
+            matcher = re.match(self.test_pattern, line)
+            if not (matcher and matcher.group(1) and matcher.group(2)):
+                return
+            self.collect_case(matcher)
+        elif line.startswith("---- tests::"):
+            matcher = re.match(self.stout_pattern, line)
+            if not (matcher and matcher.group(1)):
+                return
+            self.cur_fail_case = matcher.group(1)
+        else:
+            if self.cur_fail_case:
+                self.handle_stdout(line)
+
+    def handle_case_lifecycle(self, matcher):
+        cost_time = matcher.group(2)
+        for test_result in self.result_list:
+            if self.stdout_list and \
+                    self.stdout_list[0][0] == test_result.test_name:
+                test_result.stacktrace = self.stdout_list[0][1]
+                self.stdout_list.pop(0)
+            test_result.current = self.state_machine.running_test_index + 1
+            for listener in self.get_listeners():
+                test_result = copy.copy(test_result)
+                listener.__started__(LifeCycle.TestCase, test_result)
+            for listener in self.get_listeners():
+                result = copy.copy(test_result)
+                listener.__ended__(LifeCycle.TestCase, result)
+        test_suite = self.state_machine.suite()
+        test_suite.run_time = float(cost_time) * 1000
+
+    def handle_stdout(self, line):
+        if line.strip():
+            self.failures_stdout.append(line.strip())
+        else:
+            self.stdout_list.append((self.cur_fail_case,
+                                     " ".join(self.failures_stdout)))
+            self.cur_fail_case = ""
+            self.failures_stdout.clear()
+
+    def collect_case(self, matcher):
+        test_result = self.state_machine.test(reset=True)
+        test_result.test_class = self.suite_name
+        test_result.test_name = matcher.group(1)
+        test_result.code = ResultCode.PASSED.value if\
+            matcher.group(2) == "ok" else ResultCode.FAILED.value
+        self.result_list.append(test_result)
+
+    def handle_suite_start(self, matcher):
+        self.state_machine.suite(reset=True)
+        test_suite = self.state_machine.suite()
+        test_suite.suite_name = self.suite_name
+        test_suite.test_num = int(matcher.group(1))
+        for listener in self.get_listeners():
+            suite_report = copy.copy(test_suite)
+            listener.__started__(LifeCycle.TestSuite, suite_report)
+
+    def handle_suite_end(self):
+        suite_result = self.state_machine.suite()
+        suite_result.run_time += suite_result.run_time
+        suite_result.is_completed = True
+        for listener in self.get_listeners():
+            suite = copy.copy(suite_result)
+            listener.__ended__(LifeCycle.TestSuite, suite, suite_report=True)
