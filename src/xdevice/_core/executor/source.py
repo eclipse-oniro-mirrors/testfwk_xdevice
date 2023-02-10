@@ -488,10 +488,15 @@ def _generate_config_file(device_labels, filename, ext, test_type):
 
 
 class TestDictSource:
-    exe_type = dict()
-    test_type = dict()
+    exe_type = copy.deepcopy(EXT_TYPE_DICT)
+    test_type = copy.deepcopy(TEST_TYPE_DICT)
 
     @classmethod
     def reset(cls):
         cls.test_type = copy.deepcopy(TEST_TYPE_DICT)
         cls.exe_type = copy.deepcopy(EXT_TYPE_DICT)
+
+    @classmethod
+    def clear(cls):
+        cls.test_type.clear()
+        cls.exe_type.clear()

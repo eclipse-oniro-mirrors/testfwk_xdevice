@@ -108,7 +108,6 @@ class Scheduler(object):
         task = Task(drivers=[])
         task.init(config)
 
-        TestDictSource.reset()
         root_descriptor = self._find_test_root_descriptor(task.config)
         task.set_root_descriptor(root_descriptor)
         return task
@@ -160,7 +159,7 @@ class Scheduler(object):
             LOG.exception(exception, exc_info=False, error_no=error_no)
 
         finally:
-            Scheduler._clear_test_dict_source()
+            Scheduler.reset_test_dict_source()
             if getattr(task.config, ConfigConst.test_environment, "") or \
                     getattr(task.config, ConfigConst.configfile, ""):
                 self._restore_environment()
@@ -1227,9 +1226,12 @@ class Scheduler(object):
         TestDictSource.exe_type[key] = value
 
     @classmethod
-    def _clear_test_dict_source(cls):
-        TestDictSource.exe_type.clear()
-        TestDictSource.test_type.clear()
+    def clear_test_dict_source(cls):
+        TestDictSource.clear()
+
+    @classmethod
+    def reset_test_dict_source(cls):
+        TestDictSource.reset()
 
     @classmethod
     def _pre_component_test(cls, config):
