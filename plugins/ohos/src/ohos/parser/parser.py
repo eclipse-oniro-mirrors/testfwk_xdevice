@@ -1413,6 +1413,7 @@ class OHRustTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            LOG.debug(line)
             self.parse(line)
 
     def __done__(self):
