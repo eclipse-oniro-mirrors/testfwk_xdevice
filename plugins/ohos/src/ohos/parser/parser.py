@@ -1424,7 +1424,7 @@ class OHRustTestParser(IParser):
             if not (matcher and matcher.group(1)):
                 return
             self.handle_suite_start(matcher)
-        elif line.startswith("test result::"):
+        elif line.startswith("test result:"):
             matcher = re.match(self.test_result_pattern, line)
             if not (matcher and matcher.group(2)):
                 return
@@ -1447,10 +1447,11 @@ class OHRustTestParser(IParser):
     def handle_case_lifecycle(self, matcher):
         cost_time = matcher.group(2)
         for test_result in self.result_list:
-            if self.stdout_list and \
-                    self.stdout_list[0][0] == test_result.test_name:
-                test_result.stacktrace = self.stdout_list[0][1]
-                self.stdout_list.pop(0)
+            if test_result.code == ResultCode.FAILED.value:
+                if self.stdout_list and \
+                        self.stdout_list[0][0] == test_result.test_name:
+                    test_result.stacktrace = self.stdout_list[0][1]
+                    self.stdout_list.pop(0)
             test_result.current = self.state_machine.running_test_index + 1
             for listener in self.get_listeners():
                 test_result = copy.copy(test_result)
@@ -1474,7 +1475,7 @@ class OHRustTestParser(IParser):
         test_result = self.state_machine.test(reset=True)
         test_result.test_class = self.suite_name
         test_result.test_name = matcher.group(1)
-        test_result.code = ResultCode.PASSED.value if\
+        test_result.code = ResultCode.PASSED.value if \
             matcher.group(2) == "ok" else ResultCode.FAILED.value
         self.result_list.append(test_result)
 
