@@ -690,7 +690,7 @@ class OHRustTestDriver(IDriver):
 
     def _run_oh_rust(self, suite_file, request=None):
         # push testsuite file
-        self.config.device.pull_file(suite_file, self.config.target_test_path)
+        self.config.device.push_file(suite_file, self.config.target_test_path)
         # push resource file
         resource_manager = ResourceManager()
         resource_data_dict, resource_dir = \
@@ -712,7 +712,7 @@ class OHRustTestDriver(IDriver):
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
 
-        command = "cd {}; chmod +x *; ./%{}".format(
+        command = "cd {}; chmod +x *; ./{}".format(
             self.config.target_test_path, os.path.basename(suite_file))
         self.config.device.execute_shell_command(
             command, timeout=TIME_OUT, receiver=handler, retry=0)
