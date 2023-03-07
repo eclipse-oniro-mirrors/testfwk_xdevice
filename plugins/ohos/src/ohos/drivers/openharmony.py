@@ -361,6 +361,7 @@ class OHJSUnitTestDriver(IDriver):
                 if self.rerun:
                     self.runner.retry_times = self.runner.MAX_RETRY_TIMES
                     # execute test case
+                self._do_tf_suite()
                 self._make_exclude_list_file(request)
                 oh_jsunit_para_parse(self.runner, self.config.testargs)
                 self._do_test_run(listener=request.listeners)
@@ -519,6 +520,12 @@ class OHJSUnitTestDriver(IDriver):
         self.config.testargs.pop("test")
         self.runner.run(listener)
         self.runner.notify_finished()
+
+    def _do_tf_suite(self):
+        if hasattr(self.config, "tf_suite") and \
+                self.config.tf_suite.get("cases", []):
+            case_list = self.config["tf_suite"]["cases"]
+            self.config.testargs.update({"class": case_list})
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""

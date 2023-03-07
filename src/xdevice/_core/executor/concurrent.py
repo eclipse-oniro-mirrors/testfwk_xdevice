@@ -248,7 +248,12 @@ class DriversThread(threading.Thread):
                 if "class" in test_args.keys():
                     test_args.pop("class")
                 setattr(config, "testargs", test_args)
-
+        if getattr(config, "tf_suite", ""):
+            if root_desc.source.module_name in config.tf_suite.keys():
+                config.tf_suite = config.tf_suite.get(
+                    root_desc.source.module_name)
+            else:
+                config.tf_suite = dict()
         for listener in self.listeners:
             LOG.debug("Thread id %s, listener %s" % (self.thread_id, listener))
         driver_request = Request(self.thread_id, root_desc, self.listeners,
