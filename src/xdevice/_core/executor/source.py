@@ -191,9 +191,15 @@ def _get_test_sources(config, testcases_dirs):
         flags = os.O_RDONLY
         modes = stat.S_IWUSR | stat.S_IRUSR
         with os.fdopen(os.open(test_file, flags, modes), "r") as file_content:
-            for line in file_content:
-                if line.strip():
-                    test_sources.append(line.strip())
+            if str(test_file).endswith(".json"):
+                content = file_content.read()
+                source_list, case_dict = parse_source_from_data(content)
+                test_sources.extend(source_list)
+                config.tf_suite = case_dict
+            else:
+                for line in file_content:
+                    if line.strip():
+                        test_sources.append(line.strip())
 
         # get test sources from config.testcase
     if getattr(config, ConfigConst.testcase, ""):
@@ -486,6 +492,16 @@ def _generate_config_file(device_labels, filename, ext, test_type):
         save_handler.write(json.dumps(top_dict, indent=4))
     return save_file, test_type
 
+
+def parse_source_from_data(content):
+    source_list = list()
+    data = dict(json.loads(content))
+    case_dict = dict()
+    for item in data.get("suite", list()):
+        name = item.get("module_name", "")
+        case_dict.update({name: item})
+        source_list.append(name)
+    return source_list, case_dict
 
 class TestDictSource:
     exe_type = copy.deepcopy(EXT_TYPE_DICT)
