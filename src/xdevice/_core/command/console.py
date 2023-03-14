@@ -436,6 +436,8 @@ class Console(object):
             self._process_command_quit(command)
         elif command.startswith(ToolCommandType.toolcmd_key_list):
             self._process_command_list(command, para_list)
+        elif command.startswith(ToolCommandType.toolcmd_key_tool):
+            self._process_command_tool(command, para_list, options)
         else:
             LOG.error("Unsupported command action", error_no="00100",
                       action=command)
@@ -534,6 +536,16 @@ class Console(object):
         else:
             LOG.error("Wrong exit command. Use 'quit' to quit program")
         return
+
+    def _process_command_tool(cls, command, para_list, options):
+        if not command.startswith(ToolCommandType.toolcmd_key_tool):
+            LOG.error("Wrong tool command.")
+            return
+        if len(para_list) > 2:
+            if para_list[1] == ConfigConst.renew_report:
+                if options.report_path:
+                    report_list = str(options.report_path).split(";")
+                    cls._renew_report(report_list)
 
     @staticmethod
     def _parse_combination_param(combination_value):
@@ -733,6 +745,16 @@ class Console(object):
             option_str_list = [("report_path", "-rp", "--reportpath"),
                                ("device_sn", "-sn", "--device_sn")]
         return option_str_list
+
+    @classmethod
+    def _renew_report(cls, report_list):
+        from _core.report.__main__ import main_report
+        for report in report_list:
+            run_command = Scheduler.command_queue.pop()
+            Scheduler.command_queue.append(("", run_command, report))
+            sys.argv.insert(1, report)
+            main_report()
+            sys.argv.pop(1)
 
 
 RUN_INFORMATION = """run:
