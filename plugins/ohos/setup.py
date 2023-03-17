@@ -46,8 +46,6 @@ def main():
               'driver': [
                   'drivers=ohos.drivers.drivers',
                   'drivers_lite=ohos.drivers.drivers_lite',
-                  'homevision=ohos.drivers.homevision',
-                  'kunpeng=ohos.drivers.kunpeng',
                   'openharmony=ohos.drivers.openharmony'
               ],
               'listener': [

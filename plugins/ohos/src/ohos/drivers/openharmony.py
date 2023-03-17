@@ -18,6 +18,8 @@
 
 import os
 import time
+import json
+import stat
 
 from xdevice import ConfigConst
 from xdevice import ParamError
@@ -37,7 +39,6 @@ from xdevice import do_module_kit_teardown
 from xdevice import DeviceTestType
 from xdevice import CommonParserType
 from xdevice import FilePermission
-from xdevice import ShellCommandUnresponsiveException
 
 from ohos.testkit.kit import oh_jsunit_para_parse
 from ohos.executor.listener import CollectingPassListener
@@ -61,6 +62,11 @@ class OHKernelTestDriver(IDriver):
         self.kits = []
         self.config = None
         self.runner = None
+        # log
+        self.device_log = None
+        self.hilog = None
+        self.log_proc = None
+        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -80,24 +86,25 @@ class OHKernelTestDriver(IDriver):
             self.result = "%s.xml" % \
                           os.path.join(request.config.report_path,
                                        "result", request.get_module_name())
-            device_log = get_device_log_file(
+            self.device_log = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
                 "device_log")
 
-            hilog = get_device_log_file(
+            self.hilog = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
                 "device_hilog")
 
-            device_log_open = os.open(device_log, os.O_WRONLY | os.O_CREAT |
+            device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT |
                                       os.O_APPEND, FilePermission.mode_755)
-            hilog_open = os.open(hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  FilePermission.mode_755)
+            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
             with os.fdopen(device_log_open, "a") as log_file_pipe, \
                     os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.config.device.start_catch_device_log(log_file_pipe,
-                                                          hilog_file_pipe)
+                self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
+                    start_catch_device_log(log_file_pipe, hilog_file_pipe)
                 self._run_oh_kernel(config_file, request.listeners, request)
                 log_file_pipe.flush()
                 hilog_file_pipe.flush()
@@ -109,7 +116,9 @@ class OHKernelTestDriver(IDriver):
             raise exception
         finally:
             do_module_kit_teardown(request)
-            self.config.device.stop_catch_device_log()
+            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
+            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
+            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
@@ -217,6 +226,11 @@ class OHJSUnitTestDriver(IDriver):
         self.runner = None
         self.rerun = True
         self.rerun_all = True
+        # log
+        self.device_log = None
+        self.hilog = None
+        self.log_proc = None
+        self.hilog_proc = None
 
     def __check_environment__(self, device_options):
         pass
@@ -242,20 +256,22 @@ class OHJSUnitTestDriver(IDriver):
                     request.root.source.source_string, error_no="00110")
             LOG.debug("Test case file path: %s" % suite_file)
             self.config.device.set_device_report_path(request.config.report_path)
-            hilog = get_device_log_file(request.config.report_path,
+            self.hilog = get_device_log_file(request.config.report_path,
                                         request.config.device.__get_serial__() + "_" + request.
                                         get_module_name(),
                                         "device_hilog")
 
-            hilog_open = os.open(hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  0o755)
+            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
             self.config.device.execute_shell_command(command="hilog -r")
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
                 if hasattr(self.config, "device_log") \
                         and self.config.device_log == ConfigConst.device_log_on \
                         and hasattr(self.config.device, "clear_crash_log"):
-                    self.config.device.clear_crash_log()
-                self.config.device.start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+                    self.config.device.device_log_collector.clear_crash_log()
+                self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
+                    start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
                 self._run_oh_jsunit(config_file, request)
         except Exception as exception:
             self.error_message = exception
@@ -270,8 +286,10 @@ class OHJSUnitTestDriver(IDriver):
             if hasattr(self.config, "device_log") and \
                     self.config.device_log == ConfigConst.device_log_on \
                     and hasattr(self.config.device, "start_get_crash_log"):
-                self.config.device.start_get_crash_log(log_tar_file_name)
-            self.config.device.stop_catch_device_log()
+                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
+            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
+            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
+            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
@@ -334,12 +352,17 @@ class OHJSUnitTestDriver(IDriver):
             do_module_kit_setup(request, self.kits)
             self.runner = OHJSUnitTestRunner(self.config)
             self.runner.suites_name = request.get_module_name()
-            if self.rerun:
-                self.runner.retry_times = self.runner.MAX_RETRY_TIMES
-            # execute test case
             self._get_runner_config(json_config)
-            oh_jsunit_para_parse(self.runner, self.config.testargs)
-            self._do_test_run(listener=request.listeners)
+            if hasattr(self.config, "history_report_path") and \
+                    self.config.testargs.get("test"):
+                self._do_test_retry(request.listeners, self.config.testargs)
+            else:
+                if self.rerun:
+                    self.runner.retry_times = self.runner.MAX_RETRY_TIMES
+                    # execute test case
+                self._make_exclude_list_file(request)
+                oh_jsunit_para_parse(self.runner, self.config.testargs)
+                self._do_test_run(listener=request.listeners)
 
         finally:
             do_module_kit_teardown(request)
@@ -450,6 +473,50 @@ class OHJSUnitTestDriver(IDriver):
         LOG.debug("Rerun to rerun third, expect run: %s" % len(expected_tests))
         self._run_tests(listener)
         LOG.debug("Rerun third success")
+        self.runner.notify_finished()
+
+    def _make_exclude_list_file(self, request):
+        if "all-test-file-exclude-filter" in self.config.testargs:
+            json_file_list = self.config.testargs.get(
+                "all-test-file-exclude-filter")
+            self.config.testargs.pop("all-test-file-exclude-filter")
+            if not json_file_list:
+                LOG.warning("all-test-file-exclude-filter value is empty!")
+            else:
+                if not os.path.isfile(json_file_list[0]):
+                    LOG.warning(
+                        "[{}] is not a valid file".format(json_file_list[0]))
+                    return
+                file_open = os.open(json_file_list[0], os.O_RDONLY,
+                                    stat.S_IWUSR | stat.S_IRUSR)
+                with os.fdopen(file_open, "r") as file_handler:
+                    json_data = json.load(file_handler)
+                exclude_list = json_data.get(
+                    DeviceTestType.oh_jsunit_test, [])
+                filter_list = []
+                for exclude in exclude_list:
+                    if request.get_module_name() not in exclude:
+                        continue
+                    filter_list.extend(exclude.get(request.get_module_name()))
+                if not isinstance(self.config.testargs, dict):
+                    return
+                if 'notClass' in self.config.testargs.keys():
+                    filter_list.extend(self.config.testargs.get('notClass', []))
+                self.config.testargs.update({"notClass": filter_list})
+
+    def _do_test_retry(self, listener, testargs):
+        tests_dict = dict()
+        for test in testargs.get("test"):
+            test_item = test.split("#")
+            if len(test_item) != 2:
+                continue
+            if test_item[0] not in tests_dict:
+                tests_dict.update({test_item[0] : []})
+            tests_dict.get(test_item[0]).append(test_item[1])
+            self.runner.add_arg("class", test)
+        self.runner.expect_tests_dict = tests_dict
+        self.config.testargs.pop("test")
+        self.runner.run(listener)
         self.runner.notify_finished()
 
     def __result__(self):

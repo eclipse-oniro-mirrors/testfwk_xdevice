@@ -183,13 +183,12 @@ class LogListener(IListener):
                                  .format(test_result.test_class, test_result.test_name))
             ret = ResultCode(test_result.code).name
             if self.test_num:
-                self.log_queue.info(log_data="[{}/{} {}] {}#{} {}"
-                                    .format(test_result.current, self.test_num,
-                                            convert_serial(self.device_sn), test_result.test_class,
-                                            test_result.test_name, ret))
+                self.log_queue.debug(log_data="[{}/{} {}] {}#{} {}".
+                                     format(test_result.current, self.test_num, convert_serial(self.device_sn),
+                                            test_result.test_class, test_result.test_name, ret))
             else:
-                self.log_queue.info(log_data="[{}/- {}] {}#{} {}"
-                                    .format(test_result.current, convert_serial(self.device_sn),
+                self.log_queue.debug(log_data="[{}/- {}] {}#{} {}".
+                                     format(test_result.current, convert_serial(self.device_sn),
                                             test_result.test_class, test_result.test_name, ret))
 
     @staticmethod
