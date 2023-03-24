@@ -594,11 +594,11 @@ class Scheduler(object):
         params = ResultReporter.get_task_info_params(
             history_report_path)
 
-        if not params or not params[4]:
+        if not params or not params[ReportConst.data_reports]:
             LOG.debug("Task info record data reports is empty")
             return
 
-        report_data_dict = dict(params[4])
+        report_data_dict = dict(params[ReportConst.data_reports])
         if module_name not in report_data_dict.keys():
             module_name_ = str(module_name).split(".")[0]
             if module_name_ not in report_data_dict.keys():
