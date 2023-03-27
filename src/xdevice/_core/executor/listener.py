@@ -175,21 +175,22 @@ class LogListener(IListener):
         from _core.utils import convert_serial
         del kwargs
         if lifecycle == LifeCycle.TestSuite:
-            self.log_queue.debug(log_data="End test suite [{}] and cost {}ms."
-                                 .format(test_result.suite_name, test_result.run_time))
-            self.log_queue.clear()
+            self.log_queue.debug(log_data="End test suite cost {}ms."
+                                 .format(test_result.run_time), clear=True)
+            self.log_queue.info(log_data="End test suite [{}]."
+                                .format(test_result.suite_name), clear=True)
         elif lifecycle == LifeCycle.TestCase:
             self.log_queue.debug(log_data="TestEnded({}#{})"
                                  .format(test_result.test_class, test_result.test_name))
             ret = ResultCode(test_result.code).name
             if self.test_num:
-                self.log_queue.debug(log_data="[{}/{} {}] {}#{} {}".
-                                     format(test_result.current, self.test_num, convert_serial(self.device_sn),
-                                            test_result.test_class, test_result.test_name, ret))
+                self.log_queue.info(log_data="[{}/{} {}] {}#{} {}".
+                                    format(test_result.current, self.test_num, convert_serial(self.device_sn),
+                                           test_result.test_class, test_result.test_name, ret))
             else:
-                self.log_queue.debug(log_data="[{}/- {}] {}#{} {}".
-                                     format(test_result.current, convert_serial(self.device_sn),
-                                            test_result.test_class, test_result.test_name, ret))
+                self.log_queue.info(log_data="[{}/- {}] {}#{} {}".
+                                    format(test_result.current, convert_serial(self.device_sn),
+                                           test_result.test_class, test_result.test_name, ret))
 
     @staticmethod
     def __skipped__(lifecycle, test_result, **kwargs):
