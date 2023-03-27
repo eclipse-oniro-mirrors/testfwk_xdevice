@@ -1,28 +1,28 @@
-# xdevice组件<a name="ZH-CN_TOPIC_0000001083129731"></a>
+# xdevice
+- [xdevice](#xdevice组件)
+  - [简介](#简介)
+  - [目录](#目录)
+  - [约束](#约束)
+  - [使用](#使用)
+  - [相关资料](#相关资料)
+  - [相关仓](#相关仓)
 
--   [简介](#section15701932113019)
--   [目录](#section1791423143211)
--   [约束](#section118067583303)
--   [使用](#section2036431583)
--   [相关仓](#section260848241)
-
-## 简介<a name="section15701932113019"></a>
-
+## 简介
 xdevice是OpenHarmony中为测试框架的核心组件，提供用例执行所依赖的相关服务。
 
 xdevice主要包括以下几个主要模块：
 
--   command，用户与测试平台命令行交互模块，提供用户输入命令解析，命令处理。
--   config，测试框架配置模块，提供测试平台串口连接方式和USB连接方式的不同配置选项。
--   driver，测试用例执行器，提供测试用例分发，执行，结果收集等主要测试步骤定义。
--   report，测试报告模块，提供测试结果解析和测试报告生成。
--   scheduler，测试框架调度模块，提供不同类型的测试执行器调度的调度功能。
--   environment，测试框架的环境配置模块，提供设备发现，设备管理的功能。
--   testkit，测试框架工具模块，提供json解析，网络文件挂载等操作。
--   resource，测试框架资源模块，提供设备连接配置文件和报告模板定义。
+- command，用户与测试平台命令行交互模块，提供用户输入命令解析，命令处理。
+- config，测试框架配置模块，提供测试平台串口连接方式和USB连接方式的不同配置选项。
+- driver，测试用例执行器，提供测试用例分发，执行，结果收集等主要测试步骤定义。
+- report，测试报告模块，提供测试结果解析和测试报告生成。
+- scheduler，测试框架调度模块，提供不同类型的测试执行器调度的调度功能。
+- environment，测试框架的环境配置模块，提供设备发现，设备管理的功能。
+- testkit，测试框架工具模块，提供json解析，网络文件挂载等操作。
+- resource，测试框架资源模块，提供设备连接配置文件和报告模板定义。
 
-## 目录<a name="section1791423143211"></a>
 
+## 目录
 ```
 xdevice
 ├── config                    # xdevice组件配置
@@ -33,192 +33,301 @@ xdevice
 |     |—— ohos                # openharmony测试驱动插件
 │           ├── src           # 扩展模块源码
 │           └── setup.py      # ohos扩展模块安装脚本
+|     |--devicetest           # devicetest测试驱动插件
+|           └── setup.py      # deviectest扩展模块安装脚本
 ```
 
-## 约束<a name="section118067583303"></a>
 
+## 约束
 运行环境要求：
 
--   python版本\>=3.7.5
--   pyserial\>=3.3
--   paramiko\>=2.7.1
--   rsa\>=4.0
+- python版本>=3.7.5
+- pyserial>=3.3
+- paramiko>=2.7.1
+- rsa>=4.0
 
-## 使用<a name="section2036431583"></a>
+## 使用
+- **安装xdevice**
 
--   **安装xdevice**
-    1.  打开xdevice安装目录。
-    2.  打开控制台，执行如下命令：
+  1. 打开xdevice安装目录。
 
-        ```
-        python setup.py install
-        ```
+  2. 打开控制台，执行如下命令：
+    ```
+    python setup.py install
+    ```
 
+- **安装ohos扩展模块**
 
--   **安装extension**
-    1.  打开extension安装目录。
-    2.  打开控制台，执行如下命令：
+  1. 打开plugins\ohos安装目录。
 
-        ```
-        python setup.py install
-        ```
+  2. 打开控制台，执行如下命令：
+    ```
+    python setup.py install
+    ```
 
-
--   **修改user\_config.xml**
+- **修改user\_config.xml**
 
     user\_config.xml是框架提供的用户配置文件，用户可以根据自身环境信息配置相关内容，具体介绍如下：
 
-    **1、environment环境相关配置：**
+    1. **environment环境相关配置**
 
-    -   设备类型一
-
-        >![](figures/icon-note.gif) **说明：** 
-        >ip/port: 表示远程设备地址，默认情况为空，表示使用本地设备，ip地址为127.0.0.1，port为本机hdc启动端口号；
-        >​sn: 过滤执行测试设备，若设置为SN1，则表示只有设备SN1能够支持后续run命令执行，其他设备分配状态设置为Ignored，不参与命令执行，可通过list devices命令中Allocation字段来查看sn设置，可配置多个sn，中间以;隔开；
-
-    -   设备类型二
-
-        >![](figures/icon-note.gif) **说明：** 
-        >type: 设备连接方式，com表示连接方式是串口
-        >label: 表示设备种类，如wifiiot
-        >serial: 表示一个串口定义
-        >serial/com 表示本地连接的串口，如COM20 serial/type 表示串口类型，cmd是命令串口，deploy是刷机串口，社区版本cmd和deploy使用同一个串口，com值相同
-        >serial/baud\_rate、data\_bits、stop\_bits、timeout: 为串口波特率等串口参数 ，一般采用默认值即可。
-
-
-    **2、测试用例目录设置**
+       以下列出三种device配置。
     
-    dir: 指定测试用例目录。
+       ```xml
+       <environment>
+           <!-- 标准系统设备配置>
+           <device type="usb-hdc"> <!-- type: 设备连接方式,usb-hdc表示使用hdc命令控制设备(默认) -->
+               <ip></ip> <!-- ip: 远端设备地址,ip和port为空时使用本地设备,非空时使用远端设备 -->
+               <port></port> <!-- port: 远端设备端口号 -->
+               <sn></sn> <!-- sn: 设备串口号列表,串口号之间用分号;分隔,sn为空时使用所有本地设备,非空时使用指定的sn设备 -->
+           </device>
+       
+           <!-- 轻量系统设备配置(轻量系统设备进行测试时，需要刷入已经集成好测试用例的系统，所以需要配置两个串口进行通信，如设备支持，可以将两个serial标签的com口设置为一致)，可配置多个 -->
+           <device type="com" label="wifiiot"> <!-- type: 设备连接方式，com表示连接方式为串口；label：设备种类，如wifiiot -->
+               <serial> <!-- serial：表示一个串口定义 -->
+                   <com></com> <!-- serial：表示本地连接的串口，如COM4 -->
+                   <type>cmd</type> <!-- type：表示串口类型，cmd为命令串口 -->
+                   <baud_rate>115200</baud_rate> <!-- baud_rate、data_bits、stop_bits、timeout：为串口波特率等串口参数，一般采用默认值即可 -->
+                   <data_bits>8</data_bits>
+                   <stop_bits>1</stop_bits>
+                   <timeout>20</timeout>
+               </serial>
+               <serial>
+                   <com></com>
+                   <type>deploy</type> <!-- type：表示串口类型，cmd为刷机串口 -->
+                   <baud_rate>115200</baud_rate>
+               </serial>
+           </device>
+       
+           <!-- 小型系统设备配置，可配置多个 -->
+           <device type="com" label="ipcamera">
+               <serial>
+                   <com></com>
+                   <type>cmd</type>
+                   <baud_rate>115200</baud_rate>
+                   <data_bits>8</data_bits>
+                   <stop_bits>1</stop_bits>
+                   <timeout>1</timeout>
+               </serial>
+           </device>
+           <device type="com" label="ipcamera">
+               <ip></ip>
+               <port></port>
+           </device>
+       </environment>
+       ```
+
+    2. **测试用例目录设置**
     
-    **3、nfs挂载**
+       以下为testcase标签内容及作用。
     
-    >![](figures/icon-note.gif) **说明：** 
-    >server: nfs挂载配置，label取值为NfsServer。
-    >server/ip: 挂载环境IP地址。
-    >server/port: 挂载环境端口。
-    >server/username: 登录用户名。
-    >server/password: 登录用户密码。
-    >server/dir: 对应挂载的外部路径。
-    >server/remote: nfs服务器与xDevice执行机不在同一台机器时，remote配置为true，否则为false。
+       ```xml
+       <testcases>
+           <!-- dir标签和server标签同时配置时只有一个会起作用 -->
+           <!-- 指定测试用例目录，为空则默认设置为当前项目下的testcase文件夹 -->
+           <dir></dir>
+           <!-- nfs挂载配置，label取值为NfsServer -->
+           <server label="NfsServer">
+               <ip></ip>   <!-- 挂载环境IP地址 -->
+               <port></port>  <!-- 挂载环境端口 -->
+               <dir></dir>  <!-- 对应挂载的外部路径 -->
+               <username></username>  <!-- 登录用户名(remote为false时，可不填或删除) -->
+               <password></password> <!-- 登录密码(remote为false时，可不填或删除) -->
+               <remote></remote> <!-- nfs服务器与xDevice执行机不在同一机器时，remote配置为true，否则为false -->
+           </server>
+       </testcases>
+       ```
+    
+    3. **资源目录设置**
+    
+       以下为resource标签内容及作用。
+    
+       ```xml
+       <resource>
+           <!-- 指定资源目录，为空则默认设置为当前项目下的resource文件夹 -->
+           <dir></dir>
+       </resource>
+       ```
+    
+    4. **日志打印等级设置**
+    
+       以下为loglevel标签内容及作用。
+    
+       ```xml
+       <!-- 默认为INFO，如需更详细信息可设置为DEBUG -->
+       <loglevel>INFO</loglevel>
+       ```
+
 
 -   **选定任务类型**
--   **启动框架**
--   **执行指令**
+    
+    设备执行的测试支撑套件是由测试配置文件所指定。
 
-    框架指令可以分为三组：help、list、run。在指令序列中，以run为最常用的执行指令。
+    每类XTS测试套都有一个json格式的测试配置文件，主要配置了需要使用的kits(测试支撑套件)等信息，执行预制和清理操作。
 
-    **1、help**
+    以下为某个测试支撑套件的json配置文件样例。
 
-    输入help指令可以查询框架指令帮助信息。
-
+    ```json
+    {
+        //测试支撑套件描述
+        "description":"Configuration for acecshi Tests",
+    
+        //指定执行当前测试支撑套件的设备
+        //environment设置为可选,如不设置,将从框架中注册的设备中选择一个符合的空闲设备执行用例
+        "environment":{
+              "type":"device",
+              "label":"wifiiot"
+        },
+    
+        //指定设备执行的驱动
+        "driver":{
+            "type":"OHJSUnitTest",
+            "test-timeout":"700000",
+            "bundle-name":"com.open.harmony.acetestfive",
+            "package-name":"com.open.harmony.acetestfive",
+            "shell-timeout":"700000",
+        },
+    
+        //kit的作用是为了支撑测试执行活动
+        "kits":[
+            {
+              "type":"ShellKit",
+              "run-command":[
+                "remount",
+                "mkdir /data/data/resource"
+              ],
+              "teardown-command":[
+                "remount",
+                "rm -rf /data/data/resource"
+              ]
+            }
+        ]
+    }
     ```
-    help:
+
+
+- **启动框架**
+  
+  可以通过以下几种方式启动框架
+  - Linux系统可以运行根目录下的run.sh文件
+  - Windows系统可以运行根目录下的run.bat文件
+  - Linux和Windows系统皆可运行项目目录下的src\xdevice\\\_\__main___.py文件
+
+- **执行指令**
+
+  框架指令可以分为三组：help、list、run。在指令序列中，以run为最常用的执行指令。
+
+  1. **help**
+
+     输入help指令可以查询框架指令帮助信息。
+
+     ```bash
+     help:
          use help to get information.  
-    usage:
+     usage:
          run:  Display a list of supported run command.
          list: Display a list of supported device and task record.  
-    Examples:
+     Examples:
          help run
          help list
-    ```
+     ```
 
-    >![](figures/icon-note.gif) **说明：** 
-    >help run：展示run指令相关说明
-    >help list：展示 list指令相关说明
+     说明： help run：展示run指令相关说明 help list：展示 list指令相关说明。
 
-    **2、list**
+  2. **list**
 
-    list指令用来展示设备和相关的任务信息
+     list指令用来展示设备和相关的任务信息。
 
-    ```
-    list:
+     ```bash
+     list:
          This command is used to display device list and task record.  
-    usage:
-          list
-          list history
-          list <id>  
-    Introduction:
+     usage:
+           list
+           list history
+           list <id>  
+     Introduction:
          list:         display device list
          list history: display history record of a serial of tasks
          list <id>:    display history record about task what contains specific id  
-    Examples:
+     Examples:
          list
          list history
          list 6e****90
-    ```
+     ```
 
-    >![](figures/icon-note.gif) **说明：** 
-    >list: 展示设备信息
-    >list history: 展示任务历史信息
-    >list <id\>: 展示特定id的任务其历史信息
+     说明： list: 展示设备信息 list history: 展示任务历史信息 list <id>: 展示特定id的任务其历史信息。
 
-    **3、run**
+  3. **run**
 
-    run指令主要用于执行测试任务
+     run指令主要用于执行测试任务。
 
-    ```
-    run:
+     ```bash
+     run:
          This command is used to execute the selected testcases.
          It includes a series of processes such as use case compilation, execution, and result collection.  
-    usage: run [-l TESTLIST [TESTLIST ...] | -tf TESTFILE
-                [TESTFILE ...]] [-tc TESTCASE] [-c CONFIG] [-sn DEVICE_SN]
-                [-rp REPORT_PATH [REPORT_PATH ...]]
-                [-respath RESOURCE_PATH [RESOURCE_PATH ...]]
-                [-tcpath TESTCASES_PATH [TESTCASES_PATH ...]]
-                [-ta TESTARGS [TESTARGS ...]] [-pt]
-                [-env TEST_ENVIRONMENT [TEST_ENVIRONMENT ...]]
-                [-e EXECTYPE] [-t [TESTTYPE [TESTTYPE ...]]]
-                [-td TESTDRIVER] [-tl TESTLEVEL] [-bv BUILD_VARIANT]
-                [-cov COVERAGE] [--retry RETRY] [--session SESSION]
-                [--dryrun] [--reboot-per-module] [--check-device]
-                [--repeat REPEAT]
-                action task  
-    Specify tests to run.
-      positional arguments:
+     usage: run [-l TESTLIST [TESTLIST ...] | -tf TESTFILE
+                 [TESTFILE ...]] [-tc TESTCASE] [-c CONFIG] [-sn DEVICE_SN]
+                 [-rp REPORT_PATH [REPORT_PATH ...]]
+                 [-respath RESOURCE_PATH [RESOURCE_PATH ...]]
+                 [-tcpath TESTCASES_PATH [TESTCASES_PATH ...]]
+                 [-ta TESTARGS [TESTARGS ...]] [-pt]
+                 [-env TEST_ENVIRONMENT [TEST_ENVIRONMENT ...]]
+                 [-e EXECTYPE] [-t [TESTTYPE [TESTTYPE ...]]]
+                 [-td TESTDRIVER] [-tl TESTLEVEL] [-bv BUILD_VARIANT]
+                 [-cov COVERAGE] [--retry RETRY] [--session SESSION]
+                 [--dryrun] [--reboot-per-module] [--check-device]
+                 [--repeat REPEAT]
+                 action task  
+     Specify tests to run.
+       positional arguments:
        action                Specify action
        task                  Specify task name,such as "ssts", "acts", "hits"
-    ```
+     ```
 
-    >![](figures/icon-note.gif) **说明：** 
-    >一个基本的run指令结构如下：
-    >```
-    >run [task name] -l module1;moudle2
-    >```
-    >task name：任务类型。一般为ssts、acts、hits。非必选项
-    >-l :指定执行测试用例，多个测试用例，中间用；隔开
-    >module：被测试的模块。一般在testcases目录下存在对应的\\.json文件
-    >此外，其他参数可以作为约束条件，附加到这个基本指令之上使用。常用的如:
-    >-sn: 过滤执行测试设备，若设置为SN1，则表示只有设备SN1执行用例
-    >-c: 重新指定user\_config.xml。
-    >-rp: 报告生成路径。默认为xxx/xdevice/reports目录。指定目录后，优先级:指定目录\>xxx/xdevice/reports目录。
-    >-tcpath：环境目录，默认为xxx/xdevice/testcases目录。指定目录后，优先级:指定目录\>xxx/xdevice/testcases目录
-    >-respath：测试套目录，默认为xxx/xdevice/resource目录。指定目录后，优先级:指定目录\>xxx/xdevice/resource目录
-    >--reboot-per-module: 执行前先重启设备
+     run常用指令基本使用方式如下。
 
--   **查看执行结果**
-
-    框架执行run指令，控制台会输出对应的log打印，还会生成对应的执行结果报告。如果使用了-rp参数指定报告路径，那么报告就会生成在指定的路径下。否则报告会存放在默认目录。
-
-    ```
-    当前报告目录（默认目录/指定目录）
-         ├── result（模块执行结果存放目录）
-         │     ├── <模块名>.xml
-         │     ├──  ... ... 
-         │      
-         ├── log (设备和任务运行log存放目录)
-         │     ├── <设备1>.log
-         │     ├── ... ...
-         │     ├── <任务>.log
-         ├── summary_report.html（测试任务可视化报告）
-         ├── summary_report.html（测试任务数据化报告）
-         └── ... ...
-    ```
+     | xDevice命令             | 功能                                                         | 示例                                                         |
+     | :---------------------- | :----------------------------------------------------------- | :----------------------------------------------------------- |
+     | run xts                 | 运行所有指定类型的xts模块，如acts，hits，ssts等              | run acts                                                     |
+     | run -l XXX              | 运行指定测试套。如有多个测试套，测试套之间以分号分隔         | run -l ActsWifiServiceTest;ActsLwipTest（testcase目录下的测试套名称） |
+     | run -sn                 | 指定运行设备sn号，多个sn号之间以分号分隔                     | run acts -sn 10.11.133.22:12345 <br/> run acts -sn 2222122;22321321 |
+     | run -rp                 | 指定报告生成路径，默认报告生成在项目根目录下的reports文件夹，以时间戳或任务id建立子目录 | run acts -rp /XXXX/XXX                                       |
+     | run -respath            | 指定测试资源路径，默认为项目根目录下的resource文件夹         | run -respath /XXX/XXX/XXX                                    |
+     | run -tcpath             | 指定测试用例路径,默认为项目根目录下的testcases文件夹         | run -tcpath /XXX/XXX/XXX                                     |
+     | run - ta                | 指定模块运行参数，可以指定运行测试套中的某个用例，多个用例之间以逗号分隔，目前只支持hits | run hits -ta size:large <br/> run hits -l XXXTest -ta class:XXXX(类名)#XXXXX(方法名) |
+     | run --retry             | 重新运行上次失败的测试用例                                   | run --retry --session 2022-12-13-12-21-11(report任务报告目录) |
+     | run --reboot-per-module | 执行前先重启设备                                             | run --reboot-per-module -l XXXX                              |
 
 
-## 相关仓<a name="section260848241"></a>
+- **查看执行结果**
 
-[测试子系统](https://gitee.com/openharmony/docs/blob/master/zh-cn/readme/%E6%B5%8B%E8%AF%95%E5%AD%90%E7%B3%BB%E7%BB%9F.md)
+  框架执行run指令，控制台会输出对应的log打印，还会生成对应的执行结果报告。如果使用了-rp参数指定报告路径，那么报告就会生成在指定的路径下。否则报告会存放在默认目录。
 
-**test\_xdevice**
+  ```
+  当前报告目录（默认目录/指定目录）
+      ├── result（模块执行结果存放目录）
+      │     ├── <模块名>.xml
+      │     ├──  ... ... 
+      │      
+      ├── log (设备和任务运行log存放目录)
+      │     ├── <设备1>.log
+      │     ├── ... ...
+      │     ├── <任务>.log
+      ├── summary_report.html（测试任务可视化报告）
+      ├── summary_report.html（测试任务数据化报告）
+      ├── detail_report.html（详细执行用例结果可视化报告）
+      ├── failures_report.html（失败用例可视化报告，无失败用例时不生成）
+      ├── summary.ini（记录测试类型，使用的设备，开始时间和结束时间等信息）
+      ├── task_info.record（记录执行命令，失败用例等清单信息）
+      ├── XXX.zip（对上述文件进行压缩得到的文件）
+      ├── summary_report.hash（对压缩文件进行SHA256加密得到的文件）
+      └── ... ...
+  ```
 
-[test\_developertest](https://gitee.com/openharmony/test_developertest/blob/master/README_zh.md)
+## 相关仓
+
+  [测试子系统](https://gitee.com/openharmony/docs/blob/master/zh-cn/readme/%E6%B5%8B%E8%AF%95%E5%AD%90%E7%B3%BB%E7%BB%9F.md)
+
+  **test\_xdevice**
+
+  [test\_developertest](https://gitee.com/openharmony/test_developertest/blob/master/README_zh.md)
