@@ -75,14 +75,14 @@ xdevice
     
        ```xml
        <environment>
-           <!-- L2设备配置>
+           <!-- 标准系统设备配置>
            <device type="usb-hdc"> <!-- type: 设备连接方式,usb-hdc表示使用hdc命令控制设备(默认) -->
                <ip></ip> <!-- ip: 远端设备地址,ip和port为空时使用本地设备,非空时使用远端设备 -->
                <port></port> <!-- port: 远端设备端口号 -->
                <sn></sn> <!-- sn: 设备串口号列表,串口号之间用分号;分隔,sn为空时使用所有本地设备,非空时使用指定的sn设备 -->
            </device>
        
-           <!-- L0设备配置(L0设备进行测试时，需要刷入已经集成好测试用例的系统，所以需要配置两个串口进行通信，如设备支持，可以将两个serial标签的com口设置为一致)，可配置多个 -->
+           <!-- 轻量系统设备配置(轻量系统设备进行测试时，需要刷入已经集成好测试用例的系统，所以需要配置两个串口进行通信，如设备支持，可以将两个serial标签的com口设置为一致)，可配置多个 -->
            <device type="com" label="wifiiot"> <!-- type: 设备连接方式，com表示连接方式为串口；label：设备种类，如wifiiot -->
                <serial> <!-- serial：表示一个串口定义 -->
                    <com></com> <!-- serial：表示本地连接的串口，如COM4 -->
@@ -99,7 +99,7 @@ xdevice
                </serial>
            </device>
        
-           <!-- L1设备配置，可配置多个 -->
+           <!-- 小型系统设备配置，可配置多个 -->
            <device type="com" label="ipcamera">
                <serial>
                    <com></com>
