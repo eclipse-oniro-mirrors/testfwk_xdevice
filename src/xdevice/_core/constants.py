@@ -212,6 +212,7 @@ class ToolCommandType(object):
     toolcmd_key_run = "run"
     toolcmd_key_quit = "quit"
     toolcmd_key_list = "list"
+    toolcmd_key_tool = "tool"
 
 
 @dataclass
@@ -260,6 +261,7 @@ class ConfigConst(object):
     repeat = "repeat"
     subsystems = "subsystems"
     parts = "parts"
+    renew_report = "renew_report"
 
     # Runtime Constant
     history_report_path = "history_report_path"
