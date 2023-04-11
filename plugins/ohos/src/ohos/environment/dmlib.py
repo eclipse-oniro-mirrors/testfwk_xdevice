@@ -301,6 +301,7 @@ class HdcMonitor:
 
     def list_targets(self):
         if self.main_hdc_connection and not self.monitoring:
+            self.server.monitor_lock.acquire()
             self.monitoring_list_targets()
             len_buf = HdcHelper.read(self.main_hdc_connection,
                                      DATA_UNIT_LENGTH)
@@ -310,6 +311,7 @@ class HdcMonitor:
                 self.connection_attempt = 0
                 self.monitoring = True
                 self.process_incoming_target_data(length)
+            self.server.monitor_lock.release()
 
     def monitoring_list_targets(self):
         HdcHelper.handle_shake(self.main_hdc_connection)
@@ -1041,6 +1043,7 @@ class DeviceConnector(object):
             return
         self.device_listeners = []
         self.device_monitor = None
+        self.monitor_lock = threading.Condition()
         self.host = host if host else "127.0.0.1"
         self.usb_type = usb_type
         connector_name = HdcMonitor.peek_hdc()

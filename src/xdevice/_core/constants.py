@@ -284,6 +284,8 @@ class ConfigConst(object):
     device_log_on = "ON"
     device_log_off = "OFF"
 
+    env_pool_cache = "env_pool_cache"
+
 
 @dataclass
 class ReportConst(object):

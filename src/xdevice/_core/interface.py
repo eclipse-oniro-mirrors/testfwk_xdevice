@@ -21,7 +21,8 @@ from abc import abstractmethod
 from enum import Enum
 
 __all__ = ["LifeCycle", "IDevice", "IDriver", "IListener", "IShellReceiver",
-           "IParser", "ITestKit", "IScheduler", "IDeviceManager", "IReporter"]
+           "IParser", "ITestKit", "IScheduler", "IDeviceManager", "IReporter",
+           "IFilter"]
 
 
 class LifeCycle(Enum):
@@ -360,3 +361,18 @@ class IReporter(ABC):
         if cls is IReporter:
             return _check_methods(class_info, "__generate_reports__")
         return NotImplemented
+
+
+class IFilter(ABC):
+    """
+    A filter is used to filter xml node and selector on the manager
+    """
+    __slots__ = ()
+
+    @abstractmethod
+    def __filter_xml_node__(self, node):
+        pass
+
+    @abstractmethod
+    def __filter_selector__(self, selector):
+        pass

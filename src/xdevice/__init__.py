@@ -31,6 +31,7 @@ from _core.interface import IShellReceiver
 from _core.interface import ITestKit
 from _core.interface import IListener
 from _core.interface import IReporter
+from _core.interface import IFilter
 from _core.exception import ParamError
 from _core.exception import DeviceError
 from _core.exception import LiteDeviceError
@@ -109,6 +110,11 @@ from _core.utils import stop_standing_subprocess
 from _core.logger import LogQueue
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.environment.manager_env import EnvironmentManager
+from _core.environment.env_pool import EnvPool
+from _core.environment.env_pool import XMLNode
+from _core.environment.env_pool import Selector
+from _core.environment.env_pool import DeviceNode
+from _core.environment.env_pool import DeviceSelector
 from _core.environment.device_state import DeviceEvent
 from _core.environment.device_state import TestDeviceState
 from _core.environment.device_state import DeviceState
@@ -137,6 +143,7 @@ __all__ = [
     "IDevice",
     "IDeviceManager",
     "IParser",
+    "IFilter",
     "LifeCycle",
     "IShellReceiver",
     "ITestKit",
@@ -182,6 +189,11 @@ __all__ = [
     "SuiteReporter",
     "DeviceSelectionOption",
     "EnvironmentManager",
+    "EnvPool",
+    "XMLNode",
+    "Selector",
+    "DeviceNode",
+    "DeviceSelector",
     "DeviceEvent",
     "TestDeviceState",
     "DeviceState",
