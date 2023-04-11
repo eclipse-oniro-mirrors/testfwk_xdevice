@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import sys
 import threading
 
 from xdevice import UserConfigManager
@@ -23,6 +24,7 @@ from xdevice import ManagerType
 from xdevice import Plugin
 from xdevice import get_plugin
 from xdevice import IDeviceManager
+from xdevice import IFilter
 from xdevice import platform_logger
 from xdevice import ParamError
 from xdevice import ConfigConst
@@ -35,8 +37,12 @@ from xdevice import handle_allocation_event
 from xdevice import DeviceAllocationState
 from xdevice import DeviceStateMonitor
 from xdevice import convert_serial
+from xdevice import DeviceNode
+from xdevice import DeviceSelector
 
 from ohos.environment.dmlib import DeviceConnector
+from ohos.environment.dmlib import HDC_NAME
+from ohos.environment.dmlib import HDC_STD_NAME
 
 __all__ = ["ManagerDevice"]
 
@@ -44,7 +50,7 @@ LOG = platform_logger("ManagerDevice")
 
 
 @Plugin(type=Plugin.MANAGER, id=ManagerType.device)
-class ManagerDevice(IDeviceManager):
+class ManagerDevice(IDeviceManager, IFilter):
     """
     Class representing device manager
     managing the set of available devices for testing
@@ -122,12 +128,16 @@ class ManagerDevice(IDeviceManager):
             device = self.allocate_device_option(device_option)
             if device:
                 return device
+            if hasattr(sys, ConfigConst.env_pool_cache):
+                wait_delta = 1
+            else:
+                wait_delta = 4
             LOG.debug("Wait for available device founded")
-            self.wait_times += 2
-            if self.wait_times * 2 > timeout:
+            self.wait_times += wait_delta
+            if self.wait_times > timeout:
                 self.lock_con.wait(timeout)
             else:
-                self.lock_con.wait(self.wait_times * 2)
+                self.lock_con.wait(self.wait_times)
             LOG.debug("Wait for available device founded")
             return self.allocate_device_option(device_option)
         finally:
@@ -300,6 +310,7 @@ class ManagerDevice(IDeviceManager):
         pass
 
     def list_devices(self):
+        self.device_connector.monitor_lock.acquire(1)
         print("devices:")
         print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".format(
             "Serial", "OsType", "State", "Allocation", "Product", "host",
@@ -311,6 +322,19 @@ class ManagerDevice(IDeviceManager):
                 device.device_allocation_state,
                 device.label if device.label else 'None',
                 device.host, device.port))
+        self.device_connector.monitor_lock.release()
+
+    def __filter_selector__(self, selector):
+        if isinstance(selector, DeviceSelector):
+            return True
+        return False
+
+    def __filter_xml_node__(self, node):
+        if isinstance(node, DeviceNode):
+            if HDC_NAME in node.get_connectors() or\
+                    HDC_STD_NAME in node.get_connectors():
+                return True
+        return False
 
 
 class ManagedDeviceListener(object):
