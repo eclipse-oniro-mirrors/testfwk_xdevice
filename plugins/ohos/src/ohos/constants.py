@@ -80,3 +80,4 @@ class CKit:
     query = "QueryKit"
     component = "ComponentKit"
     permission = "PermissionKit"
+    smartperf = "SmartPerfKit"

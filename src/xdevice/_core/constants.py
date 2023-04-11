@@ -264,6 +264,8 @@ class ConfigConst(object):
     subsystems = "subsystems"
     parts = "parts"
     renew_report = "renew_report"
+    kits_in_module = "kits_in_module"
+    kits_params = "kits_params"
 
     # Runtime Constant
     history_report_path = "history_report_path"
