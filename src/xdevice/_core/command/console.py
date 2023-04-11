@@ -318,6 +318,20 @@ class Console(object):
                                 action="store",
                                 type=str,
                                 help="- Specify the list of part")
+            parser.add_argument("-kim", "--kits_in_module",
+                                dest=ConfigConst.kits_in_module,
+                                action=SplicingAction,
+                                type=str,
+                                nargs='+',
+                                default="",
+                                help="- kits that are used for specify module")
+            parser.add_argument("--kp", "--kits_params",
+                                dest=ConfigConst.kits_params,
+                                action=SplicingAction,
+                                type=str,
+                                nargs='+',
+                                default="",
+                                help="- the params of kits that related to module")
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:

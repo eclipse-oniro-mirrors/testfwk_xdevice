@@ -43,6 +43,7 @@ from xdevice import ResourceManager
 
 from ohos.testkit.kit import oh_jsunit_para_parse
 from ohos.executor.listener import CollectingPassListener
+from ohos.constants import CKit
 
 __all__ = ["OHJSUnitTestDriver", "OHKernelTestDriver"]
 
@@ -350,6 +351,7 @@ class OHJSUnitTestDriver(IDriver):
 
             self._get_driver_config(json_config)
             self.config.device.connector_command("target mount")
+            self._start_smart_perf()
             do_module_kit_setup(request, self.kits)
             self.runner = OHJSUnitTestRunner(self.config)
             self.runner.suites_name = request.get_module_name()
@@ -508,14 +510,17 @@ class OHJSUnitTestDriver(IDriver):
 
     def _do_test_retry(self, listener, testargs):
         tests_dict = dict()
+        case_list = list()
         for test in testargs.get("test"):
             test_item = test.split("#")
             if len(test_item) != 2:
                 continue
+            case_list.append(test)
             if test_item[0] not in tests_dict:
                 tests_dict.update({test_item[0] : []})
-            tests_dict.get(test_item[0]).append(test_item[1])
-            self.runner.add_arg("class", test)
+            tests_dict.get(test_item[0]).append(
+                TestDescription(test_item[0], test_item[1]))
+        self.runner.add_arg("class", ",".join(case_list))
         self.runner.expect_tests_dict = tests_dict
         self.config.testargs.pop("test")
         self.runner.run(listener)
@@ -526,6 +531,18 @@ class OHJSUnitTestDriver(IDriver):
                 self.config.tf_suite.get("cases", []):
             case_list = self.config["tf_suite"]["cases"]
             self.config.testargs.update({"class": case_list})
+
+    def _start_smart_perf(self):
+        if not getattr(self.config, ConfigConst.kits_in_module):
+            return
+        if CKit.smartperf not in self.config.get(ConfigConst.kits_in_module):
+            return
+        sp_kits = get_plugin(Plugin.TEST_KIT, CKit.smartperf)[0]
+        sp_kits.target_name = self.config.bundle_name
+        param_config = self.config.get(ConfigConst.kits_params).get(
+            CKit.smartperf, "")
+        sp_kits.__check_config__(param_config)
+        self.kits.insert(0, sp_kits)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""

@@ -26,6 +26,10 @@ import json
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from tempfile import NamedTemporaryFile
+from multiprocessing import Process
+from multiprocessing import Queue
+from openpyxl import Workbook
+from openpyxl import styles
 
 from xdevice import ITestKit
 from xdevice import platform_logger
@@ -43,6 +47,7 @@ from xdevice import get_app_name_by_tool
 from xdevice import remount
 from xdevice import disable_keyguard
 from xdevice import get_class
+from xdevice import get_cst_time
 
 from ohos.constants import CKit
 from ohos.environment.dmlib import HdcHelper
@@ -50,7 +55,7 @@ from ohos.environment.dmlib import CollectingOutputReceiver
 
 __all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
            "ConfigKit", "AppInstallKit", "ComponentKit", "PermissionKit",
-           "junit_dex_para_parse", "oh_jsunit_para_parse"]
+           "junit_dex_para_parse", "oh_jsunit_para_parse", "SmartPerfKit"]
 
 MAX_WAIT_COUNT = 4
 TARGET_SDK_VERSION = 22
@@ -1078,3 +1083,101 @@ def oh_jsunit_para_parse(runner, junit_paras):
             runner.add_arg(para_name, para_values[0])
         elif para_name == "stress":
             runner.add_arg(para_name, para_values[0])
+
+
+@Plugin(type=Plugin.TEST_KIT, id=CKit.smartperf)
+class SmartPerfKit(ITestKit):
+    def __init__(self):
+        self._run_command = ["SP_daemon", "-PKG"]
+        self._process = None
+        self._pattern = "order:\\d+ (.+)=(.+)"
+        self._param_key = ["cpu", "gpu", "ddr", "fps", "pnow", "ram", "temp"]
+        self.target_name = ""
+        self._msg_queue = None
+
+    def __check_config__(self, config):
+        self._run_command.append(self.target_name)
+        if isinstance(config, str):
+            key_value_pairs = str(config).strip(";")
+            for key_value_pair in key_value_pairs:
+                key, value = key_value_pair.split(":", 1)
+                if key == "num":
+                    self._run_command.append("-N")
+                    self._run_command.append(value)
+                else:
+                    if key in self._param_key and value == "true":
+                        self._run_command.append("-" + key[:1])
+
+    def _execute(self, msg_queue, cmd_list, xls_file, proc_name):
+        data = []
+        while msg_queue.empty():
+            process = subprocess.Popen(cmd_list, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       shell=False)
+            rev = process.stdout.read()
+            data.append((get_cst_time().strftime("%Y-%m-%d-%H-%M-%S"), rev))
+        self.write_to_file(data, proc_name, xls_file)
+
+    def write_to_file(self, data, proc_name, xls_file):
+        book = Workbook()
+        sheet = book.active
+        sheet.row_dimensions[1].height = 30
+        sheet.column_dimensions["A"].width = 30
+        sheet.sheet_properties.tabColor = "1072BA"
+        alignment = styles.Alignment(horizontal='center', vertical='center')
+        font = styles.Font(size=15, color="000000", bold=True,
+                           italic=False, strike=None, underline=None)
+        names = ["time", "PKG"]
+        start = True
+        for _time, content in data:
+            cur = [_time, proc_name]
+            rev_list = str(content, "utf-8").split("\n")
+            if start:
+                start = False
+                for rev in rev_list:
+                    result = re.match(self._pattern, rev)
+                    if result and result.group(1):
+                        names.append(result.group(1))
+                        cur.append(result.group(2))
+                sheet.append(names)
+                sheet.append(cur)
+                for pos in range(1, len(names) + 1):
+                    cur_cell = sheet.cell(1, pos)
+                    sheet.column_dimensions[cur_cell.colum_letter].width = 20
+                    cur_cell.alignment = alignment
+                    cur_cell.font = font
+            else:
+                for rev in rev_list:
+                    result = re.match(self._pattern, rev)
+                    if result and result.group(1):
+                        cur.append(result.group(2))
+                sheet.append(cur)
+        book.save(xls_file)
+
+    def __setup__(self, device, **kwargs):
+        request = kwargs.get("request")
+        folder = os.path.join(request.get_config().report_path, "smart_perf")
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+        file = os.path.join(folder, "{}.xlsx".format(request.get_module_name()))
+        if device.host != "127.0.0.1":
+            cmd_list = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(
+                device.host, device.port), "-t", device.device_sn, "shell"]
+        else:
+            cmd_list = [HdcHelper.CONNECTOR_NAME, "-t", device.device_sn, "shell"]
+
+        cmd_list.extend(self._run_command)
+        LOG.debug("Smart perf command:{}".format(" ".join(cmd_list)))
+        self._msg_queue = Queue()
+        self._process = Process(target=self._execute, args=(
+            self._msg_queue, cmd_list, file, self.target_name))
+        self._process.start()
+
+    def __teardown__(self, device):
+        if self._process:
+            if self._msg_queue:
+                self._msg_queue.put("")
+                self._msg_queue = None
+            else:
+                self._process.terminate()
+            self._process = None

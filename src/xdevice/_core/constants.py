@@ -264,6 +264,8 @@ class ConfigConst(object):
     subsystems = "subsystems"
     parts = "parts"
     renew_report = "renew_report"
+    kits_in_module = "kits_in_module"
+    kits_params = "kits_params"
 
     # Runtime Constant
     history_report_path = "history_report_path"
@@ -283,6 +285,8 @@ class ConfigConst(object):
     device_log = "device_log"
     device_log_on = "ON"
     device_log_off = "OFF"
+
+    env_pool_cache = "env_pool_cache"
 
 
 @dataclass
