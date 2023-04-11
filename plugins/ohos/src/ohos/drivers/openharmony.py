@@ -506,14 +506,17 @@ class OHJSUnitTestDriver(IDriver):
 
     def _do_test_retry(self, listener, testargs):
         tests_dict = dict()
+        case_list = list()
         for test in testargs.get("test"):
             test_item = test.split("#")
             if len(test_item) != 2:
                 continue
+            case_list.append(test)
             if test_item[0] not in tests_dict:
                 tests_dict.update({test_item[0] : []})
-            tests_dict.get(test_item[0]).append(test_item[1])
-            self.runner.add_arg("class", test)
+            tests_dict.get(test_item[0]).append(
+                TestDescription(test_item[0], test_item[1]))
+        self.runner.add_arg("class", ",".join(case_list))
         self.runner.expect_tests_dict = tests_dict
         self.config.testargs.pop("test")
         self.runner.run(listener)
