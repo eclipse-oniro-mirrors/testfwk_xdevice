@@ -28,8 +28,6 @@ from tempfile import TemporaryDirectory
 from tempfile import NamedTemporaryFile
 from multiprocessing import Process
 from multiprocessing import Queue
-from openpyxl import Workbook
-from openpyxl import styles
 
 from xdevice import ITestKit
 from xdevice import platform_logger
@@ -1119,6 +1117,8 @@ class SmartPerfKit(ITestKit):
         self.write_to_file(data, proc_name, xls_file)
 
     def write_to_file(self, data, proc_name, xls_file):
+        from openpyxl import Workbook
+        from openpyxl import styles
         book = Workbook()
         sheet = book.active
         sheet.row_dimensions[1].height = 30
