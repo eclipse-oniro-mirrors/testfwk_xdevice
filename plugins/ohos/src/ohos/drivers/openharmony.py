@@ -405,6 +405,8 @@ class OHJSUnitTestDriver(IDriver):
                                             json_config.get_driver(), False)
         if testcase_timeout:
             self.runner.add_arg("timeout", int(testcase_timeout))
+        self.runner.compile_mode = get_config_value(
+            'compile-mode', json_config.get_driver(), False)
 
     def _do_test_run(self, listener):
         test_to_run = self._collect_test_to_run()
@@ -561,6 +563,7 @@ class OHJSUnitTestRunner:
         self.expect_tests_dict = dict()
         self.finished_observer = None
         self.retry_times = 1
+        self.compile_mode = ""
 
     def dry_run(self):
         parsers = get_plugin(Plugin.PARSER, CommonParserType.oh_jsunit_list)
@@ -628,33 +631,39 @@ class OHJSUnitTestRunner:
         if self.config.package_name:
             # aa test -p ${packageName} -b ${bundleName}-s
             # unittest OpenHarmonyTestRunner
-            command = "aa test -p %s -b %s -s unittest OpenHarmonyTestRunner" \
-                      " %s" % (self.config.package_name,
-                               self.config.bundle_name,
-                               self.get_args_command())
+            command = "aa test -p {} -b {} -s unittest OpenHarmonyTestRunner" \
+                      " {}".format(self.config.package_name,
+                                   self.config.bundle_name,
+                                   self.get_args_command())
         elif self.config.module_name:
             #  aa test -m ${moduleName}  -b ${bundleName}
             #  -s unittest OpenHarmonyTestRunner
-            command = "aa test -m %s -b %s -s unittest OpenHarmonyTestRunner" \
-                      " %s" % (self.config.module_name,
-                               self.config.bundle_name,
-                               self.get_args_command())
+            command = "aa test -m {} -b {} -s unittest {} {}".format(
+                self.config.module_name, self.config.bundle_name,
+                self.get_oh_test_runner_path(), self.get_args_command())
         return command
 
     def _get_dry_run_command(self):
         command = ""
         if self.config.package_name:
-            command = "aa test -p %s -b %s -s unittest OpenHarmonyTestRunner" \
-                      " %s -s dryRun true" % (self.config.package_name,
-                                              self.config.bundle_name,
-                                              self.get_args_command())
+            command = "aa test -p {} -b {} -s unittest OpenHarmonyTestRunner" \
+                      " {} -s dryRun true".format(self.config.package_name,
+                                                  self.config.bundle_name,
+                                                  self.get_args_command())
         elif self.config.module_name:
-            command = "aa test -m %s -b %s -s unittest OpenHarmonyTestRunner" \
-                      " %s -s dryRun true" % (self.config.module_name,
-                                              self.config.bundle_name,
-                                              self.get_args_command())
+            command = "aa test -m {} -b {} -s unittest {}" \
+                      " {} -s dryRun true".format(self.config.module_name,
+                                                  self.config.bundle_name,
+                                                  self.get_oh_test_runner_path(),
+                                                  self.get_args_command())
 
         return command
+
+    def get_oh_test_runner_path(self):
+        if self.compile_mode == "esmodule":
+            return "/ets/testrunner/OpenHarmonyTestRunner"
+        else:
+            return "OpenHarmonyTestRunner"
 
 
 @Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_rust_test)

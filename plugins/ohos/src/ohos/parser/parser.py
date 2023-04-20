@@ -33,6 +33,7 @@ from xdevice import TestDescription
 from xdevice import ResultCode
 from xdevice import CommonParserType
 from xdevice import get_cst_time
+from xdevice import get_delta_time_ms
 
 __all__ = ["CppTestParser", "CppTestListParser", "JunitParser", "JSUnitParser",
            "OHKernelTestParser", "OHJSUnitTestParser",
@@ -83,6 +84,8 @@ class CppTestParser(IParser):
         self.product_info = {}
         self.is_params = False
         self.result_data = ""
+        self.start_time = get_cst_time()
+        self.suite_start_time = get_cst_time()
 
     def get_suite_name(self):
         return self.suite_name
@@ -199,6 +202,7 @@ class CppTestParser(IParser):
         test_result = self.state_machine.test(reset=True)
         test_result.test_class = test_class
         test_result.test_name = test_name
+        self.start_time = get_cst_time()
         for listener in self.get_listeners():
             test_result = copy.copy(test_result)
             listener.__started__(LifeCycle.TestCase, test_result)
@@ -218,7 +222,9 @@ class CppTestParser(IParser):
         test_class, test_name, run_time = self.parse_test_description(
             message)
         test_result = self.state_machine.test()
-        test_result.run_time = int(run_time)
+        test_result.run_time = get_delta_time_ms(self.start_time)
+        if test_result.run_time == 0 or test_result.run_time < run_time:
+            test_result.run_time = run_time
         test_result.code = test_status.value
         test_result.current = self.state_machine.running_test_index + 1
         if not test_result.is_running():
@@ -277,6 +283,7 @@ class CppTestParser(IParser):
             test_suite = self.state_machine.suite()
             test_suite.suite_name = matcher.group(2)
             test_suite.test_num = expected_test_num
+            self.suite_start_time = get_cst_time()
             for listener in self.get_listeners():
                 suite_report = copy.copy(test_suite)
                 listener.__started__(LifeCycle.TestSuite, suite_report)
@@ -284,8 +291,9 @@ class CppTestParser(IParser):
     def handle_suite_ended_tag(self, message):
         self.state_machine.running_test_index = 0
         suite_result = self.state_machine.suite()
+        suite_result.run_time = get_delta_time_ms(self.suite_start_time)
         matcher = re.match(r'.*\((\d+) ms total\)', message)
-        if matcher:
+        if matcher and suite_result.run_time == 0:
             suite_result.run_time = int(matcher.group(1))
         suite_result.is_completed = True
         for listener in self.get_listeners():
@@ -672,7 +680,7 @@ class JSUnitParser(IParser):
     def parse_test_description(self, message):
         pattern = r".*\[(pass|fail|error)\]"
         year = time.strftime("%Y")
-        match_list = ["app Log:", "JSApp:", "JsApp:"]
+        match_list = ["app Log:", "JSApp:", "JsApp:", "JSAPP:"]
         filter_message = ""
         for keyword in match_list:
             if keyword in message:
@@ -1039,6 +1047,7 @@ class OHJSUnitItemConstants(Enum):
     NUM_TESTS = "numtests"
     STACK = "stack"
     SUITE_CONSUMING = "suiteconsuming"
+    CONSUMING = "consuming"
     APP_DIED = "App died"
 
 
@@ -1052,6 +1061,7 @@ class OHJSUnitTestParser(IParser):
         self.current_key = None
         self.current_value = None
         self.start_time = get_cst_time()
+        self.suite_start_time = get_cst_time()
         self.test_time = 0
         self.test_run_finished = False
         self.cur_sum = -1
@@ -1106,6 +1116,7 @@ class OHJSUnitTestParser(IParser):
             self.current_key = None
             self.current_value = None
             self.state_machine.running_test_index = 0
+            self.suite_start_time = get_cst_time()
             for listener in self.get_listeners():
                 suite = copy.copy(current_suite)
                 listener.__started__(LifeCycle.TestSuite, suite)
@@ -1114,6 +1125,9 @@ class OHJSUnitTestParser(IParser):
             if self.current_key == OHJSUnitItemConstants.SUITE_CONSUMING.value:
                 self.test_time = int(self.current_value)
                 self.handle_suite_end()
+            elif self.current_key == OHJSUnitItemConstants.CONSUMING.value:
+                self.test_time = int(self.current_value)
+                self.handle_case_end()
             else:
                 self.submit_current_key_value()
                 self.parse_key(line, len(OHJSUnitPrefixes.STATUS.value))
@@ -1147,7 +1161,6 @@ class OHJSUnitTestParser(IParser):
             if self.check_legality(test_info.test_class) and \
                     self.check_legality(test_info.test_name):
                 self.report_result(test_info)
-                self.clear_current_test_info()
 
     def clear_current_test_info(self):
         self.state_machine.current_test = None
@@ -1165,44 +1178,18 @@ class OHJSUnitTestParser(IParser):
         if test_info.code == StatusCodes.FAILURE.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = get_cst_time()
-            run_time = (end_time - self.start_time).total_seconds()
-            test_info.run_time = int(run_time * 1000)
-            for listener in self.get_listeners():
-                result = copy.copy(test_info)
-                result.code = ResultCode.FAILED.value
-                listener.__ended__(LifeCycle.TestCase, result)
-                if listener.__class__.__name__ == "ReportListener" \
-                        and self.runner.retry_times > 1:
-                    index = list(listener.tests.keys())[-1]
-                    listener.tests.pop(index)
-            test_info.is_completed = True
+            test_info.code = ResultCode.FAILED.value
+            test_info.run_time = get_delta_time_ms(self.start_time)
         elif test_info.code == StatusCodes.ERROR.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = get_cst_time()
-            run_time = (end_time - self.start_time).total_seconds()
-            test_info.run_time = int(run_time * 1000)
-            for listener in self.get_listeners():
-                result = copy.copy(test_info)
-                result.code = ResultCode.FAILED.value
-                listener.__ended__(LifeCycle.TestCase, result)
-                if listener.__class__.__name__ == "ReportListener" \
-                        and self.runner.retry_times > 1:
-                    index = list(listener.tests.keys())[-1]
-                    listener.tests.pop(index)
-            test_info.is_completed = True
+            test_info.code = ResultCode.FAILED.value
+            test_info.run_time = get_delta_time_ms(self.start_time)
         elif test_info.code == StatusCodes.SUCCESS.value:
             self.state_machine.running_test_index += 1
             test_info.current = self.state_machine.running_test_index
-            end_time = get_cst_time()
-            run_time = (end_time - self.start_time).total_seconds()
-            test_info.run_time = int(run_time * 1000)
-            for listener in self.get_listeners():
-                result = copy.copy(test_info)
-                result.code = ResultCode.PASSED.value
-                listener.__ended__(LifeCycle.TestCase, result)
-            test_info.is_completed = True
+            test_info.code = ResultCode.PASSED.value
+            test_info.run_time = get_delta_time_ms(self.start_time)
 
     @classmethod
     def output_stack_trace(cls, test_info):
@@ -1227,9 +1214,26 @@ class OHJSUnitTestParser(IParser):
         LOG.debug(self.result_data)
         self.result_data = ""
 
+    def handle_case_end(self):
+        test_info = self.state_machine.test()
+        if test_info.run_time == 0 or test_info.run_time < self.test_time:
+            test_info.run_time = self.test_time
+        for listener in self.get_listeners():
+            result = copy.copy(test_info)
+            result.code = test_info.code
+            listener.__ended__(LifeCycle.TestCase, result)
+            if listener.__class__.__name__ == "ReportListener" \
+                    and self.runner.retry_times > 1:
+                index = list(listener.tests.keys())[-1]
+                listener.tests.pop(index)
+        test_info.is_completed = True
+        self.clear_current_test_info()
+
     def handle_suite_end(self):
         suite_result = self.state_machine.suite()
-        suite_result.run_time = self.test_time
+        suite_result.run_time = get_delta_time_ms(self.suite_start_time)
+        if suite_result.run_time == 0:
+            suite_result.run_time = self.test_time
         suite_result.is_completed = True
         for listener in self.get_listeners():
             suite = copy.copy(suite_result)
@@ -1264,7 +1268,7 @@ class OHJSUnitTestParser(IParser):
         for suite in report_listener.suites.values():
             test_des_list = self.runner.expect_tests_dict.get(
                 suite.suite_name, [])
-            pos  = self.runner.suite_recorder.get(suite.suite_name)[0]
+            pos = self.runner.suite_recorder.get(suite.suite_name)[0]
             if len(test_des_list) == len(report_listener.result[pos][1]):
                 continue
             interval = len(test_des_list) - len(report_listener.result[pos][1])

@@ -215,7 +215,10 @@ class Device(IDevice):
             return False
 
         LOG.debug("Wait device %s to recover" % self.device_sn)
-        return self.device_state_monitor.wait_for_device_available()
+        result = self.device_state_monitor.wait_for_device_available()
+        if result:
+            self.device_log_collector.restart_catch_device_log()
+        return result
 
     def get_device_type(self):
         self.label = self.model_dict.get("default", None)
@@ -496,7 +499,9 @@ class Device(IDevice):
         self.log.debug('start uitest, {}'.format(result))
 
     def start_harmony_rpc(self, port=8080, re_install_rpc=False):
-        if hasattr(sys, ConfigConst.env_pool_cache) and getattr(sys, ConfigConst.env_pool_cache, False) and self.is_harmony_rpc_running():
+        if hasattr(sys, ConfigConst.env_pool_cache) \
+                and getattr(sys, ConfigConst.env_pool_cache, False) \
+                and self.is_harmony_rpc_running():
             self.log.debug('harmony rpc is running')
             return
         from devicetest.core.error_message import ErrorMessage
@@ -768,7 +773,7 @@ class DeviceLogCollector:
         # 清空日志
         cmd = "hilog -r"
         out = self.device.execute_shell_command(cmd)
-        cmd = "rm -rf /data/log/hilog/*"
+        cmd = "rm -rf /data/log/hilog/*.gz"
         out = self.device.execute_shell_command(cmd)
         # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
         cmd = "hilog -w start -l {} -n 1000".format(log_size)

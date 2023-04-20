@@ -124,6 +124,7 @@ class DeviceLite(IDevice):
         self.device_kernel = ""
         self.device = None
         self.ifconfig = None
+        self.device_id = None
         self.extend_value = {}
         self.device_lock = threading.RLock()
 

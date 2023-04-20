@@ -702,6 +702,12 @@ def get_cst_time():
     return datetime.now(tz=cn_tz)
 
 
+def get_delta_time_ms(start_time):
+    end_time = get_cst_time()
+    delta = round(float((end_time - start_time).total_seconds()) * 1000, 3)
+    return delta
+
+
 def get_device_proc_pid(device, proc_name, double_check=False):
     if not hasattr(device, "execute_shell_command") or \
             not hasattr(device, "log") or \
