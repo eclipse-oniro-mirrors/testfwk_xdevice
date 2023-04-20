@@ -20,6 +20,7 @@ import os
 import time
 import datetime
 import sys
+import tempfile
 
 from abc import abstractmethod
 from abc import ABCMeta
@@ -354,8 +355,7 @@ class DeviceSelector(Selector):
 
 class Cache:
     def __init__(self):
-        from xdevice import Variables
-        self.cache_file = os.path.join(Variables.res_dir, "cache.dat")
+        self.cache_file = os.path.join(tempfile.gettempdir(), "cache.dat")
         self.expire_time = 1  # days
 
     def check_cache_if_expire(self):

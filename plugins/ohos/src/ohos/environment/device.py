@@ -215,7 +215,10 @@ class Device(IDevice):
             return False
 
         LOG.debug("Wait device %s to recover" % self.device_sn)
-        return self.device_state_monitor.wait_for_device_available()
+        result = self.device_state_monitor.wait_for_device_available()
+        if result:
+            self.device_log_collector.restart_catch_device_log()
+        return result
 
     def get_device_type(self):
         self.label = self.model_dict.get("default", None)
@@ -770,7 +773,7 @@ class DeviceLogCollector:
         # 清空日志
         cmd = "hilog -r"
         out = self.device.execute_shell_command(cmd)
-        cmd = "rm -rf /data/log/hilog/*"
+        cmd = "rm -rf /data/log/hilog/*.gz"
         out = self.device.execute_shell_command(cmd)
         # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
         cmd = "hilog -w start -l {} -n 1000".format(log_size)

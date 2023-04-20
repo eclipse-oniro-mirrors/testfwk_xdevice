@@ -261,8 +261,8 @@ class SuiteReporter:
             case_stacktrace = case_stacktrace.replace(chr(char_index), "")
         test_case_attributes = {ReportConstant.name: case_result.test_name,
                                 ReportConstant.status: "",
-                                ReportConstant.time: float(
-                                    case_result.run_time) / 1000,
+                                ReportConstant.time: round(float(
+                                     case_result.run_time) / 1000, 3),
                                 ReportConstant.class_name:
                                     case_result.test_class,
                                 ReportConstant.result: "",

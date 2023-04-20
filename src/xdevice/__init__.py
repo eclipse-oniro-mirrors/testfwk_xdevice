@@ -104,6 +104,7 @@ from _core.utils import modify_props
 from _core.utils import get_shell_handler
 from _core.utils import get_decode
 from _core.utils import get_cst_time
+from _core.utils import get_delta_time_ms
 from _core.utils import get_device_proc_pid
 from _core.utils import start_standing_subprocess
 from _core.utils import stop_standing_subprocess
@@ -238,6 +239,7 @@ __all__ = [
     "get_shell_handler",
     "get_decode",
     "get_cst_time",
+    "get_delta_time_ms",
     "get_device_proc_pid",
     "start_standing_subprocess",
     "stop_standing_subprocess",

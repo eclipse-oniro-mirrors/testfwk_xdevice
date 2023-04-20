@@ -137,6 +137,37 @@ def junit_para_parse(device, junit_paras, prefix_char="-e"):
     return " ".join(ret_str)
 
 
+def get_include_tests(para_datas, test_types, runner):
+    case_list = []
+    if test_types == "class":
+        case_list = para_datas
+    else:
+        for case_file in para_datas:
+            flags = os.O_RDONLY
+            modes = stat.S_IWUSR | stat.S_IRUSR
+            with os.fdopen(os.open(case_file, flags, modes), "r") as file_desc:
+                case_list.extend(file_desc.read().splitlines())
+    runner.add_instrumentation_arg("gtest_filter", ":".join(case_list).replace("#", "."))
+
+
+def get_all_test_include(para_datas, test_types, runner, request):
+    case_list = []
+    if test_types == "notClass":
+        case_list = para_datas
+    else:
+        if para_datas:
+            flags = os.O_RDONLY
+            modes = stat.S_IWUSR | stat.S_IRUSR
+            with os.fdopen(os.open(para_datas[0], flags, modes), "r") as file_handler:
+                json_data = json.load(file_handler)
+            exclude_list = json_data.get(DeviceTestType.cpp_test, [])
+            for exclude in exclude_list:
+                if request.get_module_name() in exclude:
+                    temp = exclude.get(request.get_module_name())
+                    case_list.extend(temp)
+    runner.add_instrumentation_arg("gtest_filter", "{}{}".format("-", ":".join(case_list)).replace("#", "."))
+
+
 def gtest_para_parse(gtest_paras, runner, request):
     """To parse the para of gtest
     Args:
@@ -144,40 +175,18 @@ def gtest_para_parse(gtest_paras, runner, request):
     Returns:
         the new para using in gtest
     """
-    ret_str = []
     if not isinstance(gtest_paras, dict):
         LOG.warning("The para of gtest is not the dict format as required")
         return ""
 
     for para in gtest_paras.keys():
-        if para.strip() == 'test-file-include-filter':
-            case_list = []
-            files = gtest_paras.get(para)
-            for case_file in files:
-                flags = os.O_RDONLY
-                modes = stat.S_IWUSR | stat.S_IRUSR
-                with os.fdopen(os.open(case_file, flags, modes),
-                               "r") as file_desc:
-                    case_list.extend(file_desc.read().splitlines())
-
-            runner.add_instrumentation_arg("gtest_filter", ":".join(case_list))
-
-        if para.strip() == 'all-test-file-exclude-filter':
-            json_file_list = gtest_paras.get("all-test-file-exclude-filter")
-            if json_file_list:
-                flags = os.O_RDONLY
-                modes = stat.S_IWUSR | stat.S_IRUSR
-                with os.fdopen(os.open(json_file_list[0], flags, modes),
-                               "r") as file_handler:
-                    json_data = json.load(file_handler)
-                exclude_list = json_data.get(DeviceTestType.cpp_test, [])
-                for exclude in exclude_list:
-                    if request.get_module_name() in exclude:
-                        case_list = exclude.get(request.get_module_name())
-                        runner.add_instrumentation_arg(
-                            "gtest_filter",
-                            "%s%s" % ("-", ":".join(case_list)))
-    return " ".join(ret_str)
+        test_types = para.strip()
+        para_datas = gtest_paras.get(para)
+        if test_types in ["test-file-include-filter", "class"]:
+            get_include_tests(para_datas, test_types, runner)
+        elif test_types in ["all-test-file-exclude-filter", "notClass"]:
+            get_all_test_include(para_datas, test_types, runner, request)
+    return ""
 
 
 def reset_junit_para(junit_para_str, prefix_char="-e", ignore_keys=None):

@@ -189,7 +189,9 @@ class LiteHelper:
         while time.time() - start_time < timeout:
             if not Scheduler.is_execute:
                 raise ExecuteTerminate("Execute terminate", error_no="00300")
-            data = com.readline().decode('gbk', errors='ignore')
+            if com.in_waiting == 0:
+                continue
+            data = com.read(com.in_waiting).decode('gbk', errors='ignore')
             data = PATTERN.sub('', data).replace("\r", "")
             result = "{}{}".format(result, data)
             if receiver and data:
