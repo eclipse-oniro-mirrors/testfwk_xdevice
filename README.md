@@ -219,7 +219,7 @@ The environment requirements for using this module are as follows:
 
 ## Repositories Involved<a name="section260848241"></a>
 
-[testing subsystem](https://gitee.com/openharmony/docs/blob/master/en/readme/testing-subsystem.md)
+[testing subsystem](https://gitee.com/openharmony/docs/blob/master/en/readme/test.md)
 
 **test\_xdevice**
 
