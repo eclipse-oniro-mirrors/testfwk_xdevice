@@ -115,6 +115,8 @@ def get_decode(stream):
 
 
 def is_proc_running(pid, name=None):
+    if hasattr(sys, ConfigConst.env_pool_cache) and getattr(sys, ConfigConst.env_pool_cache, False):
+        return True
     if platform.system() == "Windows":
         pid = "{}.exe".format(pid)
         proc_sub = subprocess.Popen(["C:\\Windows\\System32\\tasklist"],

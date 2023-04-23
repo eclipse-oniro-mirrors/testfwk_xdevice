@@ -22,6 +22,7 @@ import os
 import threading
 import platform
 import subprocess
+import sys
 from xdevice import DeviceOsType
 from xdevice import ProductForm
 from xdevice import ReportException
@@ -495,6 +496,11 @@ class Device(IDevice):
         self.log.debug('start uitest, {}'.format(result))
 
     def start_harmony_rpc(self, port=8080, re_install_rpc=False):
+        if hasattr(sys, ConfigConst.env_pool_cache) \
+                and getattr(sys, ConfigConst.env_pool_cache, False) \
+                and self.is_harmony_rpc_running():
+            self.log.debug('harmony rpc is running')
+            return
         from devicetest.core.error_message import ErrorMessage
         if re_install_rpc:
             try:
