@@ -535,7 +535,7 @@ class OHJSUnitTestDriver(IDriver):
             self.config.testargs.update({"class": case_list})
 
     def _start_smart_perf(self):
-        if not getattr(self.config, ConfigConst.kits_in_module):
+        if not hasattr(self.config, ConfigConst.kits_in_module):
             return
         if CKit.smartperf not in self.config.get(ConfigConst.kits_in_module):
             return
