@@ -751,73 +751,73 @@ class JSUnitTestDriver(IDriver):
             LOG.exception(self.error_message, exc_info=False, error_no="03409")
             raise exception
         finally:
-            serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
-            log_tar_file_name = "{}_{}".format(request.get_module_name(),
-                                               str(serial).replace(":", "_"))
-            if hasattr(self.config, "device_log") and \
-                    self.config.device_log == ConfigConst.device_log_on:
-                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
-            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
-            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
-            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
-            self.result = check_result_report(
-                request.config.report_path, self.result, self.error_message)
-
-    def _run_jsunit_outer(self, config_file, request):
-        try:
-            if not os.path.exists(config_file):
-                LOG.error("Error: Test cases don't exist %s." % config_file)
-                raise ParamError(
-                    "Error: Test cases don't exist %s." % config_file,
-                    error_no="00102")
-
-            json_config = JsonParser(config_file)
-            self.kits = get_kit_instances(json_config,
-                                          self.config.resource_path,
-                                          self.config.testcases_path)
-
-            package, ability_name = self._get_driver_config_outer(json_config)
-            self.config.device.connector_command("target mount")
-            do_module_kit_setup(request, self.kits)
-
-            self.hilog = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__() + "_" + request.
-                get_module_name(),
-                "device_hilog")
-
-            hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                                 0o755)
-            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
-            with os.fdopen(hilog_open, "a") as hilog_file_pipe:
+            try:
+                serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
+                log_tar_file_name = "{}_{}".format(request.get_module_name(),
+                                                   str(serial).replace(":", "_"))
                 if hasattr(self.config, "device_log") and \
                         self.config.device_log == ConfigConst.device_log_on:
-                    self.config.device.device_log_collector.clear_crash_log()
-                self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
-                    start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+                    self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
+                self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
+                self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
+                self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
+            finally:
+                do_module_kit_teardown(request)
+                self.result = check_result_report(
+                    request.config.report_path, self.result, self.error_message)
 
-            # execute test case
-            command = "shell aa start -d 123 -a %s -b %s" \
-                      % (ability_name, package)
-            result_value = self.config.device.connector_command(command)
-            if result_value and "start ability successfully" in \
-                    str(result_value).lower():
-                setattr(self, "start_success", True)
-                LOG.info("execute %s's testcase success. result value=%s"
-                         % (package, result_value))
-            else:
-                LOG.info("execute %s's testcase failed. result value=%s"
-                         % (package, result_value))
-                raise RuntimeError("hjsunit test run error happened!")
+    def _run_jsunit_outer(self, config_file, request):
+        if not os.path.exists(config_file):
+            LOG.error("Error: Test cases don't exist %s." % config_file)
+            raise ParamError(
+                "Error: Test cases don't exist %s." % config_file,
+                error_no="00102")
 
-            self.start_time = time.time()
-            timeout_config = get_config_value('test-timeout',
-                                              json_config.get_driver(),
-                                              False, 60000)
-            timeout = int(timeout_config) / 1000
-            self.generate_console_output(request, timeout)
-        finally:
-            do_module_kit_teardown(request)
+        json_config = JsonParser(config_file)
+        self.kits = get_kit_instances(json_config,
+                                      self.config.resource_path,
+                                      self.config.testcases_path)
+
+        package, ability_name = self._get_driver_config_outer(json_config)
+        self.config.device.connector_command("target mount")
+        do_module_kit_setup(request, self.kits)
+
+        self.hilog = get_device_log_file(
+            request.config.report_path,
+            request.config.device.__get_serial__() + "_" + request.
+            get_module_name(),
+            "device_hilog")
+
+        hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                             0o755)
+        self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
+        with os.fdopen(hilog_open, "a") as hilog_file_pipe:
+            if hasattr(self.config, "device_log") and \
+                    self.config.device_log == ConfigConst.device_log_on:
+                self.config.device.device_log_collector.clear_crash_log()
+            self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
+                start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+
+        # execute test case
+        command = "shell aa start -d 123 -a %s -b %s" \
+                  % (ability_name, package)
+        result_value = self.config.device.connector_command(command)
+        if result_value and "start ability successfully" in \
+                str(result_value).lower():
+            setattr(self, "start_success", True)
+            LOG.info("execute %s's testcase success. result value=%s"
+                     % (package, result_value))
+        else:
+            LOG.info("execute %s's testcase failed. result value=%s"
+                     % (package, result_value))
+            raise RuntimeError("hjsunit test run error happened!")
+
+        self.start_time = time.time()
+        timeout_config = get_config_value('test-timeout',
+                                          json_config.get_driver(),
+                                          False, 60000)
+        timeout = int(timeout_config) / 1000
+        self.generate_console_output(request, timeout)
 
     def _jsunit_clear_outer(self):
         self.config.device.execute_shell_command(
