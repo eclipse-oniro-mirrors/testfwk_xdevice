@@ -470,13 +470,7 @@ class Console(object):
         # parse history command, set history report path
         is_dry_run = True if options.dry_run else False
 
-        # clear the content about repeat count in history command
-        if "--repeat" in history_command:
-            split_list = list(history_command.split())
-            if "--repeat" in split_list:
-                pos = split_list.index("--repeat")
-                split_list = split_list[:pos] + split_list[pos + 2:]
-                history_command = " ".join(split_list)
+        history_command = self._wash_history_command(history_command)
 
         argument = self.argument_parser(history_command.split())
         argument.options.dry_run = is_dry_run
@@ -769,6 +763,21 @@ class Console(object):
             sys.argv.insert(1, report)
             main_report()
             sys.argv.pop(1)
+
+    @classmethod
+    def _wash_history_command(cls, history_command):
+        # clear redundant content in history command. e.g. repeat,sn
+        if "--repeat" in history_command or "-sn" in history_command:
+            split_list = list(history_command.split())
+            if "--repeat" in split_list:
+                pos = split_list.index("--repeat")
+                split_list = split_list[:pos] + split_list[pos + 2:]
+            if "-sn" in split_list:
+                pos = split_list.index("-sn")
+                split_list = split_list[:pos] + split_list[pos + 2:]
+            return " ".join(split_list)
+        else:
+            return history_command
 
 
 RUN_INFORMATION = """run:
