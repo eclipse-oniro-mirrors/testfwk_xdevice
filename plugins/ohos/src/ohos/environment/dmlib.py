@@ -1051,7 +1051,7 @@ class DeviceConnector(object):
         if port:
             self.port = int(port)
         else:
-            self.port = int(os.getenv("HDC_SERVER_PORT", DEFAULT_STD_PORT))
+            self.port = int(os.getenv("OHOS_HDC_SERVER_PORT", DEFAULT_STD_PORT))
 
     def start(self):
         self.device_monitor = HdcMonitor.get_instance(

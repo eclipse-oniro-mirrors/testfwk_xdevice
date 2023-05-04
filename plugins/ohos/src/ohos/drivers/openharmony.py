@@ -282,18 +282,11 @@ class OHJSUnitTestDriver(IDriver):
             LOG.exception(self.error_message, exc_info=True, error_no="03409")
             raise exception
         finally:
-            serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
-            log_tar_file_name = "{}_{}".format(request.get_module_name(),
-                                               str(serial).replace(":", "_"))
-            if hasattr(self.config, "device_log") and \
-                    self.config.device_log == ConfigConst.device_log_on \
-                    and hasattr(self.config.device, "start_get_crash_log"):
-                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
-            self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
-            self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
-            self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
-            self.result = check_result_report(
-                request.config.report_path, self.result, self.error_message)
+            try:
+                self._handle_logs(request)
+            finally:
+                self.result = check_result_report(
+                    request.config.report_path, self.result, self.error_message)
 
     def __dry_run_execute__(self, request):
         LOG.debug("Start dry run xdevice JSUnit Test")
@@ -545,6 +538,22 @@ class OHJSUnitTestDriver(IDriver):
             CKit.smartperf, "")
         sp_kits.__check_config__(param_config)
         self.kits.insert(0, sp_kits)
+
+    def _handle_logs(self, request):
+        serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
+        log_tar_file_name = "{}_{}".format(request.get_module_name(),
+                                           str(serial).replace(":", "_"))
+        if hasattr(self.config, "device_log") and \
+                self.config.device_log == ConfigConst.device_log_on \
+                and hasattr(self.config.device, "start_get_crash_log"):
+            self.config.device.device_log_collector.\
+                start_get_crash_log(log_tar_file_name)
+        self.config.device.device_log_collector.\
+            remove_log_address(self.device_log, self.hilog)
+        self.config.device.device_log_collector.\
+            stop_catch_device_log(self.log_proc)
+        self.config.device.device_log_collector.\
+            stop_catch_device_log(self.hilog_proc)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
