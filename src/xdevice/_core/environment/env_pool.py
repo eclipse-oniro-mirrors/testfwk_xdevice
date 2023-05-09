@@ -377,7 +377,7 @@ class Cache:
         return (dt2 - dt1).days
 
     def update_cache(self):
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_BINARY
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
         with os.fdopen(os.open(self.cache_file, flags, FilePermission.mode_755),
                        "wb") as f:
             f.write(b'123')
