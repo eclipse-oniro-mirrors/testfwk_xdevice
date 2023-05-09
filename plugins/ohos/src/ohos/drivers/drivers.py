@@ -961,31 +961,48 @@ class LTPPosixTestDriver(IDriver):
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
                 _, self.log_proc = self.config.device.device_log_collector.\
                     start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
-                for test_bin in test_list:
-                    if not test_bin.endswith(".run-test"):
-                        continue
-                    listeners = request.listeners
-                    for listener in listeners:
-                        listener.device_sn = self.config.device.device_sn
-                    parsers = get_plugin(Plugin.PARSER,
-                                         "OpenSourceTest")
-                    parser_instances = []
-                    for parser in parsers:
-                        parser_instance = parser.__class__()
-                        parser_instance.suite_name = request.root.source.\
-                            test_name
-                        parser_instance.test_name = test_bin.replace("./", "")
-                        parser_instance.listeners = listeners
-                        parser_instances.append(parser_instance)
-                    self.handler = ShellHandler(parser_instances)
-                    self.handler.add_process_method(_ltp_output_method)
-                    result_message = self.config.device.connector_command(
-                        "shell {}".format(test_bin))
-                    LOG.info("get result from command {}".
-                             format(result_message))
-                    process_command_ret(result_message, self.handler)
+                if hasattr(self.config, "history_report_path") and \
+                        self.config.testargs.get("test"):
+                    self._do_test_retry(request, self.config.testargs)
+                else:
+                    self._do_test_run(request, test_list)
         finally:
             do_module_kit_teardown(request)
+
+    def _do_test_retry(self, request, testargs):
+        un_pass_list = []
+        for test in testargs.get("test"):
+            test_item = test.split("#")
+            if len(test_item) != 2:
+                continue
+            un_pass_list.append(test_item[1])
+        LOG.debug("LTP Posix un pass list: [{}]".format(un_pass_list))
+        self._do_test_run(request, un_pass_list)
+
+    def _do_test_run(self, request, test_list):
+        for test_bin in test_list:
+            if not test_bin.endswith(".run-test"):
+                continue
+            listeners = request.listeners
+            for listener in listeners:
+                listener.device_sn = self.config.device.device_sn
+            parsers = get_plugin(Plugin.PARSER,
+                                 "OpenSourceTest")
+            parser_instances = []
+            for parser in parsers:
+                parser_instance = parser.__class__()
+                parser_instance.suite_name = request.root.source. \
+                    test_name
+                parser_instance.test_name = test_bin.replace("./", "")
+                parser_instance.listeners = listeners
+                parser_instances.append(parser_instance)
+            self.handler = ShellHandler(parser_instances)
+            self.handler.add_process_method(_ltp_output_method)
+            result_message = self.config.device.connector_command(
+                "shell {}".format(test_bin))
+            LOG.info("get result from command {}".
+                     format(result_message))
+            process_command_ret(result_message, self.handler)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
