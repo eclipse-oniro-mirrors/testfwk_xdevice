@@ -664,8 +664,7 @@ class Console(object):
         # get history_command, history_report_path
         if options.retry == "retry_previous_command":
             from xdevice import Variables
-            history_path = os.path.join(
-                Variables.exec_dir, Variables.report_vars.report_dir, "latest")
+            history_path = os.path.join(Variables.temp_dir, "latest")
             if options.session:
                 history_path = self._find_history_path(options.session)
 
