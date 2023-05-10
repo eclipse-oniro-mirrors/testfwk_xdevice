@@ -355,7 +355,6 @@ class DeviceSelector(Selector):
 class Cache:
     def __init__(self):
         from xdevice import Variables
-        self.cache_file = os.path.join(Variables.res_dir, "cache.dat")
         self.cache_file = os.path.join(Variables.temp_dir, "cache.dat")
         self.expire_time = 1  # days
 
