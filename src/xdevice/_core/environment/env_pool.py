@@ -20,7 +20,6 @@ import os
 import time
 import datetime
 import sys
-import tempfile
 
 from abc import abstractmethod
 from abc import ABCMeta
