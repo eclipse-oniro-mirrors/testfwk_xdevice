@@ -439,8 +439,7 @@ class ResultReporter(IReporter):
             return
 
         from xdevice import Variables
-        dst_path = os.path.join(Variables.exec_dir,
-                                Variables.report_vars.report_dir, "latest")
+        dst_path = os.path.join(Variables.temp_dir, "latest")
         try:
             shutil.rmtree(dst_path, ignore_errors=True)
             os.makedirs(dst_path, exist_ok=True)
