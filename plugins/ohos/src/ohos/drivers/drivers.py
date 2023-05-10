@@ -616,6 +616,7 @@ class JSUnitTestDriver(IDriver):
 
     def _analyse_tests(self, request, result_message, expect_tests_dict):
         exclude_list = self._make_exclude_list_file(request)
+        exclude_list.extend(self._get_retry_skip_list(expect_tests_dict))
         listener_copy = request.listeners.copy()
         parsers = get_plugin(
             Plugin.PARSER, CommonParserType.jsunit)
@@ -633,6 +634,20 @@ class JSUnitTestDriver(IDriver):
         handler.parsers[0].expect_tests_dict = expect_tests_dict
         handler.parsers[0].exclude_list = exclude_list
         process_command_ret(result_message, handler)
+
+    def _get_retry_skip_list(self, expect_tests_dict):
+        # get already pass case
+        skip_list = []
+        if hasattr(self.config, "history_report_path") and \
+                self.config.testargs.get("test"):
+            for class_name in expect_tests_dict.keys():
+                for test_desc in expect_tests_dict.get(class_name, list()):
+                    test = "{}#{}".format(test_desc.class_name, test_desc.test_name)
+                    if test not in self.config.testargs.get("test"):
+                        skip_list.append(test)
+        LOG.debug("Retry skip list: {}, total skip case: {}".
+                  format(skip_list, len(skip_list)))
+        return skip_list
 
     @classmethod
     def _parse_suite_info(cls, suite_info):
