@@ -616,6 +616,7 @@ class JSUnitTestDriver(IDriver):
 
     def _analyse_tests(self, request, result_message, expect_tests_dict):
         exclude_list = self._make_exclude_list_file(request)
+        exclude_list.extend(self._get_retry_skip_list(expect_tests_dict))
         listener_copy = request.listeners.copy()
         parsers = get_plugin(
             Plugin.PARSER, CommonParserType.jsunit)
@@ -633,6 +634,20 @@ class JSUnitTestDriver(IDriver):
         handler.parsers[0].expect_tests_dict = expect_tests_dict
         handler.parsers[0].exclude_list = exclude_list
         process_command_ret(result_message, handler)
+
+    def _get_retry_skip_list(self, expect_tests_dict):
+        # get already pass case
+        skip_list = []
+        if hasattr(self.config, "history_report_path") and \
+                self.config.testargs.get("test"):
+            for class_name in expect_tests_dict.keys():
+                for test_desc in expect_tests_dict.get(class_name, list()):
+                    test = "{}#{}".format(test_desc.class_name, test_desc.test_name)
+                    if test not in self.config.testargs.get("test"):
+                        skip_list.append(test)
+        LOG.debug("Retry skip list: {}, total skip case: {}".
+                  format(skip_list, len(skip_list)))
+        return skip_list
 
     @classmethod
     def _parse_suite_info(cls, suite_info):
@@ -959,31 +974,48 @@ class LTPPosixTestDriver(IDriver):
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
                 _, self.log_proc = self.config.device.device_log_collector.\
                     start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
-                for test_bin in test_list:
-                    if not test_bin.endswith(".run-test"):
-                        continue
-                    listeners = request.listeners
-                    for listener in listeners:
-                        listener.device_sn = self.config.device.device_sn
-                    parsers = get_plugin(Plugin.PARSER,
-                                         "OpenSourceTest")
-                    parser_instances = []
-                    for parser in parsers:
-                        parser_instance = parser.__class__()
-                        parser_instance.suite_name = request.root.source.\
-                            test_name
-                        parser_instance.test_name = test_bin.replace("./", "")
-                        parser_instance.listeners = listeners
-                        parser_instances.append(parser_instance)
-                    self.handler = ShellHandler(parser_instances)
-                    self.handler.add_process_method(_ltp_output_method)
-                    result_message = self.config.device.connector_command(
-                        "shell {}".format(test_bin))
-                    LOG.info("get result from command {}".
-                             format(result_message))
-                    process_command_ret(result_message, self.handler)
+                if hasattr(self.config, "history_report_path") and \
+                        self.config.testargs.get("test"):
+                    self._do_test_retry(request, self.config.testargs)
+                else:
+                    self._do_test_run(request, test_list)
         finally:
             do_module_kit_teardown(request)
+
+    def _do_test_retry(self, request, testargs):
+        un_pass_list = []
+        for test in testargs.get("test"):
+            test_item = test.split("#")
+            if len(test_item) != 2:
+                continue
+            un_pass_list.append(test_item[1])
+        LOG.debug("LTP Posix un pass list: [{}]".format(un_pass_list))
+        self._do_test_run(request, un_pass_list)
+
+    def _do_test_run(self, request, test_list):
+        for test_bin in test_list:
+            if not test_bin.endswith(".run-test"):
+                continue
+            listeners = request.listeners
+            for listener in listeners:
+                listener.device_sn = self.config.device.device_sn
+            parsers = get_plugin(Plugin.PARSER,
+                                 "OpenSourceTest")
+            parser_instances = []
+            for parser in parsers:
+                parser_instance = parser.__class__()
+                parser_instance.suite_name = request.root.source. \
+                    test_name
+                parser_instance.test_name = test_bin.replace("./", "")
+                parser_instance.listeners = listeners
+                parser_instances.append(parser_instance)
+            self.handler = ShellHandler(parser_instances)
+            self.handler.add_process_method(_ltp_output_method)
+            result_message = self.config.device.connector_command(
+                "shell {}".format(test_bin))
+            LOG.info("get result from command {}".
+                     format(result_message))
+            process_command_ret(result_message, self.handler)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
