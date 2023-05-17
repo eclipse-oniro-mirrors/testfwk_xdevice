@@ -59,7 +59,7 @@ class ShellHandler:
                 self.unfinished_line = lines[-1]
                 # not return the tail element of this list contains unfinished str,
                 # so we set position -1
-                return lines[:-1]
+                return lines
 
     def add_process_method(self, func):
         if isinstance(func, types.FunctionType):
