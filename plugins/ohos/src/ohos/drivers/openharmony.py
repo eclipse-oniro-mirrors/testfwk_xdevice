@@ -20,6 +20,9 @@ import os
 import time
 import json
 import stat
+import shutil
+from datetime import datetime
+from enum import Enum
 
 from xdevice import ConfigConst
 from xdevice import ParamError
@@ -40,16 +43,50 @@ from xdevice import DeviceTestType
 from xdevice import CommonParserType
 from xdevice import FilePermission
 from xdevice import ResourceManager
+from xdevice import get_file_absolute_path
+from xdevice import exec_cmd
 
-from ohos.testkit.kit import oh_jsunit_para_parse
 from ohos.executor.listener import CollectingPassListener
 from ohos.constants import CKit
+from ohos.environment.dmlib import process_command_ret
 
-__all__ = ["OHJSUnitTestDriver", "OHKernelTestDriver"]
+__all__ = ["OHJSUnitTestDriver", "OHKernelTestDriver",
+           "OHYaraTestDriver", "oh_jsunit_para_parse"]
 
 TIME_OUT = 300 * 1000
 
 LOG = platform_logger("OpenHarmony")
+
+
+def oh_jsunit_para_parse(runner, junit_paras):
+    junit_paras = dict(junit_paras)
+    test_type_list = ["function", "performance", "reliability", "security"]
+    size_list = ["small", "medium", "large"]
+    level_list = ["0", "1", "2", "3"]
+    for para_name in junit_paras.keys():
+        para_name = para_name.strip()
+        para_values = junit_paras.get(para_name, [])
+        if para_name == "class":
+            runner.add_arg(para_name, ",".join(para_values))
+        elif para_name == "notClass":
+            runner.add_arg(para_name, ",".join(para_values))
+        elif para_name == "testType":
+            if para_values[0] not in test_type_list:
+                continue
+            # function/performance/reliability/security
+            runner.add_arg(para_name, para_values[0])
+        elif para_name == "size":
+            if para_values[0] not in size_list:
+                continue
+            # size small/medium/large
+            runner.add_arg(para_name, para_values[0])
+        elif para_name == "level":
+            if para_values[0] not in level_list:
+                continue
+            # 0/1/2/3/4
+            runner.add_arg(para_name, para_values[0])
+        elif para_name == "stress":
+            runner.add_arg(para_name, para_values[0])
 
 
 @Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_kernel_test)
@@ -760,6 +797,342 @@ class OHRustTestDriver(IDriver):
             command, timeout=TIME_OUT, receiver=handler, retry=0)
         resource_manager.process_cleaner_data(resource_data_dict, resource_dir,
                                               self.config.device)
+
+    def __result__(self):
+        return self.result if os.path.exists(self.result) else ""
+
+
+class OHYaraConfig(Enum):
+    HAP_FILE = "hap-file"
+    BUNDLE_NAME = "bundle-name"
+    RUNNER = "runner"
+    TESTCASE_CLASS = "class"
+
+    OS_FULLNAME_LIST = "osFullNameList"
+    VULNERABILITIES = "vulnerabilities"
+    VUL_ID = "vul_id"
+    OPENHARMONY_SA = "openharmony-sa"
+    AFFECTED_VERSION = "affected_versions"
+    MONTH = "month"
+    SEVERITY = "severity"
+    VUL_DESCRIPTION = "vul_description"
+    DISCLOSURE = "disclosure"
+    AFFECTED_FILES = "affected_files"
+    YARA_RULES = "yara_rules"
+
+    PASS = "pass"
+    FAIL = "fail"
+    BLOCK = "block"
+
+    BLOCK_MSG_001 = "The patch label is longer than two months (60 days), " \
+                    "which violates the OHCA agreement [https://compatibility.openharmony.cn/]."
+    BLOCK_MSG_002 = "The yara rule not in the maintenance scope."
+
+
+class VulItem:
+    vul_id = ""
+    month = ""
+    severity = ""
+    vul_description = ""
+    disclosure = ""
+    affected_files = ""
+    affected_versions = ""
+    yara_rules = ""
+    trace = ""
+    final_risk = OHYaraConfig.BLOCK.value
+    complete = False
+
+
+@Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_yara_test)
+class OHYaraTestDriver(IDriver):
+    def __init__(self):
+        self.result = ""
+        self.error_message = ""
+        self.config = None
+        self.tool_hap_info = dict()
+        self.security_patch = None
+        self.system_version = None
+
+    def __check_environment__(self, device_options):
+        pass
+
+    def __check_config__(self, config):
+        pass
+
+    def __execute__(self, request):
+        try:
+            LOG.debug("Start to execute open harmony yara test")
+            self.result = os.path.join(
+                request.config.report_path, "result",
+                '.'.join((request.get_module_name(), "xml")))
+            self.config = request.config
+            self.config.device = request.config.environment.devices[0]
+
+            config_file = request.root.source.config_file
+            suite_file = request.root.source.source_file
+
+            if not suite_file:
+                raise ParamError(
+                    "test source '%s' not exists" %
+                    request.root.source.source_string, error_no="00110")
+            LOG.debug("Test case file path: %s" % suite_file)
+            self.config.device.set_device_report_path(request.config.report_path)
+            self._run_oh_yara(config_file, request)
+
+        except Exception as exception:
+            self.error_message = exception
+            if not getattr(exception, "error_no", ""):
+                setattr(exception, "error_no", "03409")
+            LOG.exception(self.error_message, exc_info=False, error_no="03409")
+        finally:
+            serial = "{}_{}".format(str(request.config.device.__get_serial__()),
+                                    time.time_ns())
+            log_tar_file_name = "{}_{}".format(
+                request.get_module_name(), str(serial).replace(":", "_"))
+            self.config.device.device_log_collector.stop_hilog_task(
+                log_tar_file_name)
+
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message)
+
+    def _get_driver_config(self, json_config):
+        yara_bin = get_config_value('yara-bin',
+                                    json_config.get_driver(), False)
+        version_mapping_file = get_config_value('version-mapping-file',
+                                                json_config.get_driver(), False)
+        vul_info_file = get_config_value('vul-info-file',
+                                         json_config.get_driver(), False)
+        # get absolute file path
+        self.config.yara_bin = get_file_absolute_path(yara_bin)
+        self.config.version_mapping_file = get_file_absolute_path(version_mapping_file)
+        self.config.vul_info_file = get_file_absolute_path(vul_info_file, [self.config.testcases_path])
+
+        # get tool hap info
+        tool_hap_info = get_config_value('tools-hap-info',
+                                         json_config.get_driver(), False)
+        if tool_hap_info:
+            self.tool_hap_info[OHYaraConfig.HAP_FILE.value] = \
+                tool_hap_info.get("hap-file", "")
+            self.tool_hap_info[OHYaraConfig.BUNDLE_NAME.value] = \
+                tool_hap_info.get("bundle-name", "")
+            self.tool_hap_info[OHYaraConfig.RUNNER.value] = \
+                tool_hap_info.get("runner", "")
+            self.tool_hap_info[OHYaraConfig.TESTCASE_CLASS.value] = \
+                tool_hap_info.get("class", "")
+
+    def _run_oh_yara(self, config_file, request=None):
+        message_list = list()
+
+        json_config = JsonParser(config_file)
+        self._get_driver_config(json_config)
+
+        # get device info
+        self.security_patch = self.config.device.execute_shell_command(
+            "param get const.ohos.version.security_patch").strip()
+        self.system_version = self.config.device.execute_shell_command(
+            "param get const.ohos.fullname").strip()
+
+        if "fail" in self.system_version:
+            self._get_full_name_by_tool_hap()
+
+        vul_items = self._get_vul_items()
+        # if security patch expire, case fail
+        current_date_str = datetime.now().strftime('%Y-%m')
+        if self._check_if_expire_or_risk(current_date_str):
+            LOG.info("Security patch has expired. Set all case fail.")
+            for _, item in enumerate(vul_items):
+                if item.complete is False:
+                    item.complete = True
+                    item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_001.value)
+        else:
+            LOG.info("Security patch is shorter than two months. Start yara test.")
+            for _, item in enumerate(vul_items):
+                if item.complete is False:
+                    for index, affected_file in enumerate(item.affected_files):
+                        local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
+                                                  request.get_module_name(), item.yara_rules[index].split('.')[0])
+                        if not os.path.exists(local_path):
+                            os.makedirs(local_path)
+                        yara_file = get_file_absolute_path(item.yara_rules[index], [self.config.testcases_path])
+                        self.config.device.pull_file(affected_file, local_path)
+                        affected_file = os.path.join(local_path, os.path.basename(affected_file))
+                        if not os.path.exists(affected_file):
+                            LOG.debug("affected file [{}] is not exist, skip it.".format(item.affected_files[index]))
+                            item.final_risk = OHYaraConfig.PASS.value
+                            continue
+                        cmd = [self.config.yara_bin, yara_file, affected_file]
+                        result = exec_cmd(cmd)
+                        LOG.debug("Yara result: {}".format(result))
+                        if "testcase pass" in result:
+                            item.final_risk = OHYaraConfig.PASS.value
+                        else:
+                            if self._check_if_expire_or_risk(item.month, check_risk=True):
+                                item.trace = "{}{}".format(item.trace, result)
+                                item.final_risk = OHYaraConfig.FAIL.value
+                            else:
+                                item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_001.value)
+                        # if no risk delete files, if has risk keep it
+                        if item.final_risk != OHYaraConfig.FAIL.value:
+                            local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
+                                                      request.get_module_name(), item.yara_rules[index].split('.')[0])
+                            if os.path.exists(local_path):
+                                LOG.debug("Yara rule [{}] has no risk, remove affected files.".format(item.yara_rules[index]))
+                                shutil.rmtree(local_path)
+                    item.complete = True
+        self._generate_yara_report(request, vul_items, message_list)
+        self._generate_xml_report(request, vul_items, message_list)
+
+    def _check_if_expire_or_risk(self, date_str, expire_time=2, check_risk=False):
+        from dateutil.relativedelta import relativedelta
+        self.security_patch = self.security_patch.replace(' ', '')
+        self.security_patch = self.security_patch.replace('/', '-')
+        # get current date
+        source_date = datetime.strptime(date_str, '%Y-%m')
+        security_patch_date = datetime.strptime(self.security_patch[:-3], '%Y-%m')
+        # check if expire 2 months
+        rd = relativedelta(source_date, security_patch_date)
+        months = rd.months + (rd.years * 12)
+        if check_risk:
+            # vul time before security patch time no risk
+            LOG.debug("Security patch time: {}, vul time: {}, delta_months: {}"
+                      .format(self.security_patch[:-3], date_str, months))
+            if months <= 0:
+                return False
+            else:
+                return True
+        else:
+            # check if security patch time expire current time 2 months
+            LOG.debug("Security patch time: {}, current time: {}, delta_months: {}"
+                      .format(self.security_patch[:-3], date_str, months))
+            if months > expire_time:
+                return True
+            else:
+                return False
+
+    def _get_vul_items(self):
+        vul_items = list()
+        # parse version mapping file
+        mapping_info = self._do_parse_json(self.config.version_mapping_file)
+        os_full_name_list = mapping_info.get(OHYaraConfig.OS_FULLNAME_LIST.value, None)
+        # check if system version in version mapping list
+        is_maintenance = True
+        vul_version = os_full_name_list.get(self.system_version, None)
+        if os_full_name_list and vul_version is None:
+            is_maintenance = False
+        vul_info = self._do_parse_json(self.config.vul_info_file)
+        vulnerabilities = vul_info.get(OHYaraConfig.VULNERABILITIES.value, [])
+        for _, vul in enumerate(vulnerabilities):
+            affected_versions = vul.get(OHYaraConfig.AFFECTED_VERSION.value, [])
+            item = VulItem()
+            item.vul_id = vul.get(OHYaraConfig.VUL_ID.value, dict()).get(OHYaraConfig.OPENHARMONY_SA.value, "")
+            item.affected_versions = affected_versions
+            item.month = vul.get(OHYaraConfig.MONTH.value, "")
+            item.severity = vul.get(OHYaraConfig.SEVERITY.value, "")
+            item.vul_description = vul.get(OHYaraConfig.VUL_DESCRIPTION.value, "")
+            item.disclosure = vul.get(OHYaraConfig.DISCLOSURE.value, "")
+            item.affected_files = \
+                vul["affected_device"]["standard"]["linux"]["arm"]["scan_strategy"]["ists"]["yara"].get(
+                    OHYaraConfig.AFFECTED_FILES.value, [])
+            item.yara_rules = \
+                vul["affected_device"]["standard"]["linux"]["arm"]["scan_strategy"]["ists"]["yara"].get(
+                    OHYaraConfig.YARA_RULES.value, [])
+            # not in the maintenance scope, mark it completed
+            if not is_maintenance or vul_version not in affected_versions:
+                item.complete = True
+                item.final_risk = OHYaraConfig.BLOCK.value
+                item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_002.value)
+                LOG.debug("Yara rule [{}] is not in the maintenance scope, skip it. "
+                          "Mapping version is {}, affected versions is {}"
+                          .format(item.vul_id, vul_version, affected_versions))
+            vul_items.append(item)
+
+        return vul_items
+
+    @staticmethod
+    def _do_parse_json(file_path):
+        json_content = None
+        if not os.path.exists(file_path):
+            raise ParamError("The json file {} does not exist".format(
+                file_path), error_no="00110")
+        flags = os.O_RDONLY
+        modes = stat.S_IWUSR | stat.S_IRUSR
+        with os.fdopen(os.open(file_path, flags, modes),
+                       "r", encoding="utf-8") as file_content:
+            json_content = json.load(file_content)
+        if json_content is None:
+            raise ParamError("The json file {} parse error".format(
+                file_path), error_no="00110")
+        return json_content
+
+    def _get_full_name_by_tool_hap(self):
+        # check if tool hap has installed
+        result = self.config.device.execute_shell_command(
+            "bm dump -a | grep {}".format(self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
+        LOG.debug(result)
+        if self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value) not in result:
+            hap_path = get_file_absolute_path(self.tool_hap_info.get(OHYaraConfig.HAP_FILE.value))
+            self.config.device.push_file(hap_path, "/data/local/tmp")
+            result = self.config.device.execute_shell_command(
+                "bm install -p /data/local/tmp/{}".format(os.path.basename(hap_path)))
+            LOG.debug(result)
+            self.config.device.execute_shell_command(
+                "mkdir -p /data/app/el2/100/base/{}/haps/entry/files".format(
+                    self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
+        self.config.device.execute_shell_command(
+            "aa test -b {} -m entry -s unittest {} -s type testcase -s class {} -s timeout 5000".format(
+                self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value),
+                self.tool_hap_info.get(OHYaraConfig.RUNNER.value),
+                self.tool_hap_info.get(OHYaraConfig.TESTCASE_CLASS.value)))
+        self.system_version = self.config.device.execute_shell_command(
+            "cat /data/app/el2/100/base/{}/haps/entry/files/osFullNameInfo.txt".format(
+                self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value))).replace('"', '')
+        LOG.debug(self.system_version)
+
+    def _generate_yara_report(self, request, vul_items, result_message):
+        import csv
+        result_message.clear()
+        yara_report = os.path.join(request.config.report_path, "vul_info_{}.csv"
+                                   .format(request.config.device.device_sn))
+        if os.path.exists(yara_report):
+            data = []
+        else:
+            data = [
+                ["设备版本号:", self.system_version, "设备安全补丁标签:", self.security_patch],
+                ["漏洞编号", "严重程度", "披露时间", "检测结果", "修复建议", "漏洞描述"]
+            ]
+        fd = os.open(yara_report, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o755)
+        for _, item in enumerate(vul_items):
+            data.append([item.vul_id, item.severity,
+                         item.month, item.final_risk,
+                         item.disclosure.get("zh", ""), item.vul_description.get("zh", "")])
+            result = "{}|{}|{}|{}|{}|{}|{}\n".format(
+                item.vul_id, item.severity,
+                item.month, item.final_risk,
+                item.disclosure.get("zh", ""), item.vul_description.get("zh", ""),
+                item.trace)
+            result_message.append(result)
+        with os.fdopen(fd, "a", newline='') as file_handler:
+            writer = csv.writer(file_handler)
+            writer.writerows(data)
+
+    def _generate_xml_report(self, request, vul_items, message_list):
+        result_message = "".join(message_list)
+        listener_copy = request.listeners.copy()
+        parsers = get_plugin(
+            Plugin.PARSER, CommonParserType.oh_yara)
+        if parsers:
+            parsers = parsers[:1]
+        for listener in listener_copy:
+            listener.device_sn = self.config.device.device_sn
+        parser_instances = []
+        for parser in parsers:
+            parser_instance = parser.__class__()
+            parser_instance.suites_name = request.get_module_name()
+            parser_instance.vul_items = vul_items
+            parser_instance.listeners = listener_copy
+            parser_instances.append(parser_instance)
+        handler = ShellHandler(parser_instances)
+        process_command_ret(result_message, handler)
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
