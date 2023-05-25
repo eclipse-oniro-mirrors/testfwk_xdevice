@@ -1570,8 +1570,6 @@ class OHYaraTestParser(IParser):
 
         test_suites = self.state_machine.get_suites()
         self.state_machine.test().is_completed = True
-        if not hasattr(test_suite, "total_cases"):
-            test_suite.test_num += 1
         test_suites.test_num += 1
         for listener in self.get_listeners():
             result = copy.copy(test_result)
