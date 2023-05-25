@@ -21,6 +21,7 @@ import time
 import json
 import stat
 import shutil
+import re
 from datetime import datetime
 from enum import Enum
 
@@ -843,6 +844,48 @@ class VulItem:
     complete = False
 
 
+class OHYaraConfig(Enum):
+    HAP_FILE = "hap-file"
+    BUNDLE_NAME = "bundle-name"
+    RUNNER = "runner"
+    TESTCASE_CLASS = "class"
+
+    OS_FULLNAME_LIST = "osFullNameList"
+    VULNERABILITIES = "vulnerabilities"
+    VUL_ID = "vul_id"
+    OPENHARMONY_SA = "openharmony-sa"
+    AFFECTED_VERSION = "affected_versions"
+    MONTH = "month"
+    SEVERITY = "severity"
+    VUL_DESCRIPTION = "vul_description"
+    DISCLOSURE = "disclosure"
+    AFFECTED_FILES = "affected_files"
+    YARA_RULES = "yara_rules"
+
+    PASS = "pass"
+    FAIL = "fail"
+    BLOCK = "block"
+
+    ERROR_MSG_001 = "The patch label is longer than two months (60 days), " \
+                    "which violates the OHCA agreement [https://compatibility.openharmony.cn/]."
+    ERROR_MSG_002 = "This test case is beyond the patch label scope and does not need to be executed."
+    ERROR_MSG_003 = "Modify the code according to the patch requirements: "
+
+
+class VulItem:
+    vul_id = ""
+    month = ""
+    severity = ""
+    vul_description = dict()
+    disclosure = dict()
+    affected_files = ""
+    affected_versions = ""
+    yara_rules = ""
+    trace = ""
+    final_risk = OHYaraConfig.PASS.value
+    complete = False
+
+
 @Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_yara_test)
 class OHYaraTestDriver(IDriver):
     def __init__(self):
@@ -941,14 +984,34 @@ class OHYaraTestDriver(IDriver):
         if self._check_if_expire_or_risk(current_date_str):
             LOG.info("Security patch has expired. Set all case fail.")
             for _, item in enumerate(vul_items):
-                if item.complete is False:
-                    item.complete = True
-                    item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_001.value)
+                item.complete = True
+                item.final_risk = OHYaraConfig.FAIL.value
+                item.trace = "{}{}".format(item.trace, OHYaraConfig.ERROR_MSG_001.value)
         else:
             LOG.info("Security patch is shorter than two months. Start yara test.")
-            for _, item in enumerate(vul_items):
-                if item.complete is False:
+            # parse version mapping file
+            mapping_info = self._do_parse_json(self.config.version_mapping_file)
+            os_full_name_list = mapping_info.get(OHYaraConfig.OS_FULLNAME_LIST.value, None)
+            # check if system version in version mapping list
+            vul_version = os_full_name_list.get(self.system_version, None)
+            # not in the maintenance scope, skip all case
+            if vul_version is None:
+                LOG.debug("The system version is not in the maintenance scope, skip it. "
+                          "system versions is {}".format(self.system_version))
+            else:
+                for _, item in enumerate(vul_items):
                     for index, affected_file in enumerate(item.affected_files):
+                        has_inter = False
+                        for i, _ in enumerate(item.affected_versions):
+                            if self._check_if_intersection(vul_version, item.affected_versions[i]):
+                                has_inter = True
+                                break
+                        if not has_inter:
+                            LOG.debug("Yara rule [{}] affected versions has no intersection "
+                                      "in mapping version, skip it. Mapping version is {}, "
+                                      "affected versions is {}".format(item.vul_id, vul_version,
+                                                                       item.affected_versions))
+                            continue
                         local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
                                                   request.get_module_name(), item.yara_rules[index].split('.')[0])
                         if not os.path.exists(local_path):
@@ -966,17 +1029,21 @@ class OHYaraTestDriver(IDriver):
                         if "testcase pass" in result:
                             item.final_risk = OHYaraConfig.PASS.value
                         else:
-                            if self._check_if_expire_or_risk(item.month, check_risk=True):
-                                item.trace = "{}{}".format(item.trace, result)
+                            if not self._check_if_expire_or_risk(item.month, check_risk=True):
+                                item.trace = "{}{}".format(OHYaraConfig.ERROR_MSG_003.value,
+                                                           item.disclosure.get("zh", ""))
                                 item.final_risk = OHYaraConfig.FAIL.value
                             else:
-                                item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_001.value)
-                        # if no risk delete files, if has risk keep it
+                                item.final_risk = OHYaraConfig.BLOCK.value
+                                item.trace = "{}{}".format(item.trace, OHYaraConfig.ERROR_MSG_002.value)
+                        # if no risk delete files, if rule has risk keep it
                         if item.final_risk != OHYaraConfig.FAIL.value:
                             local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
                                                       request.get_module_name(), item.yara_rules[index].split('.')[0])
                             if os.path.exists(local_path):
-                                LOG.debug("Yara rule [{}] has no risk, remove affected files.".format(item.yara_rules[index]))
+                                LOG.debug(
+                                    "Yara rule [{}] has no risk, remove affected files.".format(
+                                        item.yara_rules[index]))
                                 shutil.rmtree(local_path)
                     item.complete = True
         self._generate_yara_report(request, vul_items, message_list)
@@ -1009,16 +1076,45 @@ class OHYaraTestDriver(IDriver):
             else:
                 return False
 
+    @staticmethod
+    def _check_if_intersection(source_version, dst_version):
+        # para dst_less_sor control if dst less than source
+        def _do_check(soruce, dst, dst_less_sor=True):
+            if re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}', soruce) and \
+                    re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}', dst):
+                source_vers = soruce.split(".")
+                dst_vers = dst.split(".")
+                for index, _ in enumerate(source_vers):
+                    if dst_less_sor:
+                        # check if all source number less than dst number
+                        if int(source_vers[index]) < int(dst_vers[index]):
+                            return False
+                    else:
+                        # check if all source number larger than dst number
+                        if int(source_vers[index]) > int(dst_vers[index]):
+                            return False
+                return True
+            return False
+
+        source_groups = source_version.split("-")
+        dst_groups = dst_version.split("-")
+        if source_version == dst_version:
+            return True
+        elif len(source_groups) == 1 and len(dst_groups) == 1:
+            return source_version == dst_version
+        elif len(source_groups) == 1 and len(dst_groups) == 2:
+            return _do_check(source_groups[0], dst_groups[0]) and \
+                   _do_check(source_groups[0], dst_groups[1], dst_less_sor=False)
+        elif len(source_groups) == 2 and len(dst_groups) == 1:
+            return _do_check(source_groups[0], dst_groups[0], dst_less_sor=False) and \
+                   _do_check(source_groups[1], dst_groups[0])
+        elif len(source_groups) == 2 and len(dst_groups) == 2:
+            return _do_check(source_groups[0], dst_groups[1], dst_less_sor=False) and \
+                   _do_check(source_groups[1], dst_groups[0])
+        return False
+
     def _get_vul_items(self):
         vul_items = list()
-        # parse version mapping file
-        mapping_info = self._do_parse_json(self.config.version_mapping_file)
-        os_full_name_list = mapping_info.get(OHYaraConfig.OS_FULLNAME_LIST.value, None)
-        # check if system version in version mapping list
-        is_maintenance = True
-        vul_version = os_full_name_list.get(self.system_version, None)
-        if os_full_name_list and vul_version is None:
-            is_maintenance = False
         vul_info = self._do_parse_json(self.config.vul_info_file)
         vulnerabilities = vul_info.get(OHYaraConfig.VULNERABILITIES.value, [])
         for _, vul in enumerate(vulnerabilities):
@@ -1036,16 +1132,8 @@ class OHYaraTestDriver(IDriver):
             item.yara_rules = \
                 vul["affected_device"]["standard"]["linux"]["arm"]["scan_strategy"]["ists"]["yara"].get(
                     OHYaraConfig.YARA_RULES.value, [])
-            # not in the maintenance scope, mark it completed
-            if not is_maintenance or vul_version not in affected_versions:
-                item.complete = True
-                item.final_risk = OHYaraConfig.BLOCK.value
-                item.trace = "{}{}".format(item.trace, OHYaraConfig.BLOCK_MSG_002.value)
-                LOG.debug("Yara rule [{}] is not in the maintenance scope, skip it. "
-                          "Mapping version is {}, affected versions is {}"
-                          .format(item.vul_id, vul_version, affected_versions))
             vul_items.append(item)
-
+        LOG.debug("Vul size is {}".format(len(vul_items)))
         return vul_items
 
     @staticmethod
@@ -1065,6 +1153,8 @@ class OHYaraTestDriver(IDriver):
         return json_content
 
     def _get_full_name_by_tool_hap(self):
+        if self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value, None) is None:
+            raise ParamError("The json file not set tool hap.", error_no="00110")
         # check if tool hap has installed
         result = self.config.device.execute_shell_command(
             "bm dump -a | grep {}".format(self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
