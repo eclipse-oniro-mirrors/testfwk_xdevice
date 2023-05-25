@@ -825,47 +825,6 @@ class OHYaraConfig(Enum):
     FAIL = "fail"
     BLOCK = "block"
 
-    BLOCK_MSG_001 = "The patch label is longer than two months (60 days), " \
-                    "which violates the OHCA agreement [https://compatibility.openharmony.cn/]."
-    BLOCK_MSG_002 = "The yara rule not in the maintenance scope."
-
-
-class VulItem:
-    vul_id = ""
-    month = ""
-    severity = ""
-    vul_description = ""
-    disclosure = ""
-    affected_files = ""
-    affected_versions = ""
-    yara_rules = ""
-    trace = ""
-    final_risk = OHYaraConfig.BLOCK.value
-    complete = False
-
-
-class OHYaraConfig(Enum):
-    HAP_FILE = "hap-file"
-    BUNDLE_NAME = "bundle-name"
-    RUNNER = "runner"
-    TESTCASE_CLASS = "class"
-
-    OS_FULLNAME_LIST = "osFullNameList"
-    VULNERABILITIES = "vulnerabilities"
-    VUL_ID = "vul_id"
-    OPENHARMONY_SA = "openharmony-sa"
-    AFFECTED_VERSION = "affected_versions"
-    MONTH = "month"
-    SEVERITY = "severity"
-    VUL_DESCRIPTION = "vul_description"
-    DISCLOSURE = "disclosure"
-    AFFECTED_FILES = "affected_files"
-    YARA_RULES = "yara_rules"
-
-    PASS = "pass"
-    FAIL = "fail"
-    BLOCK = "block"
-
     ERROR_MSG_001 = "The patch label is longer than two months (60 days), " \
                     "which violates the OHCA agreement [https://compatibility.openharmony.cn/]."
     ERROR_MSG_002 = "This test case is beyond the patch label scope and does not need to be executed."
