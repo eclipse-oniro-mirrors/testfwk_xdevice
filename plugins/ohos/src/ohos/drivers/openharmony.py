@@ -959,6 +959,7 @@ class OHYaraTestDriver(IDriver):
                           "system versions is {}".format(self.system_version))
             else:
                 for _, item in enumerate(vul_items):
+                    LOG.debug("Affected files: {}".format(item.affected_files))
                     for index, affected_file in enumerate(item.affected_files):
                         has_inter = False
                         for i, _ in enumerate(item.affected_versions):
@@ -984,9 +985,10 @@ class OHYaraTestDriver(IDriver):
                             continue
                         cmd = [self.config.yara_bin, yara_file, affected_file]
                         result = exec_cmd(cmd)
-                        LOG.debug("Yara result: {}".format(result))
+                        LOG.debug("Yara result: {}, affected file: {}".format(result, item.affected_files[index]))
                         if "testcase pass" in result:
                             item.final_risk = OHYaraConfig.PASS.value
+                            break
                         else:
                             if self._check_if_expire_or_risk(item.month, check_risk=True):
                                 item.trace = "{}{}".format(OHYaraConfig.ERROR_MSG_003.value,
