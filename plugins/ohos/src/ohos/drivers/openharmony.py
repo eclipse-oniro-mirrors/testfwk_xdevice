@@ -988,7 +988,7 @@ class OHYaraTestDriver(IDriver):
                         if "testcase pass" in result:
                             item.final_risk = OHYaraConfig.PASS.value
                         else:
-                            if not self._check_if_expire_or_risk(item.month, check_risk=True):
+                            if self._check_if_expire_or_risk(item.month, check_risk=True):
                                 item.trace = "{}{}".format(OHYaraConfig.ERROR_MSG_003.value,
                                                            item.disclosure.get("zh", ""))
                                 item.final_risk = OHYaraConfig.FAIL.value
@@ -1022,7 +1022,7 @@ class OHYaraTestDriver(IDriver):
             # vul time before security patch time no risk
             LOG.debug("Security patch time: {}, vul time: {}, delta_months: {}"
                       .format(self.security_patch[:-3], date_str, months))
-            if months <= 0:
+            if months > 0:
                 return False
             else:
                 return True
