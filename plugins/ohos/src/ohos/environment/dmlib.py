@@ -192,6 +192,7 @@ class HdcMonitor:
                             self.main_hdc_connection)
 
                 self.list_targets()
+                time.sleep(2)
             except (HdcError, Exception) as _:
                 self.handle_exception_monitor_loop()
                 break
