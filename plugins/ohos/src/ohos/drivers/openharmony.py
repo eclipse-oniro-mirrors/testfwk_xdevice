@@ -806,8 +806,7 @@ class OHRustTestDriver(IDriver):
 class OHYaraConfig(Enum):
     HAP_FILE = "hap-file"
     BUNDLE_NAME = "bundle-name"
-    RUNNER = "runner"
-    TESTCASE_CLASS = "class"
+    CLEANUP_APPS = "cleanup-apps"
 
     OS_FULLNAME_LIST = "osFullNameList"
     VULNERABILITIES = "vulnerabilities"
@@ -887,6 +886,12 @@ class OHYaraTestDriver(IDriver):
                 setattr(exception, "error_no", "03409")
             LOG.exception(self.error_message, exc_info=False, error_no="03409")
         finally:
+            if self.tool_hap_info.get(OHYaraConfig.CLEANUP_APPS.value):
+                cmd = ["uninstall", self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)]
+                result = self.config.device.connector_command(cmd)
+                LOG.debug("Try uninstall tools hap, bundle name is {}, result is {}".format(
+                    self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value), result))
+
             serial = "{}_{}".format(str(request.config.device.__get_serial__()),
                                     time.time_ns())
             log_tar_file_name = "{}_{}".format(
@@ -910,17 +915,21 @@ class OHYaraTestDriver(IDriver):
         self.config.vul_info_file = get_file_absolute_path(vul_info_file, [self.config.testcases_path])
 
         # get tool hap info
+        # default value
+        self.tool_hap_info = {
+            OHYaraConfig.HAP_FILE.value: "sststool.hap",
+            OHYaraConfig.BUNDLE_NAME.value: "com.example.sststool",
+            OHYaraConfig.CLEANUP_APPS.value: "true"
+        }
         tool_hap_info = get_config_value('tools-hap-info',
                                          json_config.get_driver(), False)
         if tool_hap_info:
             self.tool_hap_info[OHYaraConfig.HAP_FILE.value] = \
-                tool_hap_info.get("hap-file", "")
+                tool_hap_info.get(OHYaraConfig.HAP_FILE.value, "sststool.hap")
             self.tool_hap_info[OHYaraConfig.BUNDLE_NAME.value] = \
-                tool_hap_info.get("bundle-name", "")
-            self.tool_hap_info[OHYaraConfig.RUNNER.value] = \
-                tool_hap_info.get("runner", "")
-            self.tool_hap_info[OHYaraConfig.TESTCASE_CLASS.value] = \
-                tool_hap_info.get("class", "")
+                tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value, "com.example.sststool")
+            self.tool_hap_info[OHYaraConfig.CLEANUP_APPS.value] = \
+                tool_hap_info.get(OHYaraConfig.CLEANUP_APPS.value, "true")
 
     def _run_oh_yara(self, config_file, request=None):
         message_list = list()
@@ -1114,8 +1123,6 @@ class OHYaraTestDriver(IDriver):
         return json_content
 
     def _get_full_name_by_tool_hap(self):
-        if self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value, None) is None:
-            raise ParamError("The json file not set tool hap.", error_no="00110")
         # check if tool hap has installed
         result = self.config.device.execute_shell_command(
             "bm dump -a | grep {}".format(self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
@@ -1130,10 +1137,10 @@ class OHYaraTestDriver(IDriver):
                 "mkdir -p /data/app/el2/100/base/{}/haps/entry/files".format(
                     self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
         self.config.device.execute_shell_command(
-            "aa test -b {} -m entry -s unittest {} -s type testcase -s class {} -s timeout 5000".format(
+            "aa start -a {}.MainAbility -b {}".format(
                 self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value),
-                self.tool_hap_info.get(OHYaraConfig.RUNNER.value),
-                self.tool_hap_info.get(OHYaraConfig.TESTCASE_CLASS.value)))
+                self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value)))
+        time.sleep(1)
         self.system_version = self.config.device.execute_shell_command(
             "cat /data/app/el2/100/base/{}/haps/entry/files/osFullNameInfo.txt".format(
                 self.tool_hap_info.get(OHYaraConfig.BUNDLE_NAME.value))).replace('"', '')
