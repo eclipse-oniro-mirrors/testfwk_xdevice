@@ -53,7 +53,7 @@ from ohos.environment.dmlib import CollectingOutputReceiver
 
 __all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
            "ConfigKit", "AppInstallKit", "ComponentKit", "PermissionKit",
-           "junit_dex_para_parse", "oh_jsunit_para_parse", "SmartPerfKit"]
+           "junit_dex_para_parse", "SmartPerfKit"]
 
 MAX_WAIT_COUNT = 4
 TARGET_SDK_VERSION = 22
@@ -1050,37 +1050,6 @@ def get_app_name(hap_app):
         if hap_file_info:
             hap_file_info.close()
     return app_name
-
-
-def oh_jsunit_para_parse(runner, junit_paras):
-    junit_paras = dict(junit_paras)
-    test_type_list = ["function", "performance", "reliability", "security"]
-    size_list = ["small", "medium", "large"]
-    level_list = ["0", "1", "2", "3"]
-    for para_name in junit_paras.keys():
-        para_name = para_name.strip()
-        para_values = junit_paras.get(para_name, [])
-        if para_name == "class":
-            runner.add_arg(para_name, ",".join(para_values))
-        elif para_name == "notClass":
-            runner.add_arg(para_name, ",".join(para_values))
-        elif para_name == "testType":
-            if para_values[0] not in test_type_list:
-                continue
-            # function/performance/reliability/security
-            runner.add_arg(para_name, para_values[0])
-        elif para_name == "size":
-            if para_values[0] not in size_list:
-                continue
-            # size small/medium/large
-            runner.add_arg(para_name, para_values[0])
-        elif para_name == "level":
-            if para_values[0] not in level_list:
-                continue
-            # 0/1/2/3/4
-            runner.add_arg(para_name, para_values[0])
-        elif para_name == "stress":
-            runner.add_arg(para_name, para_values[0])
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.smartperf)

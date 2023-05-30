@@ -124,6 +124,7 @@ class DeviceTestType(object):
     oh_jsunit_test = "OHJSUnitTest"
     hm_os_jsunit_test = "HMOSJSUnitTest"
     oh_rust_test = "OHRustTest"
+    oh_yara_test = "OHYaraTest"
 
 
 @dataclass
@@ -198,6 +199,7 @@ class CommonParserType:
     oh_jsunit = "OHJSUnit"
     oh_jsunit_list = "OHJSUnitList"
     oh_rust = "OHRust"
+    oh_yara = "OHYara"
 
 
 @dataclass
