@@ -359,6 +359,7 @@ class CppTestListParser(IParser):
         self.last_test_class_name = None
         self.tests = []
         self.result_data = ""
+        self.suites = dict()
 
     def __process__(self, lines):
         for line in lines:
@@ -376,14 +377,21 @@ class CppTestListParser(IParser):
                                   line)
         if class_matcher:
             self.last_test_class_name = class_matcher.group(1)
+            if self.last_test_class_name not in self.suites:
+                self.suites.setdefault(self.last_test_class_name, [])
         elif method_matcher:
             if not self.last_test_class_name:
                 LOG.error("Parsed new test case name %s but no test class name"
                           " has been set" % line)
             else:
-                test = TestDescription(self.last_test_class_name,
-                                       method_matcher.group(1))
-                self.tests.append(test)
+                test_name = method_matcher.group(1)
+                if test_name not in self.suites.get(self.last_test_class_name, []):
+                    test = TestDescription(self.last_test_class_name,
+                                           test_name)
+                    self.tests.append(test)
+                else:
+                    LOG.debug("[{}.{}] has already collect it, skip it.".format(
+                        self.last_test_class_name, test_name))
         else:
             if not check_pub_key_exist():
                 LOG.debug("Line ignored: %s" % line)
