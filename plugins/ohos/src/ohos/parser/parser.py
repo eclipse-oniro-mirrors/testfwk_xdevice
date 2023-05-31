@@ -389,6 +389,7 @@ class CppTestListParser(IParser):
                     test = TestDescription(self.last_test_class_name,
                                            test_name)
                     self.tests.append(test)
+                    self.suites.get(self.last_test_class_name, []).append(test_name)
                 else:
                     LOG.debug("[{}.{}] has already collect it, skip it.".format(
                         self.last_test_class_name, test_name))
