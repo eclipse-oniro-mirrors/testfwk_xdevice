@@ -701,7 +701,7 @@ class CTestParser(IParser):
             test_class, test_name, status, run_time = \
                 self.parse_test_description(message)
         test_result = self.state_machine.test(reset=True)
-        test_result.test_class = test_class
+        test_result.test_class = self.state_machine.suite().suite_name
         test_result.test_name = test_name
         test_result.run_time = run_time
         self.state_machine.running_test_index += 1
