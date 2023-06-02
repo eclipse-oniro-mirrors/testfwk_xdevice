@@ -66,8 +66,8 @@ def _init_global_config():
         MODULES_DIR, "_core", "resource"))
 
     # create xdevice temp folder
-    Variables.temp_dir = os.path.join(
-        os.path.dirname(tempfile.gettempdir()), "xdevice_data")
+    Variables.temp_dir = os.path.join(tempfile.gettempdir(),
+                                      "xdevice_data")
     if not os.path.exists(Variables.temp_dir):
         os.makedirs(Variables.temp_dir)
 
