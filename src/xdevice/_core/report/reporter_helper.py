@@ -552,7 +552,7 @@ class VisionHelper:
                     render_target=ReportConstant.summary_vision_report):
         exec_info, summary, suites = parsed_data
         if not os.path.exists(self.template_name):
-            LOG.error("Template file not exists")
+            LOG.error("Template file not exists. {}".format(self.template_name))
             return ""
 
         with open(self.template_name) as file:
