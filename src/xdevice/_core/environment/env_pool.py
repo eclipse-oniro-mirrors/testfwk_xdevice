@@ -128,7 +128,7 @@ class EnvPool(object):
                 device.remove_ports()
         self._unload_manager()
 
-    def _apply_device(self, selector, timeout=10):
+    def _apply_device(self, selector, timeout=3):
         LOG.info("Apply device in pool")
         for manager_type, manager in self._filters.items():
             if not manager.__filter_selector__(selector):
