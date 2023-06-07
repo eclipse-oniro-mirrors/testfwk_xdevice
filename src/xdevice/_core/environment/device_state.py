@@ -34,6 +34,8 @@ class TestDeviceState(Enum):
             return TestDeviceState.NOT_AVAILABLE
         elif device_state == DeviceState.ONLINE:
             return TestDeviceState.ONLINE
+        elif device_state == DeviceState.CONNECTED:
+            return TestDeviceState.ONLINE
         elif device_state == DeviceState.OFFLINE:
             return TestDeviceState.NOT_AVAILABLE
         elif device_state == DeviceState.RECOVERY:
@@ -49,12 +51,13 @@ class DeviceState(Enum):
     BOOTLOADER = "bootloader"
     OFFLINE = "offline"
     ONLINE = "device"
+    CONNECTED = "connected"
     RECOVERY = "recovery"
 
     @staticmethod
     def get_state(state):
         for device_state in DeviceState:
-            if device_state.value == state:
+            if device_state.value == state.lower():
                 return device_state
         return None
 
