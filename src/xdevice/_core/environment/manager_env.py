@@ -156,7 +156,7 @@ class EnvironmentManager(object):
         for _, device in used_devices.items():
             self.reset_device(device)
 
-    def apply_device(self, device_option, timeout=10):
+    def apply_device(self, device_option, timeout=3):
         LOG.debug("Apply device from managers:%s" % self.managers)
         for manager_type, manager in self.managers.items():
             support_labels = getattr(manager, "support_labels", [])
