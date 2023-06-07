@@ -374,9 +374,9 @@ class ManagedDeviceListener(object):
                                              DeviceEvent.CONNECTED_OFFLINE)
         test_device.device_state_monitor.set_state(
             test_device.test_device_state)
-        LOG.debug("Device connected: %s %s %s %s" % (
+        LOG.debug("Device connected: {} {} {} {}, state: {}".format(
             convert_serial(idevice.device_sn), idevice.device_os_type,
-            idevice.host, idevice.port))
+            idevice.host, idevice.port, test_device.test_device_state))
         LOG.debug("Set device %s %s to true" % (
             convert_serial(idevice.device_sn), ConfigConst.recover_state))
         test_device.set_recover_state(True)
