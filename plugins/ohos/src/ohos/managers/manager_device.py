@@ -120,7 +120,7 @@ class ManagerDevice(IDeviceManager, IFilter):
             LOG.debug("Find: release list con lock")
             self.list_con.release()
 
-    def apply_device(self, device_option, timeout=10):
+    def apply_device(self, device_option, timeout=3):
 
         LOG.debug("Apply device: apply lock con lock")
         self.lock_con.acquire()
@@ -128,12 +128,8 @@ class ManagerDevice(IDeviceManager, IFilter):
             device = self.allocate_device_option(device_option)
             if device:
                 return device
-            if hasattr(sys, ConfigConst.env_pool_cache):
-                wait_delta = 1
-            else:
-                wait_delta = 4
             LOG.debug("Wait for available device founded")
-            self.wait_times += wait_delta
+            self.wait_times += 1
             if self.wait_times > timeout:
                 self.lock_con.wait(timeout)
             else:
@@ -238,14 +234,14 @@ class ManagerDevice(IDeviceManager, IFilter):
                           (device_instance, device_instance.host,
                            device_instance.port, device_instance.device_sn,
                            device_instance.usb_type))
-                device_instance.device_state = DeviceState.get_state(
-                    idevice.device_state)
+                device_instance.device_state = idevice.device_state
                 device_instance.test_device_state = \
                     TestDeviceState.get_test_device_state(
                         device_instance.device_state)
                 device_instance.device_state_monitor = \
                     DeviceStateMonitor(device_instance)
-                if idevice.device_state == DeviceState.ONLINE:
+                if idevice.device_state == DeviceState.ONLINE or \
+                        idevice.device_state == DeviceState.CONNECTED:
                     device_instance.get_device_type()
                 self.append_device_by_sort(device_instance)
                 device = device_instance
@@ -378,9 +374,9 @@ class ManagedDeviceListener(object):
                                              DeviceEvent.CONNECTED_OFFLINE)
         test_device.device_state_monitor.set_state(
             test_device.test_device_state)
-        LOG.debug("Device connected: %s %s %s %s" % (
+        LOG.debug("Device connected: {} {} {} {}, state: {}".format(
             convert_serial(idevice.device_sn), idevice.device_os_type,
-            idevice.host, idevice.port))
+            idevice.host, idevice.port, test_device.test_device_state))
         LOG.debug("Set device %s %s to true" % (
             convert_serial(idevice.device_sn), ConfigConst.recover_state))
         test_device.set_recover_state(True)

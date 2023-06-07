@@ -92,9 +92,13 @@ def perform_device_action(func):
                     ConnectionAbortedError) as error:  # pylint:disable=undefined-variable
                 self.log.error("error type: %s, error: %s" %
                                (error.__class__.__name__, error))
-                cmd = "{} target boot".format(HdcHelper.CONNECTOR_NAME)
-                self.log.info("re-execute {} reset".format(HdcHelper.CONNECTOR_NAME))
-                exec_cmd(cmd)
+                # check hdc if running
+                if not HdcHelper.check_if_hdc_running():
+                    LOG.debug("%s is not running, set device %s %s false" % (
+                        HdcHelper.CONNECTOR_NAME, self.device_sn, ConfigConst.recover_state))
+                    self.set_recover_state(False)
+                    callback_to_outer(self, "recover failed")
+                    raise error
                 callback_to_outer(self, "error:%s, prepare to recover" % error)
                 if not self.recover_device():
                     LOG.debug("Set device %s %s false" % (
@@ -305,12 +309,9 @@ class Device(IDevice):
 
     def _reboot_until_online(self):
         self._do_reboot()
-        self._wait_for_device_online()
 
     def reboot(self):
         self._reboot_until_online()
-        self.device_state_monitor.wait_for_device_available(
-            self.reboot_timeout)
         self.enable_hdc_root()
         self.device_log_collector.restart_catch_device_log()
 
@@ -591,7 +592,7 @@ class Device(IDevice):
         @summary: Reconnect the device.
         '''
         if not self.is_harmony:
-            if not self.wait_for_boot_completion(waittime):
+            if not self.wait_for_boot_completion():
                 raise Exception("Reconnect timed out.")
 
         if self._proxy:
@@ -613,20 +614,13 @@ class Device(IDevice):
             return self._proxy
         return None
 
-    def wait_for_boot_completion(self, waittime=60 * 15, reconnect=False):
+    def wait_for_boot_completion(self):
         """Waits for the device to boot up.
 
         Returns:
             True if the device successfully finished booting, False otherwise.
         """
-        if not self.wait_for_device_not_available(
-                DEFAULT_UNAVAILABLE_TIMEOUT):
-            LOG.error("Did not detect device {} becoming unavailable "
-                      "after reboot".format(convert_serial(self.device_sn)))
-        self._wait_for_device_online()
-        self.device_state_monitor.wait_for_device_available(
-            self.reboot_timeout)
-        return True
+        return self.device_state_monitor.wait_for_device_available(self.reboot_timeout)
 
     def get_local_port(self):
         from devicetest.utils.util import get_forward_port
