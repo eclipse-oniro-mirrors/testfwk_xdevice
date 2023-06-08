@@ -18,6 +18,7 @@
 
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 
 __all__ = ["Variables"]
@@ -48,6 +49,7 @@ class Variables:
     top_dir = ""
     res_dir = ""
     exec_dir = ""
+    temp_dir = ""
     report_vars = ReportVariables()
     task_name = ""
     source_code_rootpath = ""
@@ -62,6 +64,12 @@ def _init_global_config():
     Variables.top_dir = TOP_DIR
     Variables.res_dir = os.path.abspath(os.path.join(
         MODULES_DIR, "_core", "resource"))
+
+    # create xdevice temp folder
+    Variables.temp_dir = os.path.join(tempfile.gettempdir(),
+                                      "xdevice_data")
+    if not os.path.exists(Variables.temp_dir):
+        os.makedirs(Variables.temp_dir)
 
     # set report variables
     Variables.report_vars.log_dir = "log"

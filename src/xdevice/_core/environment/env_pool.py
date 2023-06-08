@@ -128,7 +128,7 @@ class EnvPool(object):
                 device.remove_ports()
         self._unload_manager()
 
-    def _apply_device(self, selector, timeout=10):
+    def _apply_device(self, selector, timeout=3):
         LOG.info("Apply device in pool")
         for manager_type, manager in self._filters.items():
             if not manager.__filter_selector__(selector):
@@ -355,7 +355,7 @@ class DeviceSelector(Selector):
 class Cache:
     def __init__(self):
         from xdevice import Variables
-        self.cache_file = os.path.join(Variables.res_dir, "cache.dat")
+        self.cache_file = os.path.join(Variables.temp_dir, "cache.dat")
         self.expire_time = 1  # days
 
     def check_cache_if_expire(self):
@@ -377,7 +377,7 @@ class Cache:
         return (dt2 - dt1).days
 
     def update_cache(self):
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_BINARY
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
         with os.fdopen(os.open(self.cache_file, flags, FilePermission.mode_755),
                        "wb") as f:
             f.write(b'123')
