@@ -330,9 +330,10 @@ class ReportListener(IListener):
                                           task_info=test_result)
 
     def __skipped__(self, lifecycle, test_result):
-        del test_result
         if lifecycle == LifeCycle.TestCase:
-            self._remove_current_test_result()
+            test = self._get_test_result(test_result=test_result, create=False)
+            test.stacktrace = test_result.stacktrace
+            test.code = ResultCode.SKIPPED.value
 
     def __failed__(self, lifecycle, test_result):
         if lifecycle == LifeCycle.TestSuite:
