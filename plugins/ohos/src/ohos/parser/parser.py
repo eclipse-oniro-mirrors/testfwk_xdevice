@@ -83,7 +83,6 @@ class CppTestParser(IParser):
         self.listeners = []
         self.product_info = {}
         self.is_params = False
-        self.result_data = ""
         self.start_time = get_cst_time()
         self.suite_start_time = get_cst_time()
 
@@ -97,7 +96,7 @@ class CppTestParser(IParser):
         if not self.state_machine.suites_is_started():
             self.state_machine.trace_logs.extend(lines)
         for line in lines:
-            self.result_data = "{}[{}] {}\n".format(self.result_data, threading.currentThread().ident, line)
+            LOG.debug(line)
             self.parse(line)
 
     def __done__(self):
@@ -110,9 +109,6 @@ class CppTestParser(IParser):
                                suites_name=suites.suites_name,
                                product_info=suites.product_info)
         self.state_machine.current_suites = None
-        LOG.debug("CppParser data:")
-        LOG.debug(self.result_data)
-        self.result_data = ""
 
     def parse(self, line):
 
@@ -1075,7 +1071,6 @@ class OHJSUnitTestParser(IParser):
         self.test_run_finished = False
         self.cur_sum = -1
         self.runner = None
-        self.result_data = ""
 
     def get_suite_name(self):
         return self.suites_name
@@ -1085,7 +1080,7 @@ class OHJSUnitTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
-            self.result_data = "{}[{}] {}\n".format(self.result_data, threading.currentThread().ident, line)
+            LOG.debug(line)
             self.parse(line)
 
     def parse(self, line):
@@ -1219,9 +1214,7 @@ class OHJSUnitTestParser(IParser):
         return True
 
     def __done__(self):
-        LOG.debug("OHJSParser data:")
-        LOG.debug(self.result_data)
-        self.result_data = ""
+        pass
 
     def handle_case_end(self):
         test_info = self.state_machine.test()
