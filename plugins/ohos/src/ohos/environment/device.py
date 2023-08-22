@@ -959,6 +959,8 @@ class DeviceLogCollector:
             path = "{}/log/{}".format(self.device.get_device_report_path(), module_name)
         else:
             path = "{}/log/".format(self.device.get_device_report_path())
+        if not os.path.exists(path):
+            os.makedirs(path)
         self.device.pull_file("/data/log/hilog/", path)
         # HDC不支持创建绝对路径，拉取文件夹出来后重命名文件夹
         try:
