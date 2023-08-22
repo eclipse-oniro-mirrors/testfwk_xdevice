@@ -384,13 +384,10 @@ class Console(object):
                 testcases_path = "".join((options.testcases_path,
                                           "/special/android-ets/testcases"))
                 setattr(options, "testcases_path", testcases_path)
-        device_log = UserConfigManager(
+        device_log_dict = UserConfigManager(
             config_file=options.config, env=options.test_environment). \
             get_device_log_status()
-        if device_log is None or (device_log != ConfigConst.device_log_on
-                                  and device_log != ConfigConst.device_log_off):
-            device_log = ConfigConst.device_log_on
-        setattr(options, ConfigConst.device_log, device_log)
+        setattr(options, ConfigConst.device_log, device_log_dict)
         if options.subsystems:
             subsystem_list = str(options.subsystems).split(";")
             setattr(options, ConfigConst.subsystems, subsystem_list)

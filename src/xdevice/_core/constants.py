@@ -287,6 +287,8 @@ class ConfigConst(object):
     device_log = "device_log"
     device_log_on = "ON"
     device_log_off = "OFF"
+    tag_dir = "dir"
+    tag_enable = "enable"
 
     env_pool_cache = "env_pool_cache"
 

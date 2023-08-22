@@ -393,9 +393,12 @@ def modify_props(device, local_prop_file, target_prop_file, new_props):
 
 
 def get_device_log_file(report_path, serial=None, log_name="device_log",
-                        device_name=""):
+                        device_name="", module_name=None):
     from xdevice import Variables
-    log_path = os.path.join(report_path, Variables.report_vars.log_dir)
+    if module_name:
+        log_path = os.path.join(report_path, Variables.report_vars.log_dir, module_name)
+    else:
+        log_path = os.path.join(report_path, Variables.report_vars.log_dir)
     os.makedirs(log_path, exist_ok=True)
 
     serial = serial or time.time_ns()

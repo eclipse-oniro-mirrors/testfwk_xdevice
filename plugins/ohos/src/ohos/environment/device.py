@@ -774,13 +774,18 @@ class DeviceLogCollector:
         out = self.device.execute_shell_command(cmd)
         LOG.info("Execute command: {}, result is {}".format(cmd, out))
 
-    def stop_hilog_task(self, log_name):
+    def stop_hilog_task(self, log_name, **kwargs):
         cmd = "hilog -w stop"
         out = self.device.execute_shell_command(cmd)
-        self.device.pull_file("/data/log/hilog/", "{}/log/".format(self.device.get_device_report_path()))
+        module_name = kwargs.get("module_name", None)
+        if module_name:
+            path = "{}/log/{}".format(self.device.get_device_report_path(), module_name)
+        else:
+            path = "{}/log/".format(self.device.get_device_report_path())
+        self.device.pull_file("/data/log/hilog/", path)
         try:
-            os.rename("{}/log/hilog".format(self.device.get_device_report_path()),
-                      "{}/log/{}_hilog".format(self.device.get_device_report_path(), log_name))
+            os.rename("{}/hilog".format(path),
+                      "{}/hilog_{}".format(path, log_name))
         except Exception as e:
             self.device.log.warning("Rename hilog folder {}_hilog failed. error: {}".format(log_name, e))
             # 把hilog文件夹下所有文件拉出来 由于hdc不支持整个文件夹拉出只能采用先压缩再拉取文件
@@ -788,12 +793,11 @@ class DeviceLogCollector:
             out = self.device.execute_shell_command(cmd)
             LOG.info("Execute command: {}, result is {}".format(cmd, out))
             if "No space left on device" not in out:
-                self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name),
-                                      "{}/log/".format(self.device.get_device_report_path()))
+                self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), path)
                 cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
                 out = self.device.execute_shell_command(cmd)
         # 获取crash日志
-        self.start_get_crash_log(log_name)
+        self.start_get_crash_log(log_name, module_name)
 
     def _get_log(self, log_cmd, *params):
         def filter_by_name(log_name, args):
@@ -835,7 +839,8 @@ class DeviceLogCollector:
         self.device.pull_file(temp_path, crash_path)
         LOG.debug("Finish pull file: %s" % log_name)
 
-    def start_get_crash_log(self, task_name):
+    def start_get_crash_log(self, task_name, **kwargs):
+        module_name = kwargs.get("module_name", None)
         log_array = list()
         native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
         js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
@@ -845,7 +850,10 @@ class DeviceLogCollector:
         log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
         log_array.extend(self._get_log(block_crash_cmd, "SERVICE_BLOCK", "appfreeze"))
         LOG.debug("crash log file {}, length is {}".format(str(log_array), str(len(log_array))))
-        crash_path = "{}/log/{}_crash_log/".format(self.device.get_device_report_path(), task_name)
+        if module_name:
+            crash_path = "{}/log/{}/{}_crash_log/".format(self.device.get_device_report_path(), module_name, task_name)
+        else:
+            crash_path = "{}/log/crash_log_{}/".format(self.device.get_device_report_path(), task_name)
         for log_name in log_array:
             log_name = log_name.strip()
             self.get_cur_crash_log(crash_path, log_name)
@@ -879,3 +887,15 @@ class DeviceLogCollector:
             self.log_file_address.remove(log_file_address)
         if hilog_file_address:
             self.hilog_file_address.remove(hilog_file_address)
+
+    def pull_extra_log_files(self, task_name, module_name, dirs:str):
+        if dirs is None:
+            return
+        dir_list = dirs.split(";")
+        if len(dir_list) > 0:
+            extra_log_path = "{}/log/{}/extra_log_{}/".format(self.device.get_device_report_path(),
+                                                              module_name, task_name)
+            if not os.path.exists(extra_log_path):
+                os.makedirs(extra_log_path)
+            for dir_path in dir_list:
+                self.device.pull_file(dir_path, extra_log_path)
