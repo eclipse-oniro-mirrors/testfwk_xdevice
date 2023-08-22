@@ -60,6 +60,7 @@ from _core.constants import CommonParserType
 from _core.constants import FilePermission
 from _core.constants import HostDrivenTestType
 from _core.constants import DeviceConnectorType
+from _core.constants import AdvanceDeviceOption
 from _core.config.config_manager import UserConfigManager
 from _core.config.resource_manager import ResourceManager
 from _core.executor.listener import CaseResult
@@ -179,6 +180,7 @@ __all__ = [
     "FilePermission",
     "HostDrivenTestType",
     "DeviceConnectorType",
+    "AdvanceDeviceOption",
     "UserConfigManager",
     "ResourceManager",
     "CaseResult",

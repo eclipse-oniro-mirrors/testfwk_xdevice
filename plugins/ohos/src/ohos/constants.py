@@ -38,6 +38,7 @@ class HostDrivenTestType(object):
     HostDrivenType enumeration
     """
     device_test = "DeviceTest"
+    device_testsuite = "DeviceTestSuite"
     windows_test = "WindowsTest"
 
 
@@ -81,3 +82,18 @@ class CKit:
     component = "ComponentKit"
     permission = "PermissionKit"
     smartperf = "SmartPerfKit"
+
+
+@dataclass
+class AdvanceDeviceOption(object):
+    """
+    Advance Device Option
+    """
+    advance = "advance"
+    type = "type"
+    command = "command"
+    product = "product"
+    version = "version"
+    product_cmd = "product_cmd"
+    version_cmd = "version_cmd"
+    label = "label"
