@@ -977,7 +977,7 @@ class DeviceLogCollector:
                 cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
                 self.device.execute_shell_command(cmd)
         # 获取crash日志
-        self.start_get_crash_log(log_name, module_name)
+        self.start_get_crash_log(log_name, module_name=module_name)
         # 获取额外路径的日志
         self.pull_extra_log_files(log_name, module_name, kwargs.get("extras_dirs", None))
 
