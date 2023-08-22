@@ -38,7 +38,6 @@ class HostDrivenTestType(object):
     HostDrivenType enumeration
     """
     device_test = "DeviceTest"
-    device_testsuite = "DeviceTestSuite"
     windows_test = "WindowsTest"
 
 

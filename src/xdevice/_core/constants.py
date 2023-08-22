@@ -24,7 +24,7 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "TEST_DRIVER_SET", "LogType", "CKit",
            "DeviceLabelType", "GTestConst", "ManagerType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
-           "DeviceConnectorType"]
+           "DeviceConnectorType", "AdvanceDeviceOption"]
 
 
 @dataclass
@@ -142,6 +142,7 @@ class HostDrivenTestType(object):
     HostDrivenType enumeration
     """
     device_test = "DeviceTest"
+    device_testsuite = "DeviceTestSuite"
     windows_test = "WindowsTest"
     app_test = "AppTest"
 
