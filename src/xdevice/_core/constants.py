@@ -24,7 +24,7 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "TEST_DRIVER_SET", "LogType", "CKit",
            "DeviceLabelType", "GTestConst", "ManagerType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
-           "DeviceConnectorType"]
+           "DeviceConnectorType", "AdvanceDeviceOption"]
 
 
 @dataclass
@@ -142,6 +142,7 @@ class HostDrivenTestType(object):
     HostDrivenType enumeration
     """
     device_test = "DeviceTest"
+    device_testsuite = "DeviceTestSuite"
     windows_test = "WindowsTest"
     app_test = "AppTest"
 
@@ -287,6 +288,8 @@ class ConfigConst(object):
     device_log = "device_log"
     device_log_on = "ON"
     device_log_off = "OFF"
+    tag_dir = "dir"
+    tag_enable = "enable"
 
     env_pool_cache = "env_pool_cache"
 
@@ -309,4 +312,19 @@ class FilePermission(object):
 @dataclass
 class DeviceConnectorType:
     hdc = "usb-hdc"
+
+
+@dataclass
+class AdvanceDeviceOption(object):
+    """
+    Advance Device Option
+    """
+    advance = "advance"
+    type = "type"
+    command = "command"
+    product = "product"
+    version = "version"
+    product_cmd = "product_cmd"
+    version_cmd = "version_cmd"
+    label = "label"
 

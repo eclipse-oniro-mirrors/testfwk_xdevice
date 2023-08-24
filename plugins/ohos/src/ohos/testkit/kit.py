@@ -693,7 +693,6 @@ class AppInstallKit(ITestKit):
         if len(self.app_list) == 0:
             LOG.info("No app to install, skipping!")
             return
-        # to disable app install alert
         for app in self.app_list:
             if self.alt_dir:
                 app_file = get_file_absolute_path(app, self.paths,
