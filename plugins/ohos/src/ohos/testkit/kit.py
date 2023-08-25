@@ -702,10 +702,7 @@ class AppInstallKit(ITestKit):
             if app_file is None:
                 LOG.error("The app file {} does not exist".format(app))
                 continue
-            if hasattr(device, "is_harmony") and device.is_harmony:
-                device.connector_command("install \"{}\"".format(app_file))
-            else:
-                self.install_hap(device, app_file)
+            device.connector_command("install \"{}\"".format(app_file))
             self.installed_app.add(app_file)
 
     def __teardown__(self, device):
