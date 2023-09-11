@@ -299,6 +299,10 @@ class ResultReporter(IReporter):
                  summary.result.ignored, summary.result.unavailable)
         LOG.info("Log path: %s", self.exec_info.log_path)
 
+        if summary.result.failed != 0 or summary.result.blocked != 0 or summary.result.unavailable != 0:
+            from xdevice import Scheduler
+            Scheduler.is_need_auto_retry = True
+
         # generate summary vision report
         report_generate_flag = self._generate_vision_report(
             parsed_data, ReportConstant.summary_title,

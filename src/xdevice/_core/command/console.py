@@ -332,6 +332,11 @@ class Console(object):
                                 nargs='+',
                                 default="",
                                 help="- the params of kits that related to module")
+            parser.add_argument("--auto_retry",
+                                dest=ConfigConst.auto_retry,
+                                type=int,
+                                default=0,
+                                help="- the count of auto retry")
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:
@@ -407,6 +412,8 @@ class Console(object):
                 return None
             if options.action == ToolCommandType.toolcmd_key_run and \
                     options.retry:
+                if hasattr(options, ConfigConst.auto_retry):
+                    setattr(options, ConfigConst.auto_retry, 0)
                 options = self._get_retry_options(options, argument.parser)
                 if options.dry_run:
                     history_report_path = getattr(options,

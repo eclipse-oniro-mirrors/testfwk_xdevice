@@ -125,6 +125,7 @@ class DeviceTestType(object):
     hm_os_jsunit_test = "HMOSJSUnitTest"
     oh_rust_test = "OHRustTest"
     oh_yara_test = "OHYaraTest"
+    validator_test = "ValidatorTest"
 
 
 @dataclass
@@ -269,6 +270,7 @@ class ConfigConst(object):
     renew_report = "renew_report"
     kits_in_module = "kits_in_module"
     kits_params = "kits_params"
+    auto_retry = "auto_retry"
 
     # Runtime Constant
     history_report_path = "history_report_path"

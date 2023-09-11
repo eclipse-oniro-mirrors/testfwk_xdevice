@@ -100,6 +100,8 @@ class Scheduler(object):
     # the number of tests in current task
     test_number = 0
     device_labels = []
+    auto_retry = -1
+    is_need_auto_retry = False
 
     def __discover__(self, args):
         """Discover task to execute"""
@@ -781,6 +783,7 @@ class Scheduler(object):
         Directly allocates a device and execute a device test.
         """
         try:
+            self.check_auto_retry(options)
             task = self.__discover__(options.__dict__)
             self.__execute__(task)
         except (ParamError, ValueError, TypeError, SyntaxError,
@@ -794,6 +797,7 @@ class Scheduler(object):
         finally:
             self.stop_task_logcat()
             self.stop_encrypt_log()
+            self.start_auto_retry()
 
     @classmethod
     def _reset_environment(cls, environment="", config_file=""):
@@ -884,6 +888,7 @@ class Scheduler(object):
     @classmethod
     def terminate_cmd_exec(cls):
         Scheduler.is_execute = False
+        Scheduler.auto_retry = -1
         LOG.info("Start to terminate execution")
         return Scheduler.terminate_result.get()
 
@@ -1282,3 +1287,23 @@ class Scheduler(object):
             LOG.warning("%s are skipped, no suitable component found. "
                         "Require subsystem=%s part=%s, no device match this"
                         % (module_name, _subsystem, _part))
+
+    @classmethod
+    def start_auto_retry(cls):
+        if not Scheduler.is_need_auto_retry:
+            Scheduler.auto_retry = -1
+            LOG.debug("No need auto retry")
+            return
+        if Scheduler.auto_retry > 0:
+            Scheduler.auto_retry -= 1
+            if Scheduler.auto_retry == 0:
+                Scheduler.auto_retry = -1
+            from _core.command.console import Console
+            console = Console()
+            console.command_parser("run --retry")
+
+    @classmethod
+    def check_auto_retry(cls, options):
+        if Scheduler.auto_retry < 0 and int(getattr(options, ConfigConst.auto_retry, 0)) > 0:
+            value = int(getattr(options, ConfigConst.auto_retry, 0))
+            Scheduler.auto_retry = value if value <= 10 else 10
