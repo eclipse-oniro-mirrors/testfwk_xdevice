@@ -770,13 +770,17 @@ class Console(object):
     @classmethod
     def _wash_history_command(cls, history_command):
         # clear redundant content in history command. e.g. repeat,sn
-        if "--repeat" in history_command or "-sn" in history_command:
+        if "--repeat" in history_command or "-sn" in history_command\
+                or "--auto_retry" in history_command:
             split_list = list(history_command.split())
             if "--repeat" in split_list:
                 pos = split_list.index("--repeat")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             if "-sn" in split_list:
                 pos = split_list.index("-sn")
+                split_list = split_list[:pos] + split_list[pos + 2:]
+            if "--auto_retry" in split_list:
+                pos = split_list.index("--auto_retry")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             return " ".join(split_list)
         else:
