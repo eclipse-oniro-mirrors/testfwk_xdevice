@@ -109,7 +109,7 @@ class CommandKit(ITestKit):
                         package))
 
             result = device.install_package(package)
-            if not result.startswith("Success"):
+            if not result.startswith("Success") and "successfully" not in result:
                 raise AppInstallError(
                     "Failed to install %s on %s. Reason:%s" %
                     (package, device.__get_serial__(), result))
