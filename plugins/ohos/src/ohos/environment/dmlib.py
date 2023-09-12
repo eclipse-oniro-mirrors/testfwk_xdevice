@@ -769,7 +769,7 @@ class HdcHelper:
     @staticmethod
     def _install_remote_package(device, remote_file_path, command):
         receiver = CollectingOutputReceiver()
-        cmd = "bm install %s %s" % (command.strip(), remote_file_path)
+        cmd = "bm install -p %s %s" % (command.strip(), remote_file_path)
         HdcHelper.execute_shell_command(device, cmd, INSTALL_TIMEOUT, receiver)
         return receiver.output
 
@@ -780,14 +780,7 @@ class HdcHelper:
         remote_file_path = "/data/local/tmp/%s" % os.path.basename(
             package_file_path)
 
-        service = None
-        try:
-            service = SyncService(device, host=device.host, port=device.port)
-            service.open_sync()
-            service.push_file(package_file_path, remote_file_path)
-        finally:
-            if service is not None:
-                service.close()
+        HdcHelper.push_file(device, package_file_path, remote_file_path)
 
         result = HdcHelper._install_remote_package(device, remote_file_path,
                                                    command)

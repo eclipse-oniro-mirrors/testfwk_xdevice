@@ -332,6 +332,11 @@ class Console(object):
                                 nargs='+',
                                 default="",
                                 help="- the params of kits that related to module")
+            parser.add_argument("--auto_retry",
+                                dest=ConfigConst.auto_retry,
+                                type=int,
+                                default=0,
+                                help="- the count of auto retry")
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:
@@ -407,6 +412,8 @@ class Console(object):
                 return None
             if options.action == ToolCommandType.toolcmd_key_run and \
                     options.retry:
+                if hasattr(options, ConfigConst.auto_retry):
+                    setattr(options, ConfigConst.auto_retry, 0)
                 options = self._get_retry_options(options, argument.parser)
                 if options.dry_run:
                     history_report_path = getattr(options,
@@ -763,13 +770,17 @@ class Console(object):
     @classmethod
     def _wash_history_command(cls, history_command):
         # clear redundant content in history command. e.g. repeat,sn
-        if "--repeat" in history_command or "-sn" in history_command:
+        if "--repeat" in history_command or "-sn" in history_command\
+                or "--auto_retry" in history_command:
             split_list = list(history_command.split())
             if "--repeat" in split_list:
                 pos = split_list.index("--repeat")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             if "-sn" in split_list:
                 pos = split_list.index("-sn")
+                split_list = split_list[:pos] + split_list[pos + 2:]
+            if "--auto_retry" in split_list:
+                pos = split_list.index("--auto_retry")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             return " ".join(split_list)
         else:
