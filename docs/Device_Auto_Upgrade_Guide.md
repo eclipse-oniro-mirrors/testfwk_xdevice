@@ -63,39 +63,39 @@ Hiburn.exe烧写命令参数
 
 ​		如下图：
 
-![image-20230825102644453](C:\Users\xdevice\AppData\Roaming\Typora\typora-user-images\image-20230825102644453.png)
+![upgrade_1](../figures/upgrade_1.png)
 
 2. 调用方法burn实现烧写
 
 ​		该函数主要是对设备进行复位、擦除、烧写设备，烧写成功返回True，失败返回False
 
-![image-20230825102910504](C:\Users\xdevice\AppData\Roaming\Typora\typora-user-images\image-20230825102910504.png)
+![upgrade_2](../figures/upgrade_2.png)
 
 ​			1) 函数_reset()
 
 ​				发送命令让设备复位
 
-​				![image-20230825103046982](C:\Users\xdevice\AppData\Roaming\Typora\typora-user-images\image-20230825103046982.png)
+​				![upgrade_3](../figures/upgrade_3.png)
 
 ​		2)  函数_upgrade_device() 
 
 ​			对设备进行烧录
 
-![image-20230825103426377](C:\Users\xdevice\AppData\Roaming\Typora\typora-user-images\image-20230825103426377.png)
+![upgrade_4](../figures/upgrade_4.png)
 
 3. 调用方法reset_device重启设备
 
 ​		该函数主要是重启设备，然后自动执行用例，返回用例执行数据给测试框架。
 
-![img](file:///C:/Users/xdevice/AppData/Local/Temp/msohtmlclip1/01/clip_image009.jpg)
+![reset_device](../figures/reset_device.png)
 
 ​      1 ) 返回重启设备的AT命令，由xDevice框架做重启设备的操作
 
-![img](file:///C:/Users/xdevice/AppData/Local/Temp/msohtmlclip1/01/clip_image011.jpg)
+![upgrade_6](../figures/upgrade_6.png)
 
 ​    2)  在不知道AT命令情况下，借助三方工具重启设备，将执行用例的数据返回给xDevice做处理
 
-![image-20230825103613436](C:\Users\xdevice\AppData\Roaming\Typora\typora-user-images\image-20230825103613436.png)
+![upgrade_5](../figures/upgrade_5.png)
 
 
 
