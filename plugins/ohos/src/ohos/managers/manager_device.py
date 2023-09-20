@@ -129,7 +129,7 @@ class ManagerDevice(IDeviceManager, IFilter):
             if device:
                 return device
             LOG.debug("Wait for available device founded")
-            self.wait_times += 1
+            self.wait_times += 3
             if self.wait_times > timeout:
                 self.lock_con.wait(timeout)
             else:
