@@ -767,11 +767,11 @@ class JSUnitTestDriver(IDriver):
             raise exception
         finally:
             serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
-            log_tar_file_name = "{}_{}".format(request.get_module_name(),
-                                               str(serial).replace(":", "_"))
-            if hasattr(self.config, "device_log") and \
-                    self.config.device_log == ConfigConst.device_log_on:
-                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name)
+            log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
+            if hasattr(self.config, ConfigConst.device_log) and \
+                    self.config.device_log.get(ConfigConst.tag_enable) == ConfigConst.device_log_on:
+                self.config.device.device_log_collector.start_get_crash_log(log_tar_file_name,
+                                                                            module_name=request.get_module_name())
             self.config.device.device_log_collector.remove_log_address(self.device_log, self.hilog)
             self.config.device.device_log_collector.stop_catch_device_log(self.log_proc)
             self.config.device.device_log_collector.stop_catch_device_log(self.hilog_proc)
@@ -805,8 +805,8 @@ class JSUnitTestDriver(IDriver):
                              0o755)
         self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
         with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-            if hasattr(self.config, "device_log") and \
-                    self.config.device_log == ConfigConst.device_log_on:
+            if hasattr(self.config, ConfigConst.device_log) and \
+                    self.config.device_log.get(ConfigConst.tag_enable) == ConfigConst.device_log_on:
                 self.config.device.device_log_collector.clear_crash_log()
             self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
                 start_catch_device_log(hilog_file_pipe=hilog_file_pipe)

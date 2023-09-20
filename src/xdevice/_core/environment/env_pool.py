@@ -2,7 +2,7 @@
 # coding=utf-8
 
 #
-# Copyright (c) 2023 Huawei Device Co., Ltd.
+# Copyright (c) 2020-2022 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,11 +14,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 import json
 import os
 import time
-import datetime
 import sys
 
 from abc import abstractmethod
@@ -26,19 +24,22 @@ from abc import ABCMeta
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element
 
+
 from _core.interface import IFilter
 from _core.interface import IDeviceManager
 from _core.logger import platform_logger
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.utils import convert_serial
+from _core.utils import get_cst_time
 from _core.logger import change_logger_level
 from _core.constants import ConfigConst
 from _core.constants import FilePermission
+from _core.executor.scheduler import Scheduler
 
 LOG = platform_logger("EnvPool")
 
-__all__ = ["EnvPool", "XMLNode", "Selector", "DeviceSelector", "DeviceNode"]
+__all__ = ["EnvPool", "XMLNode", "Selector", "DeviceSelector", "DeviceNode", "is_env_pool_run_mode"]
 
 
 class EnvPool(object):
@@ -47,26 +48,34 @@ class EnvPool(object):
     managing the set of available devices for testing.
     this class is used directly by users without going through the command flow.
     """
-    __instance = None
+    instance = None
     __init_flag = False
+    report_path = None
+    resource_path = None
 
     def __new__(cls, *args, **kwargs):
         """
         Singleton instance
         """
         del args, kwargs
-        if cls.__instance is None:
-            cls.__instance = super(EnvPool, cls).__new__(cls)
-        return cls.__instance
+        if cls.instance is None:
+            cls.instance = super(EnvPool, cls).__new__(cls)
+        return cls.instance
 
-    def __init__(self, log_level="info"):
+    def __init__(self, **kwargs):
+        EnvPool.report_path = kwargs.get("report_path", "")
+        self._stop_task_log()
+        self._start_task_log()
         if EnvPool.__init_flag:
             return
         self._managers = {}
         self._filters = {}
-        self._init_log_level(log_level)
+        self._init_log_level(kwargs.get("log_level", "info"))
         self._load_managers()
         EnvPool.__init_flag = True
+        EnvPool.resource_path = kwargs.get("resource_path",
+                                           os.path.join(os.path.abspath(os.getcwd()), "resource"))
+        setattr(sys, "ecotest_resource_path", EnvPool.resource_path)
         # init cache file and check if expire
         cache_file = Cache()
         cache_file.check_cache_if_expire()
@@ -102,7 +111,8 @@ class EnvPool(object):
                 convert_serial(device.device_sn), device.extend_value))
             self.devices.append(device)
         else:
-            LOG.info("Require label is '{}', can't get device".format(selector.label))
+            LOG.info("Require label is '{}', can't get device".
+                     format(selector.label))
         return device
 
     def init_pool(self, node):
@@ -127,6 +137,7 @@ class EnvPool(object):
             if hasattr(device, "remove_ports"):
                 device.remove_ports()
         self._unload_manager()
+        self._stop_task_log()
 
     def _apply_device(self, selector, timeout=3):
         LOG.info("Apply device in pool")
@@ -162,9 +173,25 @@ class EnvPool(object):
     @classmethod
     def _init_log_level(cls, level):
         if str(level).lower() not in ["debug", "info"]:
-            LOG.info("Level str must be 'debug or 'info")
+            LOG.info("Level str must be 'debug' or 'info'")
             return
         change_logger_level({"console": level})
+
+    @classmethod
+    def _start_task_log(cls):
+        report_folder_path = EnvPool.report_path
+        if not report_folder_path:
+            report_folder_path = os.path.join(
+                os.path.abspath(os.getcwd()), "reports", get_cst_time().strftime("%Y-%m-%d-%H-%M-%S"))
+        if not os.path.exists(report_folder_path):
+            os.makedirs(report_folder_path)
+        LOG.info("Report path: {}".format(report_folder_path))
+        EnvPool.report_path = report_folder_path
+        Scheduler.start_task_log(report_folder_path)
+
+    @classmethod
+    def _stop_task_log(cls):
+        Scheduler.stop_task_logcat()
 
 
 class XMLNode(metaclass=ABCMeta):
@@ -254,7 +281,7 @@ class Selector(metaclass=ABCMeta):
     def format(self):
         if self.type or self.label:
             self.__device_dict.update({"type": self.type})
-            self.__device_dict.update(({"label": self.label}))
+            self.__device_dict.update({"label": self.label})
         self.__on_config__(self.__config, self.__device_dict)
         index = 1
         label = self.__device_dict.get("label", "phone")
@@ -289,13 +316,13 @@ class SelectionOption:
         return self.env_index
 
     def matches(self, device):
-        LOG.debug("Do matches, device:{state:%s, sn:%s, label:%s}, selection "
-                  "option:{device sn:%s, label:%s}" % (
-                      device.device_allocation_state,
-                      convert_serial(device.device_sn),
-                      device.label,
-                      [convert_serial(sn) if sn else "" for sn in self.device_sn],
-                      self.label))
+        LOG.info("Do matches, device:[state:{}, sn:{}, label:{}], selection "
+                 "option:[device sn:{}, label:{}]".format(
+                   device.device_allocation_state,
+                   convert_serial(device.device_sn),
+                   device.label,
+                   [convert_serial(sn) if sn else "" for sn in self.device_sn],
+                   self.label))
         if not getattr(device, "task_state", True):
             return False
 
@@ -325,6 +352,7 @@ class DeviceNode(XMLNode):
         port_ele = self.get_root_node().find("port")
         host_ele.text = host
         port_ele.text = port
+        return self
 
     def add_device_sn(self, device_sn):
         sn_ele = self.get_root_node().find("sn")
@@ -364,7 +392,7 @@ class Cache:
             current_time = time.time()
             if Cache.get_delta_days(current_modify_time, current_time) < self.expire_time:
                 setattr(sys, ConfigConst.env_pool_cache, True)
-                LOG.info("Env pool ruuning in cache mode.")
+                LOG.info("Env pool running in cache mode.")
                 return
         self.update_cache()
         setattr(sys, ConfigConst.env_pool_cache, False)
@@ -372,6 +400,7 @@ class Cache:
 
     @staticmethod
     def get_delta_days(t1, t2):
+        import datetime
         dt2 = datetime.datetime.fromtimestamp(t2)
         dt1 = datetime.datetime.fromtimestamp(t1)
         return (dt2 - dt1).days
@@ -381,3 +410,7 @@ class Cache:
         with os.fdopen(os.open(self.cache_file, flags, FilePermission.mode_755),
                        "wb") as f:
             f.write(b'123')
+
+
+def is_env_pool_run_mode():
+    return False if EnvPool.instance is None else True

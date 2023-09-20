@@ -306,8 +306,8 @@ class OHJSUnitTestDriver(IDriver):
             self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
             self.config.device.execute_shell_command(command="hilog -r")
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                if hasattr(self.config, "device_log") \
-                        and self.config.device_log == ConfigConst.device_log_on \
+                if hasattr(self.config, ConfigConst.device_log) \
+                        and self.config.device_log.get(ConfigConst.tag_enable) == ConfigConst.device_log_on \
                         and hasattr(self.config.device, "clear_crash_log"):
                     self.config.device.device_log_collector.clear_crash_log()
                 self.log_proc, self.hilog_proc = self.config.device.device_log_collector.\
@@ -579,13 +579,12 @@ class OHJSUnitTestDriver(IDriver):
 
     def _handle_logs(self, request):
         serial = "{}_{}".format(str(self.config.device.__get_serial__()), time.time_ns())
-        log_tar_file_name = "{}_{}".format(request.get_module_name(),
-                                           str(serial).replace(":", "_"))
-        if hasattr(self.config, "device_log") and \
-                self.config.device_log == ConfigConst.device_log_on \
+        log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
+        if hasattr(self.config, ConfigConst.device_log) and \
+                self.config.device_log.get(ConfigConst.tag_enable) == ConfigConst.device_log_on \
                 and hasattr(self.config.device, "start_get_crash_log"):
             self.config.device.device_log_collector.\
-                start_get_crash_log(log_tar_file_name)
+                start_get_crash_log(log_tar_file_name, module_name=request.get_module_name())
         self.config.device.device_log_collector.\
             remove_log_address(self.device_log, self.hilog)
         self.config.device.device_log_collector.\
@@ -756,10 +755,9 @@ class OHRustTestDriver(IDriver):
         finally:
             serial = "{}_{}".format(str(request.config.device.__get_serial__()),
                                     time.time_ns())
-            log_tar_file_name = "{}_{}".format(
-                request.get_module_name(), str(serial).replace(":", "_"))
+            log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
             self.config.device.device_log_collector.stop_hilog_task(
-                log_tar_file_name)
+                log_tar_file_name, module_name=request.get_module_name())
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
 
@@ -894,10 +892,9 @@ class OHYaraTestDriver(IDriver):
 
             serial = "{}_{}".format(str(request.config.device.__get_serial__()),
                                     time.time_ns())
-            log_tar_file_name = "{}_{}".format(
-                request.get_module_name(), str(serial).replace(":", "_"))
+            log_tar_file_name = "{}".format(str(serial).replace(":", "_"))
             self.config.device.device_log_collector.stop_hilog_task(
-                log_tar_file_name)
+                log_tar_file_name, module_name=request.get_module_name())
 
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message)
@@ -1194,3 +1191,73 @@ class OHYaraTestDriver(IDriver):
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
+
+    @Plugin(type=Plugin.DRIVER, id=DeviceTestType.validator_test)
+    class ValidatorTestDriver(IDriver):
+
+        def __init__(self):
+            self.error_message = ""
+            self.xml_path = ""
+            self.result = ""
+            self.config = None
+            self.kits = []
+
+        def __check_environment__(self, device_options):
+            pass
+
+        def __check_config__(self, config):
+            pass
+
+        def __execute__(self, request):
+            try:
+                self.result = os.path.join(
+                    request.config.report_path, "result",
+                    ".".join((request.get_module_name(), "xml")))
+                self.config = request.config
+                self.config.device = request.config.environment.devices[0]
+                config_file = request.root.source.config_file
+                self._run_validate_test(config_file, request)
+            except Exception as exception:
+                self.error_message = exception
+                if not getattr(exception, "error_no", ""):
+                    setattr(exception, "error_no", "03409")
+                LOG.exception(self.error_message, exc_info=True, error_no="03409")
+                raise exception
+            finally:
+                self.result = check_result_report(request.config.report_path,
+                                                  self.result, self.error_message)
+
+        def _run_validate_test(self, config_file, request):
+            is_update = False
+            try:
+                if "update" in self.config.testargs.keys():
+                    if dict(self.config.testargs).get("update")[0] == "true":
+                        is_update = True
+                json_config = JsonParser(config_file)
+                self.kits = get_kit_instances(json_config, self.config.resource_path,
+                                              self.config.testcases_path)
+                self._get_driver_config(json_config)
+                if is_update:
+                    do_module_kit_setup(request, self.kits)
+                while True:
+                    print("Is test finished?Y/N")
+                    usr_input = input(">>>")
+                    if usr_input == "Y" or usr_input == "y":
+                        LOG.debug("Finish current test")
+                        break
+                    else:
+                        print("continue")
+                        LOG.debug("Your input is:{}, continue".format(usr_input))
+                if self.xml_path:
+                    result_dir = os.path.join(request.config.report_path, "result")
+                    if not os.path.exists(result_dir):
+                        os.makedirs(result_dir)
+                    self.config.device.pull_file(self.xml_path, self.result)
+            finally:
+                if is_update:
+                    do_module_kit_teardown(request)
+
+        def _get_driver_config(self, json_config):
+            self.xml_path = get_config_value("xml_path", json_config.get_driver(), False)
+        def __result__(self):
+            return self.result if os.path.exists(self.result) else ""

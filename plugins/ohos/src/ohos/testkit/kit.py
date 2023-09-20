@@ -109,7 +109,7 @@ class CommandKit(ITestKit):
                         package))
 
             result = device.install_package(package)
-            if not result.startswith("Success"):
+            if not result.startswith("Success") and "successfully" not in result:
                 raise AppInstallError(
                     "Failed to install %s on %s. Reason:%s" %
                     (package, device.__get_serial__(), result))
@@ -693,7 +693,6 @@ class AppInstallKit(ITestKit):
         if len(self.app_list) == 0:
             LOG.info("No app to install, skipping!")
             return
-        # to disable app install alert
         for app in self.app_list:
             if self.alt_dir:
                 app_file = get_file_absolute_path(app, self.paths,
@@ -703,10 +702,7 @@ class AppInstallKit(ITestKit):
             if app_file is None:
                 LOG.error("The app file {} does not exist".format(app))
                 continue
-            if hasattr(device, "is_harmony") and device.is_harmony:
-                device.connector_command("install \"{}\"".format(app_file))
-            else:
-                self.install_hap(device, app_file)
+            device.connector_command("install \"{}\"".format(app_file))
             self.installed_app.add(app_file)
 
     def __teardown__(self, device):

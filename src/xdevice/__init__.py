@@ -60,6 +60,7 @@ from _core.constants import CommonParserType
 from _core.constants import FilePermission
 from _core.constants import HostDrivenTestType
 from _core.constants import DeviceConnectorType
+from _core.constants import AdvanceDeviceOption
 from _core.config.config_manager import UserConfigManager
 from _core.config.resource_manager import ResourceManager
 from _core.executor.listener import CaseResult
@@ -116,6 +117,7 @@ from _core.environment.env_pool import XMLNode
 from _core.environment.env_pool import Selector
 from _core.environment.env_pool import DeviceNode
 from _core.environment.env_pool import DeviceSelector
+from _core.environment.env_pool import is_env_pool_run_mode
 from _core.environment.device_state import DeviceEvent
 from _core.environment.device_state import TestDeviceState
 from _core.environment.device_state import DeviceState
@@ -178,6 +180,7 @@ __all__ = [
     "FilePermission",
     "HostDrivenTestType",
     "DeviceConnectorType",
+    "AdvanceDeviceOption",
     "UserConfigManager",
     "ResourceManager",
     "CaseResult",
@@ -195,6 +198,7 @@ __all__ = [
     "Selector",
     "DeviceNode",
     "DeviceSelector",
+    "is_env_pool_run_mode",
     "DeviceEvent",
     "TestDeviceState",
     "DeviceState",

@@ -332,6 +332,11 @@ class Console(object):
                                 nargs='+',
                                 default="",
                                 help="- the params of kits that related to module")
+            parser.add_argument("--auto_retry",
+                                dest=ConfigConst.auto_retry,
+                                type=int,
+                                default=0,
+                                help="- the count of auto retry")
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:
@@ -384,13 +389,10 @@ class Console(object):
                 testcases_path = "".join((options.testcases_path,
                                           "/special/android-ets/testcases"))
                 setattr(options, "testcases_path", testcases_path)
-        device_log = UserConfigManager(
+        device_log_dict = UserConfigManager(
             config_file=options.config, env=options.test_environment). \
             get_device_log_status()
-        if device_log is None or (device_log != ConfigConst.device_log_on
-                                  and device_log != ConfigConst.device_log_off):
-            device_log = ConfigConst.device_log_on
-        setattr(options, ConfigConst.device_log, device_log)
+        setattr(options, ConfigConst.device_log, device_log_dict)
         if options.subsystems:
             subsystem_list = str(options.subsystems).split(";")
             setattr(options, ConfigConst.subsystems, subsystem_list)
@@ -410,6 +412,8 @@ class Console(object):
                 return None
             if options.action == ToolCommandType.toolcmd_key_run and \
                     options.retry:
+                if hasattr(options, ConfigConst.auto_retry):
+                    setattr(options, ConfigConst.auto_retry, 0)
                 options = self._get_retry_options(options, argument.parser)
                 if options.dry_run:
                     history_report_path = getattr(options,
@@ -766,13 +770,17 @@ class Console(object):
     @classmethod
     def _wash_history_command(cls, history_command):
         # clear redundant content in history command. e.g. repeat,sn
-        if "--repeat" in history_command or "-sn" in history_command:
+        if "--repeat" in history_command or "-sn" in history_command\
+                or "--auto_retry" in history_command:
             split_list = list(history_command.split())
             if "--repeat" in split_list:
                 pos = split_list.index("--repeat")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             if "-sn" in split_list:
                 pos = split_list.index("-sn")
+                split_list = split_list[:pos] + split_list[pos + 2:]
+            if "--auto_retry" in split_list:
+                pos = split_list.index("--auto_retry")
                 split_list = split_list[:pos] + split_list[pos + 2:]
             return " ".join(split_list)
         else:

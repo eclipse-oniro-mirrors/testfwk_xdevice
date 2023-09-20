@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from _core.exception import ParamError
 from _core.logger import platform_logger
 from _core.utils import get_local_ip
+from _core.constants import ConfigConst
 
 __all__ = ["UserConfigManager"]
 LOG = platform_logger("ConfigManager")
@@ -244,8 +245,15 @@ class UserConfigManager(object):
         return data_dic
 
     def get_device_log_status(self):
+        data_dic = {}
         node = self.config_content.find("devicelog")
         if node is not None:
-            return str(node.text).strip()
-        return None
+            if node.find(ConfigConst.tag_enable) is not None \
+                    or node.find(ConfigConst.tag_dir) is not None:
+                for child in node:
+                    data_dic.update({child.tag: str(child.text).strip()})
+            else:
+                data_dic.update({ConfigConst.tag_enable: str(node.text).strip()})
+                data_dic.update({ConfigConst.tag_dir: None})
+        return data_dic
 
