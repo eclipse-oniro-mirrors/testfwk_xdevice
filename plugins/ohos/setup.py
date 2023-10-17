@@ -18,7 +18,9 @@
 
 from setuptools import setup
 
-INSTALL_REQUIRES = []
+INSTALL_REQUIRES = [
+    "xdevice"
+]
 
 
 def main():

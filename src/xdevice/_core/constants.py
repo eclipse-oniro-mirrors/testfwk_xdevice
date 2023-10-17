@@ -292,7 +292,7 @@ class ConfigConst(object):
     device_log_off = "OFF"
     tag_dir = "dir"
     tag_enable = "enable"
-
+    query_resource = "query_resource"
     env_pool_cache = "env_pool_cache"
 
 
