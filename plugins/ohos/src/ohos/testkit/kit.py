@@ -132,9 +132,12 @@ class CommandKit(ITestKit):
             device.pull_file(remote, local)
         elif command_type == "push":
             files = command_value.split("->")
-            src = files[0].strip()
-            dst = files[1].strip() if files[1].strip().startswith("/") else \
-                files[1].strip() + Props.dest_root
+            if len(files) != 2:
+                LOG.error("The push spec is invalid: {}".format(command_value))
+                return
+            src, dst = files[0].strip(), files[1].strip()
+            if not dst.startswith("/"):
+                dst = Props.dest_root + dst
             LOG.debug(
                 "Trying to push the file local {} to remote{}".format(
                     src, dst))
