@@ -47,6 +47,7 @@ class ProductForm(object):
     television = "tv"
     watch = "watch"
     tablet = 'tablet'
+    _2in1 = '2in1'
 
 
 @dataclass
@@ -329,4 +330,15 @@ class AdvanceDeviceOption(object):
     product_cmd = "product_cmd"
     version_cmd = "version_cmd"
     label = "label"
+
+
+@dataclass
+class LifeStage(object):
+    """
+    LifeStage enumeration
+    """
+    task_start = "TaskStart"
+    task_end = "TaskEnd"
+    case_start = "CaseStart"
+    case_end = "CaseEnd"
 

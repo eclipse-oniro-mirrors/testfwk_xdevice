@@ -69,6 +69,7 @@ from _core.executor.listener import SuitesResult
 from _core.executor.listener import StateRecorder
 from _core.executor.listener import TestDescription
 from _core.executor.listener import CollectingTestListener
+from _core.executor.request import Task
 from _core.testkit.json_parser import JsonParser
 from _core.testkit.kit import junit_para_parse
 from _core.testkit.kit import gtest_para_parse
@@ -94,6 +95,7 @@ from _core.utils import do_module_kit_teardown
 from _core.utils import convert_serial
 from _core.utils import convert_ip
 from _core.utils import convert_port
+from _core.utils import convert_mac
 from _core.utils import check_mode
 from _core.utils import get_filename_extension
 from _core.utils import get_test_component_version
@@ -106,7 +108,9 @@ from _core.utils import get_shell_handler
 from _core.utils import get_decode
 from _core.utils import get_cst_time
 from _core.utils import get_delta_time_ms
-from _core.utils import get_device_proc_pid
+from _core.utils import get_netstat_proc_pid
+from _core.utils import calculate_elapsed_time
+from _core.utils import check_mode_in_sys
 from _core.utils import start_standing_subprocess
 from _core.utils import stop_standing_subprocess
 from _core.logger import LogQueue
@@ -189,6 +193,7 @@ __all__ = [
     "StateRecorder",
     "TestDescription",
     "CollectingTestListener",
+    "Task",
     "Scheduler",
     "SuiteReporter",
     "DeviceSelectionOption",
@@ -232,6 +237,7 @@ __all__ = [
     "convert_serial",
     "convert_ip",
     "convert_port",
+    "convert_mac",
     "check_mode",
     "get_filename_extension",
     "get_test_component_version",
@@ -244,7 +250,9 @@ __all__ = [
     "get_decode",
     "get_cst_time",
     "get_delta_time_ms",
-    "get_device_proc_pid",
+    "get_netstat_proc_pid",
+    "calculate_elapsed_time",
+    "check_mode_in_sys",
     "start_standing_subprocess",
     "stop_standing_subprocess",
     "ExecInfo",
