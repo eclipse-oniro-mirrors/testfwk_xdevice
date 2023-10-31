@@ -156,6 +156,7 @@ class UserConfigManager(object):
         nodes = self.config_content.find(target_name)
         if attr_name in nodes.attrib:
             return nodes.attrib.get(attr_name)
+        return None
 
     def get_com_device(self, target_name):
         devices = []
@@ -255,5 +256,11 @@ class UserConfigManager(object):
             else:
                 data_dic.update({ConfigConst.tag_enable: str(node.text).strip()})
                 data_dic.update({ConfigConst.tag_dir: None})
+                data_dic.update({ConfigConst.tag_loglevel: "DEBUG"})
         return data_dic
 
+    def environment_enable(self):
+        if self.config_content.find("environment") or\
+                self.config_content.find("environment/device"):
+            return True
+        return False
