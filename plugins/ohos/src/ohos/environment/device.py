@@ -598,7 +598,7 @@ class Device(IDevice):
             raise Exception("harmony abc rpc not running")
 
     def stop_harmony_rpc(self, kill_all=True):
-        # abc妯″紡涓嬩粎鏉€鎺塪evicetest锛屽惁鍒欓兘鏉€鎺?
+        # only kill devicetest in abc mode, or kill all
         proc_pids = self.get_devicetest_proc_pid()
         if not kill_all:
             proc_pids.pop()
@@ -877,6 +877,7 @@ class DeviceLogCollector:
 
     def restart_catch_device_log(self):
         for _, path in enumerate(self.hilog_file_address):
+            self._sync_device_time()
             hilog_open = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  FilePermission.mode_755)
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
@@ -1057,7 +1058,6 @@ class DeviceLogCollector:
         iso_time_format = '%Y-%m-%d %H:%M:%S'
         cur_time = get_cst_time().strftime(iso_time_format)
         self.device.execute_shell_command("date '{}'".format(cur_time))
-        self.device.execute_shell_command("hwclock --systohc")
 
     def add_log_address(self, log_file_address, hilog_file_address):
         # record to restart catch log when reboot device
