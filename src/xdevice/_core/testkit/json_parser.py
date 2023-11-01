@@ -73,7 +73,7 @@ class JsonParser:
                 flags = os.O_RDONLY
                 modes = stat.S_IWUSR | stat.S_IRUSR
                 with os.fdopen(os.open(path_or_content, flags, modes),
-                               "r") as file_content:
+                               "r", encoding="utf-8") as file_content:
                     json_content = json.load(file_content)
         except (TypeError, ValueError, AttributeError) as error:
             raise ParamError("json file error: %s %s" % (
