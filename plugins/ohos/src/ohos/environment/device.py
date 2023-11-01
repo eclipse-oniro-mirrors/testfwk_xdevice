@@ -401,15 +401,6 @@ class Device(IDevice):
         stdout = self.execute_shell_command(command, timeout=5 * 1000,
                                             output_flag=False, retry=retry,
                                             abort_on_exception=True).strip()
-        if stdout:
-            if "fail" in stdout:
-                cmd = [HdcHelper.CONNECTOR_NAME, "list", "targets"]
-
-                stdout = exec_cmd(cmd)
-                LOG.debug("exec cmd list targets:{},current device_sn:{}".format(stdout, self.device_sn))
-                if stdout and (self.device_sn in stdout):
-                    stdout = "true"
-            LOG.debug(stdout)
         return stdout
 
     def set_recover_state(self, state):
