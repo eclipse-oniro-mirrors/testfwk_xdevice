@@ -293,6 +293,8 @@ class ConfigConst(object):
     device_log_off = "OFF"
     tag_dir = "dir"
     tag_enable = "enable"
+    tag_loglevel = "loglevel"
+    tag_clear = "clear"
     query_resource = "query_resource"
     env_pool_cache = "env_pool_cache"
 
@@ -330,6 +332,14 @@ class AdvanceDeviceOption(object):
     product_cmd = "product_cmd"
     version_cmd = "version_cmd"
     label = "label"
+
+
+@dataclass
+class Platform(object):
+    """
+    Platform enumeration
+    """
+    ohos = "OpenHarmony"
 
 
 @dataclass

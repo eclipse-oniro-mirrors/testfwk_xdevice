@@ -19,7 +19,7 @@ import os
 import sys
 from xdevice import Console
 from xdevice import platform_logger
-from _core.utils import get_version
+from xdevice import VERSION
 
 
 srcpath = os.path.dirname(os.path.dirname(__file__))
@@ -31,7 +31,7 @@ LOG = platform_logger("Main")
 def main_process(command=None):
     LOG.info(
         "*************** xDevice Test Framework %s Starting ***************" %
-        get_version())
+        VERSION)
     if command:
         args = str(command).split(" ")
         args.insert(0, "xDevice")

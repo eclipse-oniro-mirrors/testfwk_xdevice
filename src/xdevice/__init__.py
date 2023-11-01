@@ -43,6 +43,7 @@ from _core.exception import ShellCommandUnresponsiveException
 from _core.exception import DeviceUnresponsiveException
 from _core.exception import AppInstallError
 from _core.exception import HapNotSupportTest
+from _core.exception import RpcNotRunningError
 from _core.constants import DeviceTestType
 from _core.constants import DeviceLabelType
 from _core.constants import ManagerType
@@ -61,6 +62,8 @@ from _core.constants import FilePermission
 from _core.constants import HostDrivenTestType
 from _core.constants import DeviceConnectorType
 from _core.constants import AdvanceDeviceOption
+from _core.constants import LifeStage
+from _core.constants import Platform
 from _core.config.config_manager import UserConfigManager
 from _core.config.resource_manager import ResourceManager
 from _core.executor.listener import CaseResult
@@ -140,7 +143,10 @@ from _core.report.reporter_helper import DataHelper
 from _core.report.__main__ import main_report
 from _core.command.console import Console
 
+VERSION = "2.30.0.1104"
+
 __all__ = [
+    "VERSION",
     "Variables",
     "Console",
     "platform_logger",
@@ -167,6 +173,7 @@ __all__ = [
     "DeviceUnresponsiveException",
     "AppInstallError",
     "HapNotSupportTest",
+    "RpcNotRunningError",
     "DeviceTestType",
     "DeviceLabelType",
     "ManagerType",
@@ -259,7 +266,9 @@ __all__ = [
     "ResultReporter",
     "DataHelper",
     "main_report",
-    "LogQueue"
+    "LogQueue",
+    "LifeStage",
+    "Platform"
 ]
 
 
