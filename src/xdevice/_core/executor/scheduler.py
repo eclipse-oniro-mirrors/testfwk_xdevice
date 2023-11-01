@@ -23,6 +23,7 @@ import queue
 import time
 import uuid
 import shutil
+import json
 from xml.etree import ElementTree
 
 from _core.utils import unique_id
@@ -30,6 +31,7 @@ from _core.utils import check_mode
 from _core.utils import get_sub_path
 from _core.utils import get_filename_extension
 from _core.utils import convert_serial
+from _core.utils import convert_mac
 from _core.utils import get_instance_name
 from _core.utils import is_config_str
 from _core.utils import check_result_report
@@ -42,7 +44,6 @@ from _core.exception import LiteDeviceError
 from _core.exception import DeviceError
 from _core.interface import LifeCycle
 from _core.executor.request import Request
-from _core.executor.request import Task
 from _core.executor.request import Descriptor
 from _core.plugin import get_plugin
 from _core.plugin import Plugin
@@ -60,6 +61,7 @@ from _core.constants import ListenerType
 from _core.constants import ConfigConst
 from _core.constants import ReportConst
 from _core.constants import HostDrivenTestType
+from _core.constants import LifeStage
 from _core.executor.concurrent import DriversThread
 from _core.executor.concurrent import QueueMonitorThread
 from _core.executor.concurrent import DriversDryRunThread
@@ -100,15 +102,21 @@ class Scheduler(object):
     # the number of tests in current task
     test_number = 0
     device_labels = []
+    repeat_index = 0
     auto_retry = -1
     is_need_auto_retry = False
 
+    queue_monitor_thread = None
+
     def __discover__(self, args):
         """Discover task to execute"""
+        from _core.executor.request import Task
         config = Config()
         config.update(args)
         task = Task(drivers=[])
         task.init(config)
+
+        Scheduler.call_life_stage_action(stage=LifeStage.task_start)
 
         root_descriptor = self._find_test_root_descriptor(task.config)
         task.set_root_descriptor(root_descriptor)
@@ -116,10 +124,11 @@ class Scheduler(object):
 
     def __execute__(self, task):
         error_message = ""
+        unavailable = 0
         try:
             Scheduler.is_execute = True
             if Scheduler.command_queue:
-                LOG.debug("Run command: %s" % Scheduler.command_queue[-1])
+                LOG.debug("Run command: {}".format(convert_mac(Scheduler.command_queue[-1])))
                 run_command = Scheduler.command_queue.pop()
                 task_id = str(uuid.uuid1()).split("-")[0]
                 Scheduler.command_queue.append((task_id, run_command,
@@ -136,14 +145,27 @@ class Scheduler(object):
 
             # do with the count of repeat about a task
             if getattr(task.config, ConfigConst.repeat, 0) > 0:
+                Scheduler.repeat_index = \
+                    getattr(task.config, ConfigConst.repeat)
                 drivers_list = list()
-                for repeat_index in range(task.config.repeat):
-                    for driver_index in range(len(task.test_drivers)):
-                        drivers_list.append(
-                            copy.deepcopy(task.test_drivers[driver_index]))
+                for index in range(-1, task.config.repeat):
+                    repeat_list = self.construct_repeat_list(task, index)
+                    if repeat_list:
+                        drivers_list.extend(repeat_list)
                 task.test_drivers = drivers_list
+            else:
+                Scheduler.repeat_index = 0
 
             self.test_number = len(task.test_drivers)
+            for des in task.root.children:
+                if des.error:
+                    error_message = "{};{}".format(des.error.error_msg, error_message)
+                    unavailable += 1
+            if error_message != "":
+                error_message = "test source '{}' or its config json not exists".format(error_message)
+                LOG.error("Exec task error: {}".format(error_message))
+
+                raise ParamError(error_message)
 
             if task.config.exectype == TestExecType.device_test:
                 self._device_test_execute(task)
@@ -159,13 +181,15 @@ class Scheduler(object):
                 if error_no else str(exception)
             error_no = error_no if error_no else "00000"
             LOG.exception(exception, exc_info=False, error_no=error_no)
-
         finally:
             Scheduler.reset_test_dict_source()
             if getattr(task.config, ConfigConst.test_environment, "") or \
                     getattr(task.config, ConfigConst.configfile, ""):
                 self._restore_environment()
 
+            Scheduler.call_life_stage_action(stage=LifeStage.task_end,
+                                             task=task, error=error_message,
+                                             unavailable=unavailable)
             if Scheduler.upload_address:
                 Scheduler.upload_task_result(task, error_message)
                 Scheduler.upload_report_end()
@@ -188,7 +212,7 @@ class Scheduler(object):
             message_queue = queue.Queue()
 
             # execute test drivers
-            queue_monitor_thread = self._start_queue_monitor(
+            self.queue_monitor_thread = self._start_queue_monitor(
                 message_queue, test_drivers, current_driver_threads)
             while test_drivers:
                 if len(current_driver_threads) > 5:
@@ -215,7 +239,7 @@ class Scheduler(object):
 
             # wait for all drivers threads finished and do kit teardown
             while True:
-                if not queue_monitor_thread.is_alive():
+                if not self.queue_monitor_thread.is_alive():
                     break
                 time.sleep(3)
 
@@ -233,7 +257,7 @@ class Scheduler(object):
             task_unused_env = []
 
             # execute test drivers
-            queue_monitor_thread = self._start_queue_monitor(
+            self.queue_monitor_thread = self._start_queue_monitor(
                 message_queue, test_drivers, current_driver_threads)
             while test_drivers:
                 # clear remaining test drivers when scheduler is terminated
@@ -259,8 +283,9 @@ class Scheduler(object):
 
                 # start driver thread
                 thread_id = self._get_thread_id(current_driver_threads)
-                driver_thread = DriversDryRunThread(test_driver, task, environment,
-                                              message_queue)
+                driver_thread = DriversDryRunThread(test_driver, task,
+                                                    environment,
+                                                    message_queue)
                 driver_thread.setDaemon(True)
                 driver_thread.set_thread_id(thread_id)
                 driver_thread.start()
@@ -270,13 +295,14 @@ class Scheduler(object):
 
             # wait for all drivers threads finished and do kit teardown
             while True:
-                if not queue_monitor_thread.is_alive():
+                if not self.queue_monitor_thread.is_alive():
                     break
                 time.sleep(3)
 
             self._do_taskkit_teardown(used_devices, task_unused_env)
         finally:
-            LOG.debug("Removing report_path: {}".format(task.config.report_path))
+            LOG.debug(
+                "Removing report_path: {}".format(task.config.report_path))
             # delete reports
             self.stop_task_logcat()
             self.stop_encrypt_log()
@@ -293,23 +319,29 @@ class Scheduler(object):
         if used_devices:
             serials = []
             platforms = []
+            test_labels = []
             for serial, device in used_devices.items():
                 serials.append(convert_serial(serial))
-                platform = str(device.label).capitalize()
+                platform = str(device.test_platform)
+                test_label = str(device.label).capitalize()
                 if platform not in platforms:
                     platforms.append(platform)
+                if test_label not in test_labels:
+                    test_labels.append(test_label)
             task_info.device_name = ",".join(serials)
             task_info.platform = ",".join(platforms)
+            task_info.device_label = ",".join(test_labels)
         else:
             task_info.device_name = "None"
             task_info.platform = "None"
+            task_info.device_label = "None"
         task_info.test_time = task.config.start_time
         task_info.product_info = getattr(task, "product_info", "")
 
         listeners = self._create_listeners(task)
         for listener in listeners:
             listener.__ended__(LifeCycle.TestTask, task_info,
-                               test_type=task_info.test_type)
+                               test_type=task_info.test_type, task=task)
 
     @classmethod
     def _create_listeners(cls, task):
@@ -364,6 +396,10 @@ class Scheduler(object):
         env_manager = EnvironmentManager()
         while True:
             if not Scheduler.is_execute:
+                break
+            if self.queue_monitor_thread and \
+                    not self.queue_monitor_thread.is_alive():
+                LOG.error("Queue monitor thread is dead.")
                 break
             environment = env_manager.apply_environment(device_options)
             if len(environment.devices) == len(device_options):
@@ -509,7 +545,7 @@ class Scheduler(object):
         task_unused_env = []
 
         # execute test drivers
-        queue_monitor_thread = self._start_queue_monitor(
+        self.queue_monitor_thread = self._start_queue_monitor(
             message_queue, test_drivers, current_driver_threads)
         while test_drivers:
             # clear remaining test drivers when scheduler is terminated
@@ -520,6 +556,10 @@ class Scheduler(object):
 
             # get test driver and device
             test_driver = test_drivers[0]
+
+            # call life stage
+            Scheduler.call_life_stage_action(stage=LifeStage.case_start,
+                                             case_name=test_driver[1].source.module_name)
 
             if getattr(task.config, ConfigConst.history_report_path, ""):
                 module_name = test_driver[1].source.module_name
@@ -542,6 +582,18 @@ class Scheduler(object):
                     task.config.__dict__, test_driver)
             except DeviceError as exception:
                 self._handle_device_error(exception, task, test_drivers)
+                Scheduler.call_life_stage_action(stage=LifeStage.case_end,
+                                                 case_name=test_driver[1].source.module_name,
+                                                 case_result="Failed",
+                                                 error_msg=exception.args)
+                continue
+
+            if not self.queue_monitor_thread.is_alive():
+                LOG.debug("Restart queue monitor thread.")
+                current_driver_threads = {}
+                message_queue = queue.Queue()
+                self.queue_monitor_thread = self._start_queue_monitor(
+                    message_queue, test_drivers, current_driver_threads)
                 continue
 
             if not Scheduler.is_execute:
@@ -581,7 +633,7 @@ class Scheduler(object):
 
         # wait for all drivers threads finished and do kit teardown
         while True:
-            if not queue_monitor_thread.is_alive():
+            if not self.queue_monitor_thread.is_alive():
                 break
             time.sleep(3)
 
@@ -736,11 +788,9 @@ class Scheduler(object):
 
     @classmethod
     def _get_thread_id(cls, current_driver_threads):
-        thread_id = get_cst_time().strftime(
-            '%Y-%m-%d-%H-%M-%S-%f')
+        thread_id = get_cst_time().strftime('%Y-%m-%d-%H-%M-%S-%f')
         while thread_id in current_driver_threads.keys():
-            thread_id = get_cst_time().strftime(
-                '%Y-%m-%d-%H-%M-%S-%f')
+            thread_id = get_cst_time().strftime('%Y-%m-%d-%H-%M-%S-%f')
         return thread_id
 
     @classmethod
@@ -870,10 +920,6 @@ class Scheduler(object):
             config, ConfigConst.testlist, "") or getattr(
             config, ConfigConst.task, "") or getattr(
             config, ConfigConst.testcase)
-        # read test list from testfile, testlist or task
-        test_set = getattr(config, "testfile", "") or getattr(
-            config, "testlist", "") or getattr(config, "task", "") or getattr(
-            config, "testcase")
         if test_set:
             fname, _ = get_filename_extension(test_set)
             uid = unique_id("Scheduler", fname)
@@ -888,6 +934,7 @@ class Scheduler(object):
     @classmethod
     def terminate_cmd_exec(cls):
         Scheduler.is_execute = False
+        Scheduler.repeat_index = 0
         Scheduler.auto_retry = -1
         LOG.info("Start to terminate execution")
         return Scheduler.terminate_result.get()
@@ -915,7 +962,6 @@ class Scheduler(object):
             return
         result_file = exec_message.get_result()
         request = exec_message.get_request()
-
         test_name = request.root.source.test_name
         if not result_file or not os.path.exists(result_file):
             LOG.error("%s result not exists", test_name, error_no="00200")
@@ -950,15 +996,18 @@ class Scheduler(object):
         report_path = result_file
         testsuites_element = DataHelper.parse_data_report(report_path)
         start_time, end_time = cls._get_time(testsuites_element)
-        if request.get_test_type() == HostDrivenTestType.device_test:
+        test_type = request.get_test_type()
+        if test_type == HostDrivenTestType.device_test or test_type == HostDrivenTestType.windows_test:
             for model_element in testsuites_element:
                 case_id = model_element.get(ReportConstant.name, "")
                 case_result, error = cls.get_script_result(model_element)
                 if error and len(error) > MAX_VISIBLE_LENGTH:
-                    error = "$s..." % error[:MAX_VISIBLE_LENGTH]
+                    error = "{}...".format(error[:MAX_VISIBLE_LENGTH])
+                report = cls._get_report_path(
+                    request.config.report_path,
+                    model_element.get(ReportConstant.report, ""))
                 upload_params.append(
-                    (case_id, case_result, error, start_time,
-                     end_time, request.config.report_path,))
+                    (case_id, case_result, error, start_time, end_time, report,))
         else:
             for testsuite_element in testsuites_element:
                 if check_mode(ModeType.developer):
@@ -970,15 +1019,17 @@ class Scheduler(object):
                 for case_element in testsuite_element:
                     case_id = cls._get_case_id(case_element, module_name)
                     case_result, error = cls._get_case_result(case_element)
-                    if error and len(error) > MAX_VISIBLE_LENGTH:
-                        error = "%s..." % error[:MAX_VISIBLE_LENGTH]
                     if case_result == "Ignored":
-                        LOG.info("Get upload params: %s result is ignored",
-                                 case_id)
+                        LOG.info(
+                            "Get upload params: {} result is ignored".format(case_id))
                         continue
+                    if error and len(error) > MAX_VISIBLE_LENGTH:
+                        error = "{}...".format(error[:MAX_VISIBLE_LENGTH])
+                    report = cls._get_report_path(
+                        request.config.report_path,
+                        case_element.get(ReportConstant.report, ""))
                     upload_params.append(
-                        (case_id, case_result, error, start_time,
-                         end_time, request.config.report_path,))
+                        (case_id, case_result, error, start_time, end_time, report,))
         return upload_params, start_time, end_time
 
     @classmethod
@@ -1002,6 +1053,9 @@ class Scheduler(object):
             return result, ""
         if Scheduler.mode == ModeType.decc:
             result = "Failed"
+        result_kind = model_element.get(ReportConstant.result_kind, "")
+        if result_kind:
+            result = result_kind
 
         error_msg = model_element.get(ReportConstant.message, "")
         if not error_msg and len(model_element) > 0:
@@ -1038,6 +1092,11 @@ class Scheduler(object):
             result = "Blocked"
         elif case.is_ignored():
             result = "Ignored"
+        elif case.is_completed():
+            if case.message:
+                result = "Failed"
+            else:
+                result = "Passed"
         else:
             result = "Unavailable"
         return result, case.message
@@ -1061,17 +1120,30 @@ class Scheduler(object):
                         end_time = int(time.mktime(time.strptime(
                             timestamp, ReportConstant.time_format)) * 1000)
                     except ArithmeticError as error:
-                        LOG.error("Get time error %s" % error)
+                        LOG.error("Get time error {}".format(error))
                         end_time = int(time.time() * 1000)
+                    except ValueError as error:
+                        LOG.error("Get time error {}".format(error))
+                        end_time = int(time.mktime(time.strptime(
+                            timestamp.split(".")[0], ReportConstant.time_format)) * 1000)
                     start_time = int(end_time - float(cost_time) * 1000)
                 else:
                     current_time = int(time.time() * 1000)
                     start_time, end_time = current_time, current_time
         except ArithmeticError as error:
-            LOG.error("Get time error %s" % error)
+            LOG.error("Get time error {}".format(error))
             current_time = int(time.time() * 1000)
             start_time, end_time = current_time, current_time
         return start_time, end_time
+
+    @classmethod
+    def _get_report_path(cls, base_path, report=""):
+        """ get report path
+        base_path: str, report base path
+        report   : str, report relative path
+        """
+        report_path = os.path.join(base_path, report)
+        return report_path if report and os.path.exists(report_path) else base_path
 
     @classmethod
     def upload_task_result(cls, task, error_message=""):
@@ -1097,9 +1169,10 @@ class Scheduler(object):
                     error_msg, "%s;" % child.get(ReportConstant.message))
         if error_msg:
             error_msg = error_msg[:-1]
-        cls.upload_case_result((Scheduler.task_name, task_result,
-                                error_msg, start_time, end_time,
-                                task.config.report_path))
+        report = cls._get_report_path(
+            task.config.report_path, ReportConstant.summary_vision_report)
+        cls.upload_case_result(
+            (Scheduler.task_name, task_result, error_msg, start_time, end_time, report))
 
     @classmethod
     def _get_task_result(cls, task_element):
@@ -1140,7 +1213,7 @@ class Scheduler(object):
         failed_flag = False
         if check_mode(ModeType.decc):
             from xdevice import SuiteReporter
-            for module, failed in SuiteReporter.get_failed_case_list():
+            for module, _ in SuiteReporter.get_failed_case_list():
                 if module_name == module or str(module_name).split(
                         ".")[0] == module:
                     failed_flag = True
@@ -1151,9 +1224,11 @@ class Scheduler(object):
                 getattr(task.config, ConfigConst.history_report_path, "")
             params = ResultReporter.get_task_info_params(history_report_path)
             if params and params[ReportConst.unsuccessful_params]:
-                if dict(params[ReportConst.unsuccessful_params]).get(module_name, []):
+                if dict(params[ReportConst.unsuccessful_params]).get(
+                        module_name, []):
                     failed_flag = True
-                elif dict(params[ReportConst.unsuccessful_params]).get(str(module_name).split(".")[0], []):
+                elif dict(params[ReportConst.unsuccessful_params]).get(
+                        str(module_name).split(".")[0], []):
                     failed_flag = True
         return failed_flag
 
@@ -1180,6 +1255,7 @@ class Scheduler(object):
             return True
         if year_interval == 1 and month_interval + 12 in (1, 2):
             return True
+        return False
 
     @classmethod
     def _parse_property_value(cls, property_name, driver_request, kit):
@@ -1187,7 +1263,6 @@ class Scheduler(object):
             driver_request.config.get(ConfigConst.testargs, dict()))
         property_value = ""
         if ConfigConst.pass_through in test_args.keys():
-            import json
             pt_dict = json.loads(test_args.get(ConfigConst.pass_through, ""))
             property_value = pt_dict.get(property_name, None)
         elif property_name in test_args.keys:
@@ -1289,6 +1364,16 @@ class Scheduler(object):
                         % (module_name, _subsystem, _part))
 
     @classmethod
+    def construct_repeat_list(cls, task, index):
+        repeat_list = list()
+        for driver_index in range(len(task.test_drivers)):
+            cur_test_driver = copy.deepcopy(task.test_drivers[driver_index])
+            desc = cur_test_driver[1]
+            desc.unique_id = '{}_{}'.format(desc.unique_id, index + 1)
+            repeat_list.append(cur_test_driver)
+        return repeat_list
+
+    @classmethod
     def start_auto_retry(cls):
         if not Scheduler.is_need_auto_retry:
             Scheduler.auto_retry = -1
@@ -1304,6 +1389,54 @@ class Scheduler(object):
 
     @classmethod
     def check_auto_retry(cls, options):
-        if Scheduler.auto_retry < 0 and int(getattr(options, ConfigConst.auto_retry, 0)) > 0:
+        if Scheduler.auto_retry < 0 and \
+                int(getattr(options, ConfigConst.auto_retry, 0)) > 0:
             value = int(getattr(options, ConfigConst.auto_retry, 0))
             Scheduler.auto_retry = value if value <= 10 else 10
+
+    @staticmethod
+    def call_life_stage_action(**kwargs):
+        """
+        call in different lift stage
+        """
+        from xdevice import Task
+        from xdevice import Variables
+        if Task.life_stage_listener is None:
+            return
+        stage = kwargs.get("stage", None)
+        data = dict()
+        if stage == LifeStage.task_start:
+            data = {"type": stage, "name": Variables.task_name}
+        elif stage == LifeStage.task_end:
+            task = kwargs.get("task", None)
+            error = kwargs.get("error", "")
+            unavailable = kwargs.get("unavailable", 0)
+            summary_data_report = os.path.join(task.config.report_path,
+                                               ReportConstant.summary_data_report) if task else ""
+            if not os.path.exists(summary_data_report):
+                LOG.error("Call lifecycle error, summary report {} not exists".format(task.config.report_path))
+                passed = failures = blocked = 0
+            else:
+                task_element = ElementTree.parse(summary_data_report).getroot()
+                total_tests = int(task_element.get(ReportConstant.tests, 0))
+                failures = int(task_element.get(ReportConstant.failures, 0))
+                blocked = int(task_element.get(ReportConstant.disabled, 0))
+                ignored = int(task_element.get(ReportConstant.ignored, 0))
+                unavailable = int(task_element.get(ReportConstant.unavailable, 0))
+                passed = total_tests - failures - blocked - ignored
+            data = {"type": stage, "name": Variables.task_name,
+                    "passed": passed, "failures": failures,
+                    "blocked": blocked, "unavailable": unavailable,
+                    "error": error}
+        elif stage == LifeStage.case_start:
+            case_name = kwargs.get("case_name", "")
+            data = {"type": stage, "name": case_name}
+        elif stage == LifeStage.case_end:
+            case_name = kwargs.get("case_name", "")
+            case_result = kwargs.get("case_result", "")
+            error_msg = kwargs.get("error_msg", "")
+            data = {"type": stage, "name": case_name, "case_result": case_result, "error_msg": error_msg}
+        else:
+            LOG.error("Call lifecycle error, error param stage: {}".format(stage))
+            return
+        Task.life_stage_listener(data)

@@ -147,3 +147,13 @@ class HapNotSupportTest(DeviceError):
 
     def __str__(self):
         return str(self.error_msg)
+
+
+class RpcNotRunningError(DeviceError):
+    def __init__(self, error_msg, error_no=""):
+        super(RpcNotRunningError, self).__init__(error_msg, error_no)
+        self.error_msg = error_msg
+        self.error_no = error_no
+
+    def __str__(self):
+        return str(self.error_msg)

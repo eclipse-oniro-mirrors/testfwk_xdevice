@@ -1034,6 +1034,13 @@ def run_command(device, command):
         device.reboot()
     elif command.strip() == "reboot-delay":
         pass
+    elif command.strip().startswith("wait"):
+        command_list = command.split(" ")
+        if command_list and len(command_list) > 1:
+            secs = int(command_list[1])
+            LOG.debug("Start wait {} secs".format(secs))
+            time.sleep(secs)
+            stdout = "Finish wait 10 secs"
     elif command.strip().endswith("&"):
         device.execute_shell_in_daemon(command.strip())
     else:

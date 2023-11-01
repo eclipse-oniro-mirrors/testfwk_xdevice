@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
+import json
 import os
 import platform
 import time
@@ -32,6 +32,15 @@ from _core.constants import FilePermission
 LOG = platform_logger("ReporterHelper")
 
 
+class CaseResult:
+    passed = "Passed"
+    failed = "Failed"
+    blocked = "Blocked"
+    ignored = "Ignored"
+    unavailable = "Unavailable"
+    investigated = "Investigated"
+
+
 @dataclass
 class ReportConstant:
     # report name constants
@@ -39,6 +48,8 @@ class ReportConstant:
     summary_vision_report = "summary_report.html"
     details_vision_report = "details_report.html"
     failures_vision_report = "failures_report.html"
+    passes_vision_report = "passes_report.html"
+    ignores_vision_report = "ignores_report.html"
     task_info_record = "task_info.record"
     summary_ini = "summary.ini"
     summary_report_hash = "summary_report.hash"
@@ -46,6 +57,8 @@ class ReportConstant:
     summary_title = "Summary Report"
     details_title = "Details Report"
     failures_title = "Failures Report"
+    passes_title = "Passes Report"
+    ignores_title = "Ignores Report"
 
     # exec_info constants
     platform = "platform"
@@ -56,6 +69,7 @@ class ReportConstant:
     log_path = "log_path"
     log_path_title = "Log Path"
     execute_time = "execute_time"
+    device_label = "device_label"
 
     # summary constants
     product_info = "productinfo"
@@ -77,11 +91,13 @@ class ReportConstant:
     unavailable = "unavailable"
     not_run = "notrun"
     message = "message"
+    report = "report"
 
     # case result constants
     module_name = "modulename"
     module_name_ = "module_name"
     result = "result"
+    result_kind = "result_kind"
     status = "status"
     run = "run"
     true = "true"
@@ -184,7 +200,7 @@ class DataHelper:
         file_prefix = kwargs.get("file_prefix", None)
         data_reports = cls._get_data_reports(report_path, file_prefix)
         if not data_reports:
-            return
+            return None
         if key:
             data_reports.sort(key=key, reverse=reverse)
         summary_result = None
@@ -194,7 +210,7 @@ class DataHelper:
                                   ReportConstant.unavailable]
         for data_report in data_reports:
             data_report_element = cls.parse_data_report(data_report)
-            if not len(list(data_report_element)):
+            if not list(data_report_element):
                 continue
             if not summary_result:
                 summary_result = data_report_element
@@ -286,7 +302,8 @@ class DataHelper:
 class ExecInfo:
     keys = [ReportConstant.platform, ReportConstant.test_type,
             ReportConstant.device_name, ReportConstant.host_info,
-            ReportConstant.test_time, ReportConstant.execute_time]
+            ReportConstant.test_time, ReportConstant.execute_time,
+            ReportConstant.device_label]
     test_type = ""
     device_name = ""
     host_info = ""
@@ -295,6 +312,7 @@ class ExecInfo:
     platform = ""
     execute_time = ""
     product_info = dict()
+    device_label = ""
 
 
 class Result:
@@ -334,12 +352,12 @@ class Summary:
 
 class Suite:
     keys = [ReportConstant.module_name_, ReportConstant.name,
-            ReportConstant.total, ReportConstant.passed,
-            ReportConstant.failed, ReportConstant.blocked,
-            ReportConstant.ignored, ReportConstant.time]
+            ReportConstant.time, ReportConstant.total, ReportConstant.passed,
+            ReportConstant.failed, ReportConstant.blocked, ReportConstant.ignored]
     module_name = ReportConstant.empty_name
     name = ""
     time = ""
+    report = ""
 
     def __init__(self):
         self.message = ""
@@ -350,7 +368,7 @@ class Suite:
         return self.cases
 
     def set_cases(self, element):
-        if len(element) == 0:
+        if not element:
             LOG.debug("%s has no testcase",
                       element.get(ReportConstant.name, ""))
             return
@@ -383,6 +401,7 @@ class Case:
     result = ""
     message = ""
     time = ""
+    report = ""
 
     def is_passed(self):
         if self.result == ReportConstant.true and \
@@ -406,6 +425,9 @@ class Case:
 
     def is_ignored(self):
         return self.status in [ReportConstant.skip, ReportConstant.not_run]
+
+    def is_completed(self):
+        return self.result == ReportConstant.completed
 
     def get_result(self):
         if self.is_failed():
@@ -436,6 +458,8 @@ class VisionHelper:
     def __init__(self):
         from xdevice import Variables
         self.summary_element = None
+        self.device_logs = None
+        self.report_path = ""
         self.template_name = os.path.join(Variables.res_dir, "template",
                                           "report.html")
 
@@ -468,6 +492,9 @@ class VisionHelper:
             end_time, ReportConstant.time_format))
         exec_info.execute_time = self.get_execute_time(round(
             end_time - start_time, 3))
+        exec_info.device_label = getattr(task_info,
+                                         ReportConstant.device_label,
+                                         "None")
         exec_info.log_path = os.path.abspath(os.path.join(report_path, "log"))
 
         try:
@@ -525,6 +552,7 @@ class VisionHelper:
                                           ReportConstant.empty_name)
             suite.name = child.get(ReportConstant.name, "")
             suite.message = child.get(ReportConstant.message, "")
+            suite.report = child.get(ReportConstant.report, "")
             suite.result.total = int(child.get(ReportConstant.tests)) if \
                 child.get(ReportConstant.tests) else 0
             suite.result.failed = int(child.get(ReportConstant.failures)) if \
@@ -552,9 +580,8 @@ class VisionHelper:
                     render_target=ReportConstant.summary_vision_report):
         exec_info, summary, suites = parsed_data
         if not os.path.exists(self.template_name):
-            LOG.error("Template file not exists. {}".format(self.template_name))
+            LOG.error("Template file not exists, {}".format(self.template_name))
             return ""
-
         with open(self.template_name) as file:
             file_context = file.read()
             file_context = self._render_key("", ReportConstant.title_name,
@@ -567,8 +594,12 @@ class VisionHelper:
                 file_context = self._render_cases(file_context, suites)
             elif render_target == ReportConstant.failures_vision_report:
                 file_context = self._render_failure_cases(file_context, suites)
+            elif render_target == ReportConstant.passes_vision_report:
+                file_context = self._render_pass_cases(file_context, suites)
+            elif render_target == ReportConstant.ignores_vision_report:
+                file_context = self._render_ignore_cases(file_context, suites)
             else:
-                LOG.error("Unsupported vision report type: %s", render_target)
+                LOG.error("Unsupported vision report type: {}".format(render_target))
             return file_context
 
     @classmethod
@@ -692,28 +723,33 @@ class VisionHelper:
         suite record sample:
             <table class="suites">
             <tr>
-                <th class="title" colspan="9">Test detail</th>
+                <td class='tasklog'>TaskLog:</td>
+                <td class='normal' colspan='8' style="border-bottom: 1px #E8F0FD solid;">
+                    <a href='log/task_log.log'>task_log.log</a>
+                </td>
             </tr>
             <tr>
                 <th class="normal module">Module</th>
-                <th class="normal test-suite">Testsuite</th>
+                <th class="normal testsuite">Testsuite</th>
+                <th class="normal time">Time(sec)</th>
                 <th class="normal total">Total Tests</th>
                 <th class="normal passed">Passed</th>
                 <th class="normal failed">Failed</th>
                 <th class="normal blocked">Blocked</th>
                 <th class="normal ignored">Ignored</th>
-                <th class="normal time">Time</th>
                 <th class="normal operate">Operate</th>
             </tr>
             <tr [class="background-color"]>
                 <td class="normal module">{suite.module_name}</td>
-                <td class="normal test-suite">{suite.name}</td>
+                <td class='normal testsuite'>
+                  <a href='{suite.report}'>{suite.name}</a> or {suite.name}
+                </td>
+                <td class="normal time">{suite.time}</td>
                 <td class="normal total">{suite.result.total}</td>
                 <td class="normal passed">{suite.result.passed}</td>
                 <td class="normal failed">{suite.result.failed}</td>
                 <td class="normal blocked">{suite.result.blocked}</td>
                 <td class="normal ignored">{suite.result.ignored}</td>
-                <td class="normal time">{suite.time}</td>
                 <td class="normal operate">
                   <a href="details_report.html#{suite.name}" or
                           "failures_report.html#{suite.name}">
@@ -726,7 +762,8 @@ class VisionHelper:
         replace_str = "<!--{suites.context}-->"
 
         suites_context = "<table class='suites'>\n"
-        suites_context = "%s%s" % (suites_context, self._get_suites_title())
+        suites_context += self._get_task_log()
+        suites_context += self._get_suites_title()
         for index, suite in enumerate(suites):
             # construct suite context
             suite_name = getattr(suite, "name", self.PLACE_HOLDER)
@@ -738,8 +775,13 @@ class VisionHelper:
                     text = getattr(result, key, self.PLACE_HOLDER)
                 else:
                     text = getattr(suite, key, self.PLACE_HOLDER)
-                suite_context = "{}{}".format(
-                    suite_context, self._add_suite_td_context(key, text))
+                if key == ReportConstant.name:
+                    report = getattr(suite, ReportConstant.report, self.PLACE_HOLDER)
+                    temp = "<td class='normal testsuite'>{}</td>\n  ".format(
+                        "<a href='{}'>{}</a>".format(report, text) if report else text)
+                else:
+                    temp = self._add_suite_td_context(key, text)
+                suite_context = "{}{}".format(suite_context, temp)
             if suite.result.total == 0:
                 href = "%s#%s" % (
                     ReportConstant.failures_vision_report, suite_name)
@@ -756,20 +798,86 @@ class VisionHelper:
         suites_context = "%s</table>\n" % suites_context
         return file_context.replace(replace_str, suites_context)
 
+    def _get_task_log(self):
+        logs = [f for f in os.listdir(os.path.join(self.report_path, 'log')) if f.startswith('task_log.log')]
+        link = ["<a href='log/{task_log}'>{task_log}</a>".format(task_log=file_name) for file_name in logs]
+        temp = "<tr>\n" \
+               "  <td class='tasklog'>TaskLog:</td>\n" \
+               "  <td class='normal' colspan='8' style='border-bottom: 1px #E8F0FD solid;'>{}</td>\n" \
+               "</tr>".format(' | '.join(link))
+        return temp
+
+    def _get_testsuite_device_log(self, module_name, suite_name):
+        log_index, log_name = 0, 'device_log'
+        hilog_index, hilog_name = 0, 'device_hilog'
+        logs = []
+        for r in self._get_device_logs():
+            if (r.startswith(log_name) or r.startswith(hilog_name)) \
+                    and ((module_name and module_name in r) or suite_name in r):
+                logs.append(r)
+        if not logs:
+            return ''
+        link = []
+        for name in sorted(logs):
+            display_name = ''
+            if name.startswith(log_name):
+                display_name = log_name
+                if log_index != 0:
+                    display_name = log_name + str(log_index)
+                log_index += 1
+            if name.startswith(hilog_name):
+                display_name = hilog_name
+                if hilog_index != 0:
+                    display_name = hilog_name + str(hilog_index)
+                hilog_index += 1
+            link.append("<a href='{}'>{}</a>".format(os.path.join('log', name), display_name))
+        ele = "<tr>\n" \
+              "  <td class='devicelog' style='border-bottom: 1px #E8F0FD solid;'>DeviceLog:</td>\n" \
+              "  <td class='normal' colspan='6' style='border-bottom: 1px #E8F0FD solid;'>\n" \
+              "    {}\n" \
+              "  </td>\n" \
+              "</tr>".format(' | '.join(link))
+        return ele
+
+    def _get_testcase_device_log(self, case_name):
+        log_name, hilog_name = 'device_log', 'device_hilog'
+        logs = [r for r in self._get_device_logs()
+                if case_name in r and (log_name in r or hilog_name in r) and r.endswith('.log')]
+        if not logs:
+            return '-'
+        link = []
+        for name in sorted(logs):
+            display_name = ''
+            if log_name in name:
+                display_name = log_name
+            if hilog_name in name:
+                display_name = hilog_name
+            link.append("<a href='{}'>{}</a>".format(os.path.join('log', name), display_name))
+        return '<br>'.join(link)
+
+    def _get_device_logs(self):
+        if self.device_logs is not None:
+            return self.device_logs
+        result = []
+        pth = os.path.join(self.report_path, 'log')
+        for top, _, nondirs in os.walk(pth):
+            for filename in nondirs:
+                if filename.startswith('device_log') or filename.startswith('device_hilog'):
+                    result.append(os.path.join(top, filename).replace(pth, '')[1:])
+        self.device_logs = result
+        return result
+
     @classmethod
     def _get_suites_title(cls):
         suites_title = "<tr>\n" \
-                       "  <th class='title' colspan='9'>Test detail</th>\n" \
-                       "</tr>\n" \
-                       "<tr>\n" \
                        "  <th class='normal module'>Module</th>\n" \
-                       "  <th class='normal test-suite'>Testsuite</th>\n" \
-                       "  <th class='normal total'>Total Tests</th>\n" \
+                       "  <th class='normal testsuite'>Testsuite</th>\n" \
+                       "  <th class='normal time'>Time(sec)</th>\n" \
+                       "  <th class='normal total'>Tests</th>\n" \
                        "  <th class='normal passed'>Passed</th>\n" \
                        "  <th class='normal failed'>Failed</th>\n" \
                        "  <th class='normal blocked'>Blocked</th>\n" \
                        "  <th class='normal ignored'>Ignored</th>\n" \
-                       "  <th class='normal time'>Time</th>\n" \
                        "  <th class='normal operate'>Operate</th>\n" \
                        "</tr>\n"
         return suites_title
@@ -793,24 +901,36 @@ class VisionHelper:
                 </th>
             </tr>
             <tr>
+                <td class='devicelog' style='border-bottom: 1px #E8F0FD solid;'>DeviceLog:</td>
+                <td class='normal' colspan='5' style='border-bottom: 1px #E8F0FD solid;'>
+                    <a href='log/device_log_xx.log'>device_log</a> | <a href='log/device_hilog_xx.log'>device_hilog</a>
+                </td>
+            </tr>
+            <tr>
                 <th class="normal module">Module</th>
-                <th class="normal test-suite">Testsuite</th>
+                <th class="normal testsuite">Testsuite</th>
                 <th class="normal test">Testcase</th>
-                <th class="normal time">Time</th>
-                <th class="normal status"><div class="circle-normal
-                    circle-white"></div></th>
+                <th class="normal time">Time(sec)</th>
+                <th class="normal status">
+                  <div class="circle-normal circle-white"></div>
+                </th>
                 <th class="normal result">Result</th>
+                <th class='normal logs'>Logs</th>
             </tr>
             <tr [class="background-color"]>
                 <td class="normal module">{case.module_name}</td>
-                <td class="normal test-suite">{case.classname}</td>
-                <td class="normal test">{case.name}</td>
+                <td class="normal testsuite">{case.classname}</td>
+                <td class="normal test">
+                  <a href='{case.report}'>{case.name}</a> or {case.name}
+                </td>
                 <td class="normal time">{case.time}</td>
                 <td class="normal status"><div class="circle-normal
                     circle-{case.result/status}"></div></td>
                 <td class="normal result">
                     [<a href="failures_report.html#{suite.name}.{case.name}">]
-                    {case.result/status}[</a>]</td>
+                    {case.result/status}[</a>]
+                </td>
+                <td class='normal logs'>-</td>
             </tr>
             ...
             </table>
@@ -820,22 +940,17 @@ class VisionHelper:
         cases_context = ""
         for suite in suites:
             # construct case context
+            module_name = suite.cases[0].module_name if suite.cases else ""
             suite_name = getattr(suite, "name", self.PLACE_HOLDER)
             case_context = "<table class='test-suite'>\n"
-            case_context = "{}{}".format(case_context,
-                                         self._get_case_title(suite_name))
+            case_context += self._get_case_title(module_name, suite_name)
             for index, case in enumerate(suite.cases):
-                case_context = "{}{}".format(
-                    case_context,
-                    self._get_case_td_context(index, case, suite_name))
-            case_context = "%s</table>\n" % case_context
-
-            # add case context to cases context
-            cases_context = "{}{}".format(cases_context, case_context)
+                case_context += self._get_case_td_context(index, case, suite_name)
+            case_context += "\n</table>\n"
+            cases_context += case_context
         return file_context.replace(replace_str, cases_context)
 
-    @classmethod
-    def _get_case_td_context(cls, index, case, suite_name):
+    def _get_case_td_context(self, index, case, suite_name):
         result = case.get_result()
         rendered_result = result
         if result != ReportConstant.passed and \
@@ -843,23 +958,34 @@ class VisionHelper:
             rendered_result = "<a href='%s#%s.%s'>%s</a>" % \
                               (ReportConstant.failures_vision_report,
                                suite_name, case.name, result)
+        if result == ReportConstant.passed:
+            rendered_result = "<a href='{}#{}.{}'>{}</a>".format(
+                ReportConstant.passes_vision_report, suite_name, case.name, result)
+
+        if result == ReportConstant.ignored:
+            rendered_result = "<a href='{}#{}.{}'>{}</a>".format(
+                ReportConstant.ignores_vision_report, suite_name, case.name, result)
+
+        report = case.report
+        test_name = "<a href='{}'>{}</a>".format(report, case.name) if report else case.name
         case_td_context = "<tr>\n" if index % 2 == 0 else \
             "<tr class='background-color'>\n"
         case_td_context = "{}{}".format(
             case_td_context,
             "  <td class='normal module'>%s</td>\n"
-            "  <td class='normal test-suite'>%s</td>\n"
+            "  <td class='normal testsuite'>%s</td>\n"
             "  <td class='normal test'>%s</td>\n"
             "  <td class='normal time'>%s</td>\n"
-            "  <td class='normal status'>"
-            "<div class='circle-normal circle-%s'></div></td>\n"
+            "  <td class='normal status'>\n"
+            "    <div class='circle-normal circle-%s'></div>\n"
+            "  </td>\n"
             "  <td class='normal result'>%s</td>\n"
-            "</tr>\n" % (case.module_name, case.classname, case.name,
-                         case.time, result, rendered_result))
+            "  <td class='normal logs'>%s</td>\n"
+            "</tr>\n" % (case.module_name, case.classname, test_name,
+                         case.time, result, rendered_result, self._get_testcase_device_log(case.name)))
         return case_td_context
 
-    @classmethod
-    def _get_case_title(cls, suite_name):
+    def _get_case_title(self, module_name, suite_name):
         case_title = \
             "<tr>\n" \
             "  <th class='title' colspan='4' id='%s'>\n" \
@@ -868,16 +994,18 @@ class VisionHelper:
             "    <span class='return'></span></a>\n" \
             "  </th>\n"  \
             "</tr>\n"  \
+            "%s\n" \
             "<tr>\n" \
             "  <th class='normal module'>Module</th>\n" \
-            "  <th class='normal test-suite'>Testsuite</th>\n" \
+            "  <th class='normal testsuite'>Testsuite</th>\n" \
             "  <th class='normal test'>Testcase</th>\n" \
-            "  <th class='normal time'>Time</th>\n" \
+            "  <th class='normal time'>Time(sec)</th>\n" \
             "  <th class='normal status'><div class='circle-normal " \
             "circle-white'></div></th>\n" \
             "  <th class='normal result'>Result</th>\n" \
+            "  <th class='normal logs'>Logs</th>\n" \
             "</tr>\n" % (suite_name, suite_name,
-                         ReportConstant.summary_vision_report)
+                         ReportConstant.summary_vision_report, self._get_testsuite_device_log(module_name, suite_name))
         return case_title
 
     def _render_failure_cases(self, file_context, suites):
@@ -951,32 +1079,228 @@ class VisionHelper:
                 "{}{}".format(failure_cases_context, case_context)
         return file_context.replace(replace_str, failure_cases_context)
 
+    def _render_pass_cases(self, file_context, suites):
+        """construct pass cases context and render it to file context
+        failure case table sample:
+            <table class="pass-test">
+            <tr>
+                <th class="title" colspan="4" id="{suite.name}">
+                    <span class="title">{suite.name}&nbsp;&nbsp;</span>
+                    <a href="details_report.html#{suite.name}" or
+                            "summary_report.html#summary">
+                    <span class="return"></span></a>
+                </th>
+            </tr>
+            <tr>
+                <th class="normal test">Test</th>
+                <th class="normal status"><div class="circle-normal
+                circle-white"></div></th>
+                <th class="normal result">Result</th>
+                <th class="normal details">Details</th>
+            </tr>
+            <tr [class="background-color"]>
+                <td class="normal test" id="{suite.name}">
+                    {suite.module_name}#{suite.name}</td>
+                or
+                <td class="normal test" id="{suite.name}.{case.name}">
+                    {case.module_name}#{case.classname}#{case.name}</td>
+                <td class="normal status"><div class="circle-normal
+                    circle-{case.result/status}"></div></td>
+                <td class="normal result">{case.result/status}</td>
+                <td class="normal details">{case.message}</td>
+            </tr>
+            ...
+            </table>
+            ...
+        """
+        file_context = file_context.replace("failure-test", "pass-test")
+        replace_str = "<!--{failures.context}-->"
+        pass_cases_context = ""
+        for suite in suites:
+            if (suite.result.total > 0 and suite.result.total == (
+                    suite.result.failed + suite.result.ignored + suite.result.blocked)) or \
+                    suite.result.unavailable != 0:
+                continue
+
+            # construct pass cases context for pass suite
+            suite_name = getattr(suite, "name", self.PLACE_HOLDER)
+            case_context = "<table class='pass-test'>\n"
+            case_context = \
+                "{}{}".format(case_context, self._get_failure_case_title(
+                    suite_name, suite.result.total))
+            skipped_num = 0
+            for index, case in enumerate(suite.cases):
+                result = case.get_result()
+                if result == ReportConstant.failed or \
+                        result == ReportConstant.ignored or result == ReportConstant.blocked:
+                    skipped_num += 1
+                    continue
+                case_context = "{}{}".format(
+                    case_context, self._get_pass_case_td_context(
+                        index - skipped_num, case, suite_name, result))
+
+            case_context = "{}</table>\n".format(case_context)
+
+            # add case context to cases context
+            pass_cases_context = \
+                "{}{}".format(pass_cases_context, case_context)
+        return file_context.replace(replace_str, pass_cases_context)
+
+    def _render_ignore_cases(self, file_context, suites):
+        file_context = file_context.replace("failure-test", "ignore-test")
+        replace_str = "<!--{failures.context}-->"
+        ignore_cases_context = ""
+        for suite in suites:
+            if (suite.result.total > 0 and suite.result.total == (
+                    suite.result.failed + suite.result.ignored + suite.result.blocked)) or \
+                    suite.result.unavailable != 0:
+                continue
+
+            # construct pass cases context for pass suite
+            suite_name = getattr(suite, "name", self.PLACE_HOLDER)
+            case_context = "<table class='ignore-test'>\n"
+            case_context = \
+                "{}{}".format(case_context, self._get_failure_case_title(
+                    suite_name, suite.result.total))
+            skipped_num = 0
+            for index, case in enumerate(suite.cases):
+                result = case.get_result()
+                if result == ReportConstant.failed or \
+                        result == ReportConstant.passed or result == ReportConstant.blocked:
+                    skipped_num += 1
+                    continue
+                case_context = "{}{}".format(
+                    case_context, self._get_ignore_case_td_context(
+                        index - skipped_num, case, suite_name, result))
+
+            case_context = "{}</table>\n".format(case_context)
+
+            # add case context to cases context
+            ignore_cases_context = "{}{}".format(ignore_cases_context, case_context)
+        return file_context.replace(replace_str, ignore_cases_context)
+
+    @classmethod
+    def _get_pass_case_td_context(cls, index, case, suite_name, result):
+        pass_case_td_context = "<tr>\n" if index % 2 == 0 else \
+            "<tr class='background-color'>\n"
+        test_context = "{}#{}#{}".format(case.module_name, case.classname, case.name)
+        href_id = "{}.{}".format(suite_name, case.name)
+
+        detail_data = "-"
+        if hasattr(case, "normal_screen_urls"):
+            detail_data += "Screenshot: {}<br>".format(
+                cls._get_screenshot_url_context(case.normal_screen_urls))
+
+        pass_case_td_context += "  <td class='normal test' id='{}'>{}</td>\n" \
+            "  <td class='normal status'>\n" \
+            "    <div class='circle-normal circle-{}'></div>\n" \
+            "  </td>\n" \
+            "  <td class='normal result'>{}</td>\n" \
+            "  <td class='normal details'>\n" \
+            "   {}\n" \
+            "  </td>\n" \
+            "</tr>\n".format(href_id, test_context, result, result, detail_data)
+        return pass_case_td_context
+
+    @classmethod
+    def _get_ignore_case_td_context(cls, index, case, suite_name, result):
+        ignore_case_td_context = "<tr>\n" if index % 2 == 0 else \
+            "<tr class='background-color'>\n"
+        test_context = "{}#{}#{}".format(case.module_name, case.classname, case.name)
+        href_id = "{}.{}".format(suite_name, case.name)
+
+        result_info = {}
+        if hasattr(case, "result_info") and case.result_info:
+            result_info = json.loads(case.result_info)
+        detail_data = ""
+        actual_info = result_info.get("actual", "")
+        if actual_info:
+            detail_data += "actual:&nbsp;{}<br>".format(actual_info)
+        except_info = result_info.get("except", "")
+        if except_info:
+            detail_data += "except:&nbsp;{}<br>".format(except_info)
+        filter_info = result_info.get("filter", "")
+        if filter_info:
+            detail_data += "filter:&nbsp;{}<br>".format(filter_info)
+        if not detail_data:
+            detail_data = "-"
+
+        ignore_case_td_context += "  <td class='normal test' id='{}'>{}</td>\n" \
+            "  <td class='normal status'>\n" \
+            "    <div class='circle-normal circle-{}'></div></td>\n" \
+            "  <td class='normal result'>{}</td>\n" \
+            "  <td class='normal details'>\n" \
+            "    {}\n" \
+            "  </td>\n" \
+            "</tr>\n".format(
+                href_id, test_context, result, result, detail_data)
+        return ignore_case_td_context
+
+    @classmethod
+    def _get_screenshot_url_context(cls, url):
+        context = ""
+        if not url:
+            return ""
+        paths = cls._find_png_file_path(url)
+        for path in paths:
+            context += "<br><a href='{0}'>{1}</a>".format(path, path)
+        return context
+
+    @classmethod
+    def _find_png_file_path(cls, url):
+        if not url:
+            return []
+        last_index = url.rfind("\\")
+        if last_index < 0:
+            return []
+        start_str = url[0:last_index]
+        end_str = url[last_index + 1:len(url)]
+        if not os.path.exists(start_str):
+            return []
+        paths = []
+        for file in os.listdir(start_str):
+            if end_str in file:
+                whole_path = os.path.join(start_str, file)
+                l_index = whole_path.rfind("screenshot")
+                relative_path = whole_path[l_index:]
+                paths.append(relative_path)
+        return paths
+
     @classmethod
     def _get_failure_case_td_context(cls, index, case, suite_name, result):
         failure_case_td_context = "<tr>\n" if index % 2 == 0 else \
             "<tr class='background-color'>\n"
         if result == ReportConstant.unavailable:
-            test_context = "%s#%s" % (case.module_name, case.name)
+            test_context = "{}#{}".format(case.module_name, case.name)
             href_id = suite_name
         else:
-            test_context = \
-                "%s#%s#%s" % (case.module_name, case.classname, case.name)
-            href_id = "%s.%s" % (suite_name, case.name)
+            test_context = "{}#{}#{}".format(case.module_name, case.classname, case.name)
+            href_id = "{}.{}".format(suite_name, case.name)
         details_context = case.message
+
+        detail_data = ""
+        if hasattr(case, "normal_screen_urls"):
+            detail_data += "Screenshot: {}<br>".format(
+                cls._get_screenshot_url_context(case.normal_screen_urls))
+        if hasattr(case, "failure_screen_urls"):
+            detail_data += "Screenshot_On_Failure: {}<br>".format(
+                cls._get_screenshot_url_context(case.failure_screen_urls))
+
         if details_context:
-            details_context = str(details_context).replace("<", "&lt;"). \
-                replace(">", "&gt;").replace("\\r\\n", "<br/>"). \
-                replace("\\n", "<br/>").replace("\n", "<br/>"). \
+            detail_data += str(details_context).replace("<", "&lt;"). \
+                replace(">", "&gt;").replace("\\r\\n", "<br>"). \
+                replace("\\n", "<br>").replace("\n", "<br>"). \
                 replace(" ", "&nbsp;")
-        failure_case_td_context = "{}{}".format(
-            failure_case_td_context,
-            "  <td class='normal test' id='%s'>%s</td>\n"
-            "  <td class='normal status'>"
-            "<div class='circle-normal circle-%s'></div></td>\n"
-            "  <td class='normal result'>%s</td>\n"
-            "  <td class='normal details'>%s</td>\n"
-            "</tr>\n" %
-            (href_id, test_context, result, result, details_context))
+
+        failure_case_td_context += "  <td class='normal test' id='{}'>{}</td>\n" \
+            "  <td class='normal status'>" \
+            "    <div class='circle-normal circle-{}'></div>" \
+            "  </td>\n" \
+            "  <td class='normal result'>{}</td>\n" \
+            "  <td class='normal details'>\n" \
+            "    {}" \
+            "  </td>\n" \
+            "</tr>\n".format(href_id, test_context, result, result, detail_data)
         return failure_case_td_context
 
     @classmethod
@@ -1022,4 +1346,4 @@ class VisionHelper:
             vision_file.write(bytes(report_context, "utf-8", "ignore"))
         vision_file.flush()
         vision_file.close()
-        LOG.info("Generate vision report: %s", summary_vision_path)
+        LOG.info("Generate vision report: file:///%s", summary_vision_path.replace("\\", "/"))
