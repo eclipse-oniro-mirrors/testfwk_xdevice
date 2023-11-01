@@ -40,6 +40,7 @@ from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
 from xdevice import get_cst_time
+from xdevice import Platform
 from xdevice import AppInstallError
 from xdevice import RpcNotRunningError
 
@@ -173,6 +174,7 @@ class Device(IDevice):
     oh_module_package = None
     module_ablity_name = None
     _device_report_path = None
+    test_platform = Platform.ohos
     _webview = None
 
     model_dict = {

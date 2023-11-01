@@ -40,7 +40,7 @@ class Descriptor:
     The descriptor for a test or suite
     """
 
-    def __init__(self, uuid=None, name=None, source=None, container=False):
+    def __init__(self, uuid=None, name=None, source=None, container=False, error=None):
         self.unique_id = uuid
         self.display_name = name
         self.tags = {}
@@ -48,6 +48,7 @@ class Descriptor:
         self.parent = None
         self.children = []
         self.container = container
+        self.error = error
 
     def get_container(self):
         return self.container
@@ -63,6 +64,7 @@ class Task:
     EMPTY_TASK = "empty"
     TASK_CONFIG_SUFFIX = ".json"
     TASK_CONFIG_DIR = "config"
+    life_stage_listener = None
 
     def __init__(self, root=None, drivers=None, config=None):
         self.root = root

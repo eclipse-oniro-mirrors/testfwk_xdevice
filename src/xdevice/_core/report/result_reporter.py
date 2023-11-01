@@ -110,11 +110,11 @@ class ResultReporter(IReporter):
         LOG.info("")
 
         if self._check_params(report_path, **kwargs):
-            # generate vision reports
-            self._generate_test_report()
-
             # generate data report
             self._generate_data_report()
+
+            # generate vision reports
+            self._generate_vision_reports()
 
             # generate task info record
             self._generate_task_record()

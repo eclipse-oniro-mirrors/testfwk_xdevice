@@ -393,8 +393,7 @@ def _create_descriptor(config_file, filename, test_source, test_type, config):
                 error_message = "test source '%s' or '%s' not exists" % (
                     test_source, "%s%s" % (test_source, MODULE_CONFIG_SUFFIX))
                 error_no = "00102"
-            if Scheduler.mode != ModeType.decc:
-                raise ParamError(error_message, error_no=error_no)
+            desc.error = ParamError(error_message, error_no=error_no)
 
     if Scheduler.mode == ModeType.decc and error_message:
         Scheduler.report_not_executed(config.report_path, [("", desc)],
