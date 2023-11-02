@@ -371,13 +371,7 @@ class Device(IDevice):
         """
         local = "\"{}\"".format(local)
         remote = "\"{}\"".format(remote)
-        if self.host != "127.0.0.1":
-            self.connector_command("file recv {} {}".format(remote, local))
-        else:
-            is_create = kwargs.get("is_create", False)
-            timeout = kwargs.get("timeout", TIMEOUT)
-            HdcHelper.pull_file(self, remote, local, is_create=is_create,
-                                timeout=timeout)
+        self.connector_command("file recv {} {}".format(remote, local))
 
     def enable_hdc_root(self):
         return True

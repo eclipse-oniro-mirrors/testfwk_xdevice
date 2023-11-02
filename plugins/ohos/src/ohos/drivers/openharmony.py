@@ -822,8 +822,7 @@ class OHYaraConfig(Enum):
     FAIL = "fail"
     BLOCK = "block"
 
-    ERROR_MSG_001 = "The patch label is longer than two months (60 days), " \
-                    "which violates the OHCA agreement [https://compatibility.openharmony.cn/]."
+    ERROR_MSG_001 = "The patch label is longer than two months (60 days), which violates the OHCA agreement."
     ERROR_MSG_002 = "This test case is beyond the patch label scope and does not need to be executed."
     ERROR_MSG_003 = "Modify the code according to the patch requirements: "
 
