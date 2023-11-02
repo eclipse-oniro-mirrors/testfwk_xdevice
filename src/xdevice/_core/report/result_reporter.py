@@ -785,13 +785,7 @@ class ResultReporter(IReporter):
             return
         _, command, report_path = Scheduler.command_queue[-1]
 
-        record_info = {
-            "command": command,
-            "session_id": os.path.split(report_path)[-1],
-            "report_path": report_path,
-            "unsuccessful_params": self.record_params,
-            "data_reports": self.record_reports
-        }
+        record_info = self._parse_record_from_data(command, report_path)
 
         def encode(content):
             # inner function to encode
