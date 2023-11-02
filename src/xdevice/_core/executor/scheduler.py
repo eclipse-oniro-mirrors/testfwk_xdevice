@@ -322,7 +322,7 @@ class Scheduler(object):
             test_labels = []
             for serial, device in used_devices.items():
                 serials.append(convert_serial(serial))
-                platform = str(device.test_platform)
+                platform = str(device.label).capitalize()
                 test_label = str(device.label).capitalize()
                 if platform not in platforms:
                     platforms.append(platform)
