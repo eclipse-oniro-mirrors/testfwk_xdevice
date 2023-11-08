@@ -886,6 +886,17 @@ class DeviceLogCollector:
     def __init__(self, device):
         self.device = device
 
+    def _set_device_log_level(self, **kwargs):
+        # set device log level
+        if not self.device_log_level:
+            log_level = kwargs.get("log_level", "INFO")
+            if log_level not in LOGLEVEL:
+                self.device_log_level = "INFO"
+            else:
+                self.device_log_level = log_level
+        cmd = "hilog -b {}".format(self.device_log_level)
+        self.device.execute_shell_command(cmd)
+
     def restart_catch_device_log(self):
         self._sync_device_time()
         for _, path in enumerate(self.hilog_file_address):
@@ -910,15 +921,7 @@ class DeviceLogCollector:
         the logs in files.
         """
         self._sync_device_time()
-        # set device log level
-        if not self.device_log_level:
-            log_level = kwargs.get("log_level", "DEBUG")
-            if log_level not in LOGLEVEL:
-                self.device_log_level = "DEBUG"
-            else:
-                self.device_log_level = log_level
-        cmd = "hilog -b {}".format(self.device_log_level)
-        self.device.execute_shell_command(cmd)
+        self._set_device_log_level(**kwargs)
 
         device_hilog_proc = None
         if hilog_file_pipe:
@@ -971,14 +974,7 @@ class DeviceLogCollector:
         self.device.execute_shell_command(cmd)
         cmd = "rm -rf /data/log/hilog/*.gz"
         # set device log level
-        if not self.device_log_level:
-            log_level = kwargs.get("log_level", "DEBUG")
-            if log_level not in LOGLEVEL:
-                self.device_log_level = "DEBUG"
-            else:
-                self.device_log_level = log_level
-        cmd = "hilog -b {}".format(self.device_log_level)
-        self.device.execute_shell_command(cmd)
+        self._set_device_log_level(**kwargs)
         # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
         cmd = "hilog -w start -l {} -n 1000".format(log_size)
         out = self.device.execute_shell_command(cmd)
