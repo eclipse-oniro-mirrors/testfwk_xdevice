@@ -925,9 +925,9 @@ class DeviceLogCollector:
             command = "hilog"
             if self.device.host != "127.0.0.1":
                 cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.device.host, self.device.port),
-                       "-t", self.device.device_sn, "shell", command]
+                       "-t", self.device.device_sn, command]
             else:
-                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device.device_sn, "shell", command]
+                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device.device_sn, command]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
                 self.device.device_sn, convert_serial(self.device.device_sn)))
             device_hilog_proc = start_standing_subprocess(
