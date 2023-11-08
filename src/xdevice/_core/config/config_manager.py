@@ -256,7 +256,8 @@ class UserConfigManager(object):
             else:
                 data_dic.update({ConfigConst.tag_enable: str(node.text).strip()})
                 data_dic.update({ConfigConst.tag_dir: None})
-                data_dic.update({ConfigConst.tag_loglevel: "DEBUG"})
+                data_dic.update({ConfigConst.tag_loglevel: "INFO"})
+                data_dic.update({ConfigConst.tag_clear: "TRUE"})
         return data_dic
 
     def environment_enable(self):
