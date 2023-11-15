@@ -28,7 +28,7 @@ from tempfile import TemporaryDirectory
 from tempfile import NamedTemporaryFile
 from multiprocessing import Process
 from multiprocessing import Queue
-
+from xdevice import FilePermission
 from xdevice import ITestKit
 from xdevice import platform_logger
 from xdevice import Plugin
@@ -46,6 +46,7 @@ from xdevice import remount
 from xdevice import disable_keyguard
 from xdevice import get_class
 from xdevice import get_cst_time
+from xdevice import UserConfigManager
 
 from ohos.constants import CKit
 from ohos.environment.dmlib import HdcHelper
@@ -131,9 +132,12 @@ class CommandKit(ITestKit):
             device.pull_file(remote, local)
         elif command_type == "push":
             files = command_value.split("->")
-            src = files[0].strip()
-            dst = files[1].strip() if files[1].strip().startswith("/") else \
-                files[1].strip() + Props.dest_root
+            if len(files) != 2:
+                LOG.error("The push spec is invalid: {}".format(command_value))
+                return
+            src, dst = files[0].strip(), files[1].strip()
+            if not dst.startswith("/"):
+                dst = Props.dest_root + dst
             LOG.debug(
                 "Trying to push the file local {} to remote{}".format(
                     src, dst))
@@ -205,6 +209,7 @@ class PushKit(ITestKit):
         self.pushed_file = []
         self.abort_on_push_failure = True
         self.teardown_push = ""
+        self.request = None
 
     def __check_config__(self, config):
         self.pre_push = get_config_value('pre-push', config)
@@ -223,7 +228,7 @@ class PushKit(ITestKit):
         self.pushed_file = []
 
     def __setup__(self, device, **kwargs):
-        del kwargs
+        self.request = kwargs.get("request")
         LOG.debug("PushKit setup, device:{}".format(device.device_sn))
         for command in self.pre_push:
             run_command(device, command)
@@ -234,12 +239,10 @@ class PushKit(ITestKit):
             if len(files) != 2:
                 LOG.error("The push spec is invalid: {}".format(push_info))
                 continue
-            src = files[0].strip()
-            dst = files[1].strip() if files[1].strip().startswith("/") else \
-                files[1].strip() + Props.dest_root
-            LOG.debug(
-                "Trying to push the file local {} to remote {}".format(src,
-                                                                       dst))
+            src, dst = files[0].strip(), files[1].strip()
+            if not dst.startswith("/"):
+                dst = Props.dest_root + dst
+            LOG.debug("Trying to push the file local {} to remote {}".format(src, dst))
 
             try:
                 real_src_path = get_file_absolute_path(src, self.paths)
@@ -273,6 +276,82 @@ class PushKit(ITestKit):
         for command in self.post_push:
             run_command(device, command)
         return self.pushed_file, dst
+
+    @staticmethod
+    def __query_resource_url(file_path):
+        """获取资源下载链接"""
+        cli = None
+        url = ""
+        test_type, os_type, os_version = "", "", ""
+        params = {
+            "filePath": file_path,
+            "osType": os_type,
+            "osVersion": os_version,
+            "testType": test_type
+        }
+        query_url = "test"
+        try:
+            import requests
+            cli = requests.post(query_url, json=params, timeout=5, verify=False)
+            rsp_code = cli.status_code
+            rsp_body = cli.content.decode()
+            if rsp_code == 200:
+                try:
+                    url = json.loads(rsp_body).get("body")
+                except ValueError:
+                    pass
+            else:
+                LOG.debug(f"query resource's response code: {rsp_code}")
+                LOG.debug(f"query resource's response body: {rsp_body}")
+        except Exception as e:
+            LOG.debug(f"query the resource of '{file_path}' downloading url failed, reason: {e}")
+        finally:
+            if cli is not None:
+                cli.close()
+        return url
+
+    def __download_file(self, file_path):
+        """下载OpenHarmony兼容性测试资源文件"""
+        # 在命令行配置
+        request_config = self.request.config
+        query_config1 = request_config.get(ConfigConst.testargs).get(ConfigConst.query_resource, ["false"])[0].lower()
+        # 在xml配置
+        config_manager = UserConfigManager(
+            config_file=self.request.get(ConfigConst.configfile, ""),
+            env=self.request.get(ConfigConst.test_environment, ""))
+        query_config2 = config_manager.get_user_config_list("resource").get(ConfigConst.query_resource, "false").lower()
+        if query_config1 == "false" and query_config2 == "false":
+            return None
+        file_path = file_path.replace("\\", "/")
+        # 必须是resource或./resource开头的资源文件
+        pattern = re.compile(r'^(\./)?resource/')
+        if re.match(pattern, file_path) is None:
+            return None
+        save_file = os.path.join(request_config.get(ConfigConst.resource_path), re.sub(pattern, "", file_path))
+        if os.path.exists(save_file):
+            return save_file
+        url = self.__query_resource_url(file_path)
+        if not url:
+            return None
+        save_path = os.path.dirname(save_file)
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        cli = None
+        try:
+            import requests
+            cli = requests.get(url, timeout=5, verify=False)
+            if cli.status_code == 200:
+                file_fd = os.open(save_file, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
+                with os.fdopen(file_fd, mode="wb+") as s_file:
+                    for chunk in cli.iter_content(chunk_size=1024 * 4):
+                        s_file.write(chunk)
+                    s_file.flush()
+        except Exception as e:
+            LOG.debug(f"download the resource of '{file_path}' failed, reason: {e}")
+        finally:
+            if cli is not None:
+                cli.close()
+        return save_file if os.path.exists(save_path) else None
 
     def add_pushed_dir(self, src, dst):
         for root, _, files in os.walk(src):
@@ -955,6 +1034,13 @@ def run_command(device, command):
         device.reboot()
     elif command.strip() == "reboot-delay":
         pass
+    elif command.strip().startswith("wait"):
+        command_list = command.split(" ")
+        if command_list and len(command_list) > 1:
+            secs = int(command_list[1])
+            LOG.debug("Start wait {} secs".format(secs))
+            time.sleep(secs)
+            stdout = "Finish wait 10 secs"
     elif command.strip().endswith("&"):
         device.execute_shell_in_daemon(command.strip())
     else:

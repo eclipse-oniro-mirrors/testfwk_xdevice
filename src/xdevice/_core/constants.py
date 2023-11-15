@@ -47,6 +47,7 @@ class ProductForm(object):
     television = "tv"
     watch = "watch"
     tablet = 'tablet'
+    _2in1 = '2in1'
 
 
 @dataclass
@@ -292,7 +293,9 @@ class ConfigConst(object):
     device_log_off = "OFF"
     tag_dir = "dir"
     tag_enable = "enable"
-
+    tag_loglevel = "loglevel"
+    tag_clear = "clear"
+    query_resource = "query_resource"
     env_pool_cache = "env_pool_cache"
 
 
@@ -329,4 +332,23 @@ class AdvanceDeviceOption(object):
     product_cmd = "product_cmd"
     version_cmd = "version_cmd"
     label = "label"
+
+
+@dataclass
+class Platform(object):
+    """
+    Platform enumeration
+    """
+    ohos = "OpenHarmony"
+
+
+@dataclass
+class LifeStage(object):
+    """
+    LifeStage enumeration
+    """
+    task_start = "TaskStart"
+    task_end = "TaskEnd"
+    case_start = "CaseStart"
+    case_end = "CaseEnd"
 

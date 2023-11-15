@@ -1051,6 +1051,7 @@ class OHJSUnitItemConstants(Enum):
     TEST = "test"
     NUM_TESTS = "numtests"
     STACK = "stack"
+    STREAM = "stream"
     SUITE_CONSUMING = "suiteconsuming"
     CONSUMING = "consuming"
     APP_DIED = "App died"
@@ -1146,7 +1147,7 @@ class OHJSUnitTestParser(IParser):
                 test_info.test_name = status_value
             elif self.current_key == OHJSUnitItemConstants.NUM_TESTS.value:
                 test_info.num_tests = int(status_value)
-            elif self.current_key == OHJSUnitItemConstants.STACK.value:
+            elif self.current_key == OHJSUnitItemConstants.STREAM.value:
                 test_info.stacktrace = status_value
             self.current_key = None
             self.current_value = None
