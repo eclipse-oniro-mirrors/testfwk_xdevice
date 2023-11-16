@@ -229,6 +229,7 @@ class Device(IDevice):
     def get_device_type(self):
         model = self.get_property("const.product.devicetype",
                                   abort_on_exception=True)
+        model = "default" if model == "" else model
         self.label = self.model_dict.get(model, ProductForm.phone)
 
     def get_property(self, prop_name, retry=RETRY_ATTEMPTS,
@@ -236,6 +237,8 @@ class Device(IDevice):
         """
         Hdc command, ddmlib function.
         """
+        if not self.get_recover_state():
+            return ""
         command = "param get %s" % prop_name
         stdout = self.execute_shell_command(command, timeout=5 * 1000,
                                             output_flag=False,
@@ -622,6 +625,9 @@ class Device(IDevice):
             raise RpcNotRunningError("harmony abc rpc process not found", error_no=ErrorMessage.Error_01440.Code)
 
     def stop_harmony_rpc(self, kill_all=True):
+        if not self.get_recover_state():
+            LOG.warning("device state is false, skip stop harmony rpc.")
+            return
         # only kill devicetest in abc mode, or kill all
         proc_pids = self.get_devicetest_proc_pid()
         if not kill_all:
