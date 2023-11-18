@@ -901,7 +901,7 @@ class Scheduler(object):
 
             root = Descriptor(uuid=uid, name="component",
                               source=TestSetSource(test_set),
-                              container=True)
+                              con=True)
 
             root.children = find_test_descriptors(config)
             return root
@@ -911,7 +911,7 @@ class Scheduler(object):
             uid = unique_id("Scheduler", "testdict")
             root = Descriptor(uuid=uid, name="testdict",
                               source=TestSetSource(config.testdict),
-                              container=True)
+                              con=True)
             root.children = find_testdict_descriptors(config)
             return root
 
@@ -924,7 +924,7 @@ class Scheduler(object):
             fname, _ = get_filename_extension(test_set)
             uid = unique_id("Scheduler", fname)
             root = Descriptor(uuid=uid, name=fname,
-                              source=TestSetSource(test_set), container=True)
+                              source=TestSetSource(test_set), con=True)
             root.children = find_test_descriptors(config)
             return root
         else:
