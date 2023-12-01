@@ -40,18 +40,18 @@ class Descriptor:
     The descriptor for a test or suite
     """
 
-    def __init__(self, uuid=None, name=None, source=None, container=False, error=None):
+    def __init__(self, uuid=None, name=None, source=None, con=False, error=None):
         self.unique_id = uuid
         self.display_name = name
         self.tags = {}
         self.source = source
         self.parent = None
         self.children = []
-        self.container = container
+        self.con = con
         self.error = error
 
-    def get_container(self):
-        return self.container
+    def get_con(self):
+        return self.con
 
     def get_unique_id(self):
         return self.unique_id

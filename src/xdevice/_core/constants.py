@@ -123,7 +123,6 @@ class DeviceTestType(object):
     ltp_posix_test = "LtpPosixTest"
     oh_kernel_test = "OHKernelTest"
     oh_jsunit_test = "OHJSUnitTest"
-    hm_os_jsunit_test = "HMOSJSUnitTest"
     oh_rust_test = "OHRustTest"
     oh_yara_test = "OHYaraTest"
     validator_test = "ValidatorTest"
