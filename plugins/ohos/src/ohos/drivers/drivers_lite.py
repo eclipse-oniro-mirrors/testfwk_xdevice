@@ -357,9 +357,9 @@ class CppTestDriver(IDriver):
     def run(self, command=None, listener=None, timeout=None):
         if not timeout:
             timeout = self.config.timeout
+        parser_instances = []
         if listener:
             parsers = get_plugin(Plugin.PARSER, ParserType.cpp_test_lite)
-            parser_instances = []
             for parser in parsers:
                 parser_instance = parser.__class__()
                 parser_instance.suite_name = self.file_name
@@ -377,6 +377,11 @@ class CppTestDriver(IDriver):
                 command="ping %s" % self.linux_host,
                 case_type=DeviceTestType.cpp_test_lite,
                 timeout=5)
+        device = self.config.device
+        for parser_instance in parser_instances:
+            if hasattr(parser_instance, "product_info"):
+                product_info = parser_instance.product_info
+                device.update_device_props(product_info)
         return error, result, handler
 
     def _do_test_run(self, command, request):
@@ -721,8 +726,12 @@ class CTestDriver(IDriver):
                     "\n".join(result.split("\n")[0:-1]), "\n"))
                 file_name.flush()
         finally:
-            self.config.device.device.com_dict.get(
-                ComType.deploy_com).close()
+            device = self.config.device
+            device.device.com_dict.get(ComType.deploy_com).close()
+            for parser_instance in parser_instances:
+                if hasattr(parser_instance, "product_info"):
+                    product_info = parser_instance.product_info
+                    device.update_device_props(product_info)
 
     def _run_ctest_third_party(self, source=None, request=None, timeout=5):
         parser_instances = []

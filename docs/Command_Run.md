@@ -100,6 +100,7 @@
     | level | 用例级别，可选参数："0","1","2","3" | run -l SoundTriggerTest -ta level:1，解释：指定测试套SoundTriggerTest的用例级别为1 |
     | size | 用例粒度，可选参数："small","medium","large" | run -l SoundTriggerTest -ta size:small，解释：指定测试套SoundTriggerTest的用例粒度为small |
     | testType | 用例测试类型，可选参数："function","performance","reliability","security" | run -l SoundTriggerTest -ta testType:function，解释：指定测试套SoundTriggerTest的测试用例类型为function |
+    | enable_web_resource | 是否下载OpenHarmony官网测试资源，可选参数："true","false" | run -l SoundTriggerTest -ta enable_web_resource:true，解释：开启下载云端资源功能 |
 
  - -pt
 

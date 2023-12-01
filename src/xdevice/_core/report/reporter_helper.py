@@ -92,6 +92,7 @@ class ReportConstant:
     not_run = "notrun"
     message = "message"
     report = "report"
+    devices = "devices"
 
     # case result constants
     module_name = "modulename"
@@ -577,7 +578,7 @@ class VisionHelper:
         return suites
 
     def render_data(self, title_name, parsed_data,
-                    render_target=ReportConstant.summary_vision_report):
+                    render_target=ReportConstant.summary_vision_report, devices=None):
         exec_info, summary, suites = parsed_data
         if not os.path.exists(self.template_name):
             LOG.error("Template file not exists, {}".format(self.template_name))
@@ -588,6 +589,8 @@ class VisionHelper:
                                             title_name, file_context)
             file_context = self._render_exec_info(file_context, exec_info)
             file_context = self._render_summary(file_context, summary)
+            if devices is not None and len(devices) != 0:
+                file_context = self._render_devices(file_context, devices)
             if render_target == ReportConstant.summary_vision_report:
                 file_context = self._render_suites(file_context, suites)
             elif render_target == ReportConstant.details_vision_report:
@@ -601,6 +604,46 @@ class VisionHelper:
             else:
                 LOG.error("Unsupported vision report type: {}".format(render_target))
             return file_context
+
+    @classmethod
+    def _render_devices(cls, file_context, devices):
+        """render devices"""
+        table_body_content = ""
+        keys = ["index", "sn", "model", "type", "platform", "version", "others"]
+        for index, device in enumerate(devices, 1):
+            tds = []
+            for key in keys:
+                value = device.get(key, "")
+                if key == "index":
+                    td_content = index
+                elif key == "others":
+                    td_content = "<div class='tooltip'>" \
+                                 "<div class='ellipsis'>{}</div>" \
+                                 "<span class='tooltiptext'>{}</span>" \
+                                 "</div>".format(value, value)
+                else:
+                    td_content = value
+                tds.append("<td class='normal device-{}'>{}</td>".format(key, td_content))
+            table_body_content += "<tr>\n" + "\n  ".join(tds) + "\n</tr>"
+
+        render_result = """<table class="devices">
+  <thead>
+    <tr>
+      <th class="normal device-index">#</th>
+      <th class="normal device-sn">SN</th>
+      <th class="normal device-model">Model</th>
+      <th class="normal device-type">Type</th>
+      <th class="normal device-platform">Platform</th>
+      <th class="normal device-version">Version</th>
+      <th class="normal device-others">Others</th>
+    </tr>
+  </thead>
+  <tbody>
+    {}
+  </tbody>
+</table>""".format(table_body_content)
+        replace_str = "<!--{devices.context}-->"
+        return file_context.replace(replace_str, render_result)
 
     @classmethod
     def _render_key(cls, prefix, key, new_str, update_context):

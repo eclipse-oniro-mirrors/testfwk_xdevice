@@ -171,6 +171,73 @@
             padding: 5px 34px 20px 0;
         }
 
+        table.devices {
+            width: 1160px;
+            margin-left: auto;
+            margin-right: auto;
+            margin-top: 30px;
+            table-layout: fixed;
+        }
+        table.devices th.normal {
+            font-family: Roboto-Medium, sans-serif;
+            color: #293040;
+            font-size: 12px;
+            height: 36px;
+            border-bottom: 1px #E8F0FD solid;
+            text-align: left;
+        }
+        table.devices td.normal {
+            font-family: Roboto-Regular, sans-serif;
+            color: #293040;
+            font-size: 14px;
+            height: 36px;
+            text-align: left;
+        }
+        table.devices th.device-index {
+            width: 3%;
+        }
+        table.devices th.device-sn,
+        table.devices th.device-model,
+        table.devices th.device-type,
+        table.devices th.device-platform,
+        table.devices th.device-version,
+        table.devices td.device-sn,
+        table.devices td.device-model,
+        table.devices td.device-type,
+        table.devices td.device-platform,
+        table.devices td.device-version {
+            width: 15%;
+            word-break: break-all;
+        }
+
+        .ellipsis {
+            overflow: hidden;
+            width: 250px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+        .tooltiptext {
+            display: none;
+            position: absolute;
+            z-index: 1;
+            left: 0;
+            top: 100%;
+            background-color: #F2F5F7;
+            text-align: left;
+            border-radius: 5px;
+            padding: 5px 5px;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .tooltip:hover .tooltiptext {
+            display: inline-block;
+        }
+
         table.suites {
             width: 1160px;
             margin-left: auto;
@@ -462,6 +529,8 @@
             <td class="normal unavailable">Unavailable</td>
         </tr>
     </table>
+
+    <!--{devices.context}-->
 
 <!--{suites.context}-->
 <!--{cases.context}-->

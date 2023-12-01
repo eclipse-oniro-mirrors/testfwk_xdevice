@@ -21,22 +21,25 @@ import os
 import shutil
 import threading
 import time
+from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait
+from xml.etree import ElementTree
 
-from _core.constants import ModeType
 from _core.constants import ConfigConst
+from _core.constants import FilePermission
+from _core.constants import ModeType
 from _core.constants import ReportConst
 from _core.executor.request import Request
 from _core.logger import platform_logger
 from _core.plugin import Config
+from _core.utils import calculate_elapsed_time
 from _core.utils import get_instance_name
 from _core.utils import check_mode
 from _core.exception import ParamError
 from _core.exception import ExecuteTerminate
 from _core.exception import DeviceError
 from _core.exception import LiteDeviceError
-from _core.report.reporter_helper import VisionHelper
 from _core.report.reporter_helper import ReportConstant
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import Suite
@@ -141,21 +144,32 @@ class DriversThread(threading.Thread):
             for device in config.environment.devices:
                 device.reboot()
 
+    @staticmethod
+    def _write_device_to_report(result_xml, environment):
+        """write device to result file"""
+        if not os.path.exists(result_xml) or environment is None:
+            return
+        root = ElementTree.parse(result_xml).getroot()
+        desc = environment.get_description()
+        if not desc:
+            return
+        root.set("devices", literal_eval(str(desc)))
+        result_fd = os.open(result_xml, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
+        with os.fdopen(result_fd, mode="w", encoding="utf-8") as result_file:
+            result_file.write(ElementTree.tostring(root).decode())
+
     def _handle_finally(self, driver, execute_message, start_time, test):
         from xdevice import Scheduler
-        # output execute time
-        end_time = time.time()
-        execute_time = VisionHelper.get_execute_time(int(
-            end_time - start_time))
-        source_content = self.test_driver[1].source.source_file or \
-                         self.test_driver[1].source.source_string
+        source_content = (self.test_driver[1].source.source_file
+                          or self.test_driver[1].source.source_string)
         LOG.info("Executed: %s, Execution Time: %s" % (
-            source_content, execute_time))
+            source_content, calculate_elapsed_time(start_time, time.time())))
 
         # inherit history report under retry mode
         if driver and test:
             execute_result = driver.__result__()
-            LOG.debug("Execute result:%s" % execute_result)
+            self._write_device_to_report(execute_result, driver.config.environment)
+            LOG.debug("Execute result: %s" % execute_result)
             if getattr(self.task.config, "history_report_path", ""):
                 execute_result = self._inherit_execute_result(
                     execute_result, test)
@@ -537,14 +551,10 @@ class DriversDryRunThread(threading.Thread):
 
     def _handle_finally(self, driver, execute_message, start_time, test):
         from xdevice import Scheduler
-        # output execute time
-        end_time = time.time()
-        execute_time = VisionHelper.get_execute_time(int(
-            end_time - start_time))
-        source_content = self.test_driver[1].source.source_file or \
-                         self.test_driver[1].source.source_string
+        source_content = (self.test_driver[1].source.source_file
+                          or self.test_driver[1].source.source_string)
         LOG.info("Executed: %s, Execution Time: %s" % (
-            source_content, execute_time))
+            source_content, calculate_elapsed_time(start_time, time.time())))
 
         # set execute state
         if self.error_message:

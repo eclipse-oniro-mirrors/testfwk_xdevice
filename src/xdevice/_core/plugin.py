@@ -47,7 +47,7 @@ class Config:
         self.update(params)
 
     def __getitem__(self, item):
-        return self.__dict__[item]
+        return self.__dict__.get(item)
 
     def __setitem__(self, key, value):
         self.__dict__[key] = value
@@ -95,8 +95,8 @@ class Plugin(object):
             self.plugin_type = str(args[0])
             self.plugin_id = str(args[0])
         elif "id" in _param_dict.keys() and "type" in _param_dict.keys():
-            self.plugin_type = _param_dict["type"]
-            self.plugin_id = _param_dict["id"]
+            self.plugin_type = _param_dict.get("type")
+            self.plugin_id = _param_dict.get("id")
             del _param_dict["type"]
             del _param_dict["id"]
         else:

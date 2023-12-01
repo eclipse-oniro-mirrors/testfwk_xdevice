@@ -29,6 +29,8 @@ from tempfile import NamedTemporaryFile
 from multiprocessing import Process
 from multiprocessing import Queue
 from xdevice import FilePermission
+
+from xdevice import DeviceLabelType
 from xdevice import ITestKit
 from xdevice import platform_logger
 from xdevice import Plugin
@@ -229,7 +231,7 @@ class PushKit(ITestKit):
 
     def __setup__(self, device, **kwargs):
         self.request = kwargs.get("request")
-        LOG.debug("PushKit setup, device:{}".format(device.device_sn))
+        LOG.debug("PushKit setup, device: {}".format(device.device_sn))
         for command in self.pre_push:
             run_command(device, command)
         dst = None
@@ -247,9 +249,10 @@ class PushKit(ITestKit):
             try:
                 real_src_path = get_file_absolute_path(src, self.paths)
             except ParamError as error:
-                if self.abort_on_push_failure:
-                    raise error
-                else:
+                real_src_path = self.__download_web_resource(device, src)
+                if real_src_path is None:
+                    if self.abort_on_push_failure:
+                        raise error
                     LOG.warning(error, error_no=error.error_no)
                     continue
             # hdc don't support push directory now
@@ -277,60 +280,31 @@ class PushKit(ITestKit):
             run_command(device, command)
         return self.pushed_file, dst
 
-    @staticmethod
-    def __query_resource_url(file_path):
-        """获取资源下载链接"""
-        cli = None
-        url = ""
-        test_type, os_type, os_version = "", "", ""
-        params = {
-            "filePath": file_path,
-            "osType": os_type,
-            "osVersion": os_version,
-            "testType": test_type
-        }
-        query_url = "test"
-        try:
-            import requests
-            cli = requests.post(query_url, json=params, timeout=5, verify=False)
-            rsp_code = cli.status_code
-            rsp_body = cli.content.decode()
-            if rsp_code == 200:
-                try:
-                    url = json.loads(rsp_body).get("body")
-                except ValueError:
-                    pass
-            else:
-                LOG.debug(f"query resource's response code: {rsp_code}")
-                LOG.debug(f"query resource's response body: {rsp_body}")
-        except Exception as e:
-            LOG.debug(f"query the resource of '{file_path}' downloading url failed, reason: {e}")
-        finally:
-            if cli is not None:
-                cli.close()
-        return url
-
-    def __download_file(self, file_path):
+    def __download_web_resource(self, device, file_path):
         """下载OpenHarmony兼容性测试资源文件"""
         # 在命令行配置
         request_config = self.request.config
-        query_config1 = request_config.get(ConfigConst.testargs).get(ConfigConst.query_resource, ["false"])[0].lower()
+        enable_web_resource1 = request_config.get(ConfigConst.testargs).get(
+            ConfigConst.enable_web_resource, ["false"])[0].lower()
         # 在xml配置
         config_manager = UserConfigManager(
             config_file=self.request.get(ConfigConst.configfile, ""),
             env=self.request.get(ConfigConst.test_environment, ""))
-        query_config2 = config_manager.get_user_config_list("resource").get(ConfigConst.query_resource, "false").lower()
-        if query_config1 == "false" and query_config2 == "false":
+        web_resource = config_manager.get_resource_conf().get(ConfigConst.web_resource, {})
+        web_resource_url = web_resource.get(ConfigConst.tag_url, "").strip()
+        enable_web_resource2 = web_resource.get(ConfigConst.tag_enable, "false").lower()
+        if enable_web_resource1 == "false" and enable_web_resource2 == "false":
             return None
         file_path = file_path.replace("\\", "/")
         # 必须是resource或./resource开头的资源文件
         pattern = re.compile(r'^(\./)?resource/')
         if re.match(pattern, file_path) is None:
             return None
-        save_file = os.path.join(request_config.get(ConfigConst.resource_path), re.sub(pattern, "", file_path))
+        save_file = os.path.join(
+            request_config.get(ConfigConst.resource_path), re.sub(pattern, "resource/", file_path))
         if os.path.exists(save_file):
             return save_file
-        url = self.__query_resource_url(file_path)
+        url = self.__query_resource_url(device, web_resource_url, file_path)
         if not url:
             return None
         save_path = os.path.dirname(save_file)
@@ -347,11 +321,52 @@ class PushKit(ITestKit):
                         s_file.write(chunk)
                     s_file.flush()
         except Exception as e:
-            LOG.debug(f"download the resource of '{file_path}' failed, reason: {e}")
+            LOG.error(f"download the resource of '{file_path}' failed. {e}")
         finally:
             if cli is not None:
                 cli.close()
         return save_file if os.path.exists(save_path) else None
+
+    def __query_resource_url(self, device, query_url, file_path):
+        """获取资源下载链接"""
+        url = ""
+        os_type = ""
+        device_class = device.__class__.__name__
+        if device_class == "Device":
+            os_type = "standard system"
+        if device_class == "DeviceLite" and device.label == DeviceLabelType.ipcamera:
+            os_type = "small system"
+        os_version = getattr(device, "device_props", {}).get("DisplayVersion", "")
+        test_type = self.request.config.get(ConfigConst.task, "").upper()
+        if not os_type or not os_version or re.search(r'(AC|DC|HA|HI|SS)TS', test_type) is None:
+            LOG.warning("query resource params is none")
+            return url
+        cli = None
+        params = {
+            "filePath": file_path,
+            "osType": os_type,
+            "osVersion": os_version,
+            "testType": test_type
+        }
+        try:
+            import requests
+            cli = requests.post(query_url, json=params, timeout=5, verify=False)
+            rsp_code = cli.status_code
+            rsp_body = cli.content.decode()
+            if rsp_code == 200:
+                try:
+                    url = json.loads(rsp_body).get("body")
+                except ValueError:
+                    LOG.error("query resource's response body is not json data")
+            else:
+                LOG.info(f"query resource's response code: {rsp_code}")
+                LOG.info(f"query resource's response body: {rsp_body}")
+        except Exception as e:
+            LOG.error(f"query the resource of '{file_path}' downloading url failed. {e}")
+        finally:
+            if cli is not None:
+                cli.close()
+        return url
 
     def add_pushed_dir(self, src, dst):
         for root, _, files in os.walk(src):
@@ -360,7 +375,7 @@ class PushKit(ITestKit):
                     os.path.join(root, file_path).replace(src, dst))
 
     def __teardown__(self, device):
-        LOG.debug("PushKit teardown: device:{}".format(device.device_sn))
+        LOG.debug("PushKit teardown: device: {}".format(device.device_sn))
         for command in self.teardown_push:
             run_command(device, command)
         if self.is_uninstall:

@@ -61,6 +61,7 @@ from _core.constants import CommonParserType
 from _core.constants import FilePermission
 from _core.constants import HostDrivenTestType
 from _core.constants import DeviceConnectorType
+from _core.constants import DeviceProperties
 from _core.constants import AdvanceDeviceOption
 from _core.constants import LifeStage
 from _core.constants import Platform
@@ -191,6 +192,7 @@ __all__ = [
     "FilePermission",
     "HostDrivenTestType",
     "DeviceConnectorType",
+    "DeviceProperties",
     "AdvanceDeviceOption",
     "UserConfigManager",
     "ResourceManager",

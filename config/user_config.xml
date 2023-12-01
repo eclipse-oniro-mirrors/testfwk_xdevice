@@ -58,6 +58,10 @@
     </testcases>
     <resource>
         <dir></dir>
+        <web_resource>
+            <enable>FALSE</enable>
+            <url></url>
+        </web_resource>>
     </resource>
     <loglevel>INFO</loglevel>
 </user_config>

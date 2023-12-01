@@ -35,7 +35,6 @@ from xdevice import get_config_value
 from xdevice import get_file_absolute_path
 from xdevice import UserConfigManager
 from xdevice import ConfigConst
-from xdevice import get_test_component_version
 from xdevice import get_local_ip
 from xdevice import FilePermission
 from xdevice import DeviceTestType
@@ -46,6 +45,7 @@ from ohos.exception import LiteDeviceMountError
 from ohos.constants import ComType
 from ohos.constants import CKit
 from ohos.constants import DeviceLiteKernel
+from ohos.utils import parse_strings_key_value
 
 
 __all__ = ["DeployKit", "MountKit", "RootFsKit", "QueryKit", "LiteShellKit",
@@ -168,7 +168,7 @@ class MountKit(ITestKit):
 
     def mount_on_board(self, device=None, remote_info=None, case_type=""):
         """
-        Init the environment on the device server, eg. mount the testcases to
+        Init the environment on the device server, e.g. mount the testcases to
         server
 
         Parameters:
@@ -419,7 +419,7 @@ def copy_file_as_temp(original_file, str_length):
 
 def mkdir_on_board(device, dir_path):
     """
-    Liteos L1 board dont support mkdir -p
+    Liteos L1 board don't support mkdir -p
     Parameters:
         device : the L1 board
         dir_path: the dir path to make
@@ -446,7 +446,7 @@ def get_mount_dir(mount_dir):
     Use windows path to mount directly when the system is windows
     Parameters:
         mount_dir : the dir to mount that config in user_config.xml
-        such as: the mount_dir is: D:\mount\root
+        such as: the mount_dir is: D:\\mount\\root
                  the mount command should be: mount ip:/d/mount/root
     """
     if platform.system() == "Windows":
@@ -579,19 +579,16 @@ class QueryKit(ITestKit):
                              error_no="02401")
         self.mount_kit.__setup__(device, request=request)
         if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-            device.execute_command_with_timeout(command="cd /storage",
-                                                timeout=0.2)
+            command = f"chmod +x /storage{self.query} && /storage{self.query}"
             output, _, _ = device.execute_command_with_timeout(
-                command=".{}{}".format("/storage", self.query), timeout=5)
+                command=command, timeout=5)
         else:
             device.execute_command_with_timeout(command="cd /", timeout=0.2)
             output, _, _ = device.execute_command_with_timeout(
                 command=".{}".format(self.query), timeout=5)
-        product_info = {}
-        for line in output.split("\n"):
-            process_product_info(line, product_info)
-        product_info["version"] = get_test_component_version(request.config)
-        request.product_info = product_info
+        LOG.debug(output)
+        params = parse_strings_key_value(output)
+        device.update_device_props(params)
 
     def __teardown__(self, device):
         if device.label != DeviceLabelType.ipcamera:

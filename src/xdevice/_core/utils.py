@@ -442,7 +442,8 @@ def check_result_report(report_root_dir, report_file, error_message="",
     if module_name:
         suite_name = module_name
     suite_reporter = SuiteReporter(
-        [(suite_result, [])], suite_name, result_dir, modulename=module_name,
+        [(suite_result, [])], suite_name, result_dir,
+        modulename=module_name, message=error_message,
         is_monkey=kwargs.get("is_monkey", False), device_up_info=kwargs.get("device_up_info", None))
     suite_reporter.create_empty_report()
     return "%s.xml" % os.path.join(result_dir, suite_name)

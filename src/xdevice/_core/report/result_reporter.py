@@ -21,6 +21,7 @@ import copy
 import json
 import os
 import platform
+import re
 import shutil
 import time
 import zipfile
@@ -30,6 +31,7 @@ from xml.etree import ElementTree
 
 from _core.interface import IReporter
 from _core.plugin import Plugin
+from _core.constants import DeviceProperties
 from _core.constants import ModeType
 from _core.constants import TestType
 from _core.constants import FilePermission
@@ -63,6 +65,7 @@ class ResultSummary:
         self.blocked = 0
         self.ignored = 0
         self.unavailable = 0
+        self.devices = []
 
     def get_data(self):
         LOG.info(f"Summary result: modules: {self.modules}, run modules: {self.runmodules}, "
@@ -79,6 +82,9 @@ class ResultSummary:
             "unavailable": self.unavailable
         }
         return data
+
+    def get_devices(self):
+        return self.devices
 
 
 @Plugin(type=Plugin.REPORTER, id=TestType.all)
@@ -184,6 +190,7 @@ class ResultReporter(IReporter):
         data = {
             "exec_info": self._get_exec_info(),
             "summary": self.summary.get_data(),
+            "devices": self.summary.get_devices(),
             "modules": modules,
         }
         return data
@@ -214,13 +221,12 @@ class ResultReporter(IReporter):
         self.exec_info = exec_info
 
         info = {
-            "platform": platform_info,
-            "test_type": test_type,
-            "device_name": device_name,
-            "device_type": device_type,
-            "test_time": test_time,
+            "test_start": start_time,
+            "test_end": end_time,
             "execute_time": execute_time,
-            "host_info": host_info
+            "test_type": test_type,
+            "host_info": host_info,
+            "logs": self._get_task_log()
         }
         return info
 
@@ -252,6 +258,7 @@ class ResultReporter(IReporter):
             self.summary.runmodules += 1
         else:
             self.summary.unavailable += 1
+        devices = self._parse_devices(ele_module)
 
         module_report, module_time = module.report, module.time
         if len(suites) == 1 and suites[0].get(ReportConstant.name) == module_name:
@@ -262,6 +269,8 @@ class ResultReporter(IReporter):
         info = {
             "name": module_name,
             "report": module_report,
+            "test_start": "-",
+            "test_end": "-",
             "time": module_time,
             "execute_time": calculate_elapsed_time(0, module_time),
             "tests": module.tests,
@@ -271,7 +280,9 @@ class ResultReporter(IReporter):
             "ignored": module.ignored,
             "unavailable": module.unavailable,
             "passingrate": "0%" if module.tests == 0 else "{:.0%}".format(module.passed / module.tests),
-            "productinfo": ResultReporter._parse_product_info(ele_module),
+            "error": ele_module.get(ReportConstant.message, ""),
+            "logs": self._get_device_log(module_name),
+            "devices": devices,
             "suites": suites
         }
         return info
@@ -313,15 +324,21 @@ class ResultReporter(IReporter):
             LOG.error("parse test time error, set it to 0.0")
         return _time
 
-    @staticmethod
-    def _parse_product_info(ele_module):
-        product_info = ele_module.get(ReportConstant.product_info, "")
-        if product_info == "":
-            return {}
+    def _parse_devices(self, ele_module):
+        devices_str = ele_module.get(ReportConstant.devices, "")
+        if devices_str == "":
+            return []
         try:
-            return literal_eval(product_info)
+            devices = literal_eval(devices_str)
         except SyntaxError:
-            return {}
+            return []
+        for device in devices:
+            device_sn = device.get(DeviceProperties.sn, "")
+            temp = [d for d in self.summary.get_devices() if d.get(DeviceProperties.sn, "") == device_sn]
+            if len(temp) != 0:
+                continue
+            self.summary.get_devices().append(device)
+        return devices
 
     @staticmethod
     def _count_result(ele):
@@ -348,6 +365,7 @@ class ResultReporter(IReporter):
             ['name', 'report', 'time', 'tests', 'passed', 'failed', 'blocked', 'ignored', 'unavailable'])
         return Result(name, report, _time, tests, passed, failed, blocked, ignored, unavailable)
 
+    @staticmethod
     def _get_case_result(ele_case):
         result_kind = ele_case.get(ReportConstant.result_kind, "")
         if result_kind != "":
@@ -363,6 +381,31 @@ class ResultReporter(IReporter):
         if status in [ReportConstant.unavailable]:
             return CaseResult.unavailable
         return CaseResult.passed
+
+    def _get_device_log(self, module_name):
+        """黑盒用例的测试报告是单独生成的， 而xts只有模块级的设备日志，无用例级日志，故本方法仅支持获取模块级的设备日志"""
+        device_log = {}
+        log_path = os.path.join(self.report_path, "log", module_name)
+        module_log_path = f"log/{module_name}"
+        if os.path.exists(log_path):
+            for filename in os.listdir(log_path):
+                file_link = f"{module_log_path}/{filename}"
+                file_path = os.path.join(log_path, filename)
+                # 是目录，都提供链接
+                if os.path.isdir(file_path):
+                    device_log.setdefault(filename, file_link)
+                    continue
+                # 是文件，仅提供模块的日志链接
+                # 测试套日志命名格式device_log_sn.log、测试套子用例日志命名格式device_log_case_sn.log，后者”_“大于2
+                ret = re.fullmatch(r'(device_(?:hi)?log)_\S+\.log', filename)
+                if ret is None or filename.count("_") > 2:
+                    continue
+                device_log.setdefault(ret.group(1), file_link)
+        return device_log
+
+    def _get_task_log(self):
+        log_path = os.path.join(self.report_path, "log")
+        return {f: f"log/{f}" for f in os.listdir(log_path) if f.startswith("task_log.log")}
 
     def _generate_data_report(self):
         # initial element
@@ -397,6 +440,7 @@ class ResultReporter(IReporter):
             if data_report.endswith(ReportConstant.summary_data_report):
                 continue
             root = self.data_helper.parse_data_report(data_report)
+            self._parse_devices(root)
             if module_name == ReportConstant.empty_name:
                 module_name = self._get_module_name(data_report, root)
             total = int(root.get(ReportConstant.tests, 0))
@@ -587,7 +631,8 @@ class ResultReporter(IReporter):
 
         # render data
         report_context = self.vision_helper.render_data(
-            title, parsed_data, render_target=render_target)
+            title, parsed_data,
+            render_target=render_target, devices=self.summary.get_devices())
 
         # generate report
         if report_context:

@@ -146,6 +146,13 @@ xdevice
        <resource>
            <!-- 指定资源目录，为空则默认设置为当前项目下的resource文件夹 -->
            <dir></dir>
+           <!-- 下载OpenHarmony官网测试资源 -->
+           <web_resource>
+                <!-- 是否开启功能，TRUE开启/FALSE不开启，默认配置为FALSE -->
+                <enable>FALSE</enable>
+                <!-- 下载接口地址 -->
+                <url></url>
+            </web_resource>>
        </resource>
        ```
     

@@ -19,7 +19,6 @@
 import copy
 import re
 import time
-from queue import Queue
 
 from xdevice import IParser
 from xdevice import Plugin
@@ -31,7 +30,9 @@ from xdevice import platform_logger
 from xdevice import check_pub_key_exist
 from xdevice import get_cst_time
 
+from ohos.constants import Constant
 from ohos.constants import ParserType
+from ohos.utils import parse_line_key_value
 
 __all__ = ["CppTestListParserLite", "CTestParser", "OpenSourceParser",
            "CppTestParserLite"]
@@ -58,10 +59,6 @@ _TEST_PASSED_LOWER = "pass"
 
 _COMPILE_PASSED = "compile PASSED"
 _COMPILE_PARA = r"(.* compile .*)"
-
-_PRODUCT_PARA = r"(.*The .* is .*)"
-_PRODUCT_PARA_START = r"To Obtain Product Params Start"
-_PRODUCT_PARA_END = r"To Obtain Product Params End"
 
 _START_JSUNIT_RUN_MARKER = "[start] start run suites"
 _START_JSUNIT_SUITE_RUN_MARKER = "[suite start]"
@@ -111,8 +108,7 @@ class CppTestParserLite(IParser):
         for listener in self.get_listeners():
             suites = copy.copy(suites_result)
             listener.__ended__(LifeCycle.TestSuites, test_result=suites,
-                               suites_name=suites.suites_name,
-                               product_info=suites.product_info)
+                               suites_name=suites.suites_name)
         self.state_machine.current_suites = None
 
     @staticmethod
@@ -146,12 +142,14 @@ class CppTestParserLite(IParser):
         self.handle_suites_ended_tag(message)
 
     def parse(self, line):
-        if _PRODUCT_PARA_START in line:
+        if Constant.PRODUCT_PARAM_START in line:
             self.is_params = True
-        elif _PRODUCT_PARA_END in line:
+        elif Constant.PRODUCT_PARAM_END in line:
             self.is_params = False
-        if re.match(_PRODUCT_PARA, line) and self.is_params:
-            handle_product_info(line, self.product_info)
+        if self.is_params:
+            # output like this: 2023-11-13 15:51:23.453 OsFullName = xx
+            line = " ".join(line.split(" ")[2:])
+            self.product_info.update(parse_line_key_value(line))
 
         if self.state_machine.suites_is_started() or self._is_test_run(line):
             if self._is_test_start_run(line):
@@ -273,7 +271,6 @@ class CppTestParserLite(IParser):
             test_suites = self.state_machine.get_suites()
             test_suites.suites_name = self.get_suite_name()
             test_suites.test_num = expected_test_num
-            test_suites.product_info = self.product_info
             for listener in self.get_listeners():
                 suite_report = copy.copy(test_suites)
                 listener.__started__(LifeCycle.TestSuites, suite_report)
@@ -310,8 +307,7 @@ class CppTestParserLite(IParser):
         for listener in self.get_listeners():
             copy_suites = copy.copy(suites)
             listener.__ended__(LifeCycle.TestSuites, test_result=copy_suites,
-                               suites_name=suites.suites_name,
-                               product_info=suites.product_info)
+                               suites_name=suites.suites_name)
 
     def append_test_output(self, message):
         if self.state_machine.test().stacktrace:
@@ -555,8 +551,7 @@ class CTestParser(IParser):
 
         for listener in self.get_listeners():
             listener.__ended__(LifeCycle.TestSuites, test_result=suites,
-                               suites_name=suites.suites_name,
-                               product_info=suites.product_info)
+                               suites_name=suites.suites_name)
         self.state_machine.current_suites = None
 
     @staticmethod
@@ -642,12 +637,14 @@ class CTestParser(IParser):
             self.last_line = line
 
     def _parse_product_info(self, line):
-        if _PRODUCT_PARA_START in line:
+        if Constant.PRODUCT_PARAM_START in line:
             self.is_params = True
-        elif _PRODUCT_PARA_END in line:
+        elif Constant.PRODUCT_PARAM_END in line:
             self.is_params = False
-        if self.is_params and re.match(_PRODUCT_PARA, line):
-            handle_product_info(line, self.product_info)
+        if self.is_params:
+            # output like this: 2023-11-13 15:51:23.453 OsFullName = xx
+            line = " ".join(line.split(" ")[2:])
+            self.product_info.update(parse_line_key_value(line))
 
     def parse_error_test_description(self, message):
         end_time = re.match(self.pattern, message).group().strip()
@@ -742,7 +739,6 @@ class CTestParser(IParser):
         self.state_machine.get_suites(reset=True)
         test_suites = self.state_machine.get_suites()
         test_suites.suites_name = self.suites_name
-        test_suites.product_info = self.product_info
         test_suites.test_num = 0
         for listener in self.get_listeners():
             suite_report = copy.copy(test_suites)
@@ -778,8 +774,7 @@ class CTestParser(IParser):
 
         for listener in self.get_listeners():
             listener.__ended__(LifeCycle.TestSuites, test_result=suites,
-                               suites_name=suites.suites_name,
-                               product_info=suites.product_info)
+                               suites_name=suites.suites_name)
 
     def append_test_output(self, message):
         if self.state_machine.test().stacktrace:
@@ -1083,10 +1078,3 @@ class JSUnitParserLite(IParser):
                 "%s\r\n" % self.state_machine.test().stacktrace
         self.state_machine.test().stacktrace = \
             ''.join((self.state_machine.test().stacktrace, message))
-
-
-def handle_product_info(message, product_info):
-    message = message[message.index("The"):]
-    items = message[len("The "):].split(" is ")
-    product_info.setdefault(items[0].strip(),
-                            items[1].strip().strip("[").strip("]"))
