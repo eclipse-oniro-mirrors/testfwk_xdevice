@@ -972,6 +972,7 @@ class OHYaraTestDriver(IDriver):
         else:
             for _, item in enumerate(vul_items):
                 LOG.debug("Affected files: {}".format(item.affected_files))
+                LOG.debug("Object type: {}".format(item.object_type))
                 for index, affected_file in enumerate(item.affected_files):
                     has_inter = False
                     for i, _ in enumerate(item.affected_versions):
@@ -996,9 +997,9 @@ class OHYaraTestDriver(IDriver):
                         if not package_file:
                             LOG.error("Execute failed. Not found file named {}, please check the input".format(affected_file))
                             item.final_risk = OHYaraConfig.FAIL.value
-                            item.trace = "Failed to pack the kernel file"
-                           continue
-                         self.config.device.pull_file(package_file, local_path)
+                            item.trace = "Failed to pack the kernel file."
+                            continue
+                        self.config.device.pull_file(package_file, local_path)
                         affected_file = os.path.join(local_path, os.path.basename(package_file))
                     else:
                         self.config.device.pull_file(affected_file, local_path)
@@ -1027,8 +1028,9 @@ class OHYaraTestDriver(IDriver):
                         item.trace = "{}\\n{}".format(item.trace, "if ignore it, ")
                         if "testcase pass" in result:
                             item.trace = "{}{}".format(item.trace, "this testcase pass")
+                            break
                         else:
-                            item.trace = "{}{}".format(item.trace, "this testcase pass")
+                            item.trace = "{}{}".format(item.trace, "this testcase failed")
                     
                     else:
                         if "testcase pass" in result:
@@ -1126,7 +1128,7 @@ class OHYaraTestDriver(IDriver):
             return None
         link_file = cmd_result.split(" ")[-1]
         pack_result = self.config.device.execute_shell_command(f"dd if={link_file} of={img_file}")
-        LOG.debug("kernel package detail: {}".foramt(pack_result))
+        LOG.debug("kernel package detail: {}".format(pack_result))
         if "No such file or directory" in pack_result:
             return None
         return img_file
@@ -1135,7 +1137,7 @@ class OHYaraTestDriver(IDriver):
         try:
             from vmlinux_to_elf.elf_symbolizer import ElfSymbolizer
             from vmlinux_to_elf.architecture_detecter import ArchitectureGuessError
-            from vmlinux_to_elf.vmlinuz_decompressor import  obtain_raw_kernel_from_file
+            from vmlinux_to_elf.vmlinuz_decompressor import obtain_raw_kernel_from_file
         except:
             LOG.error("Please install the tool of vmlinux_to_elf before running.")
             return None
