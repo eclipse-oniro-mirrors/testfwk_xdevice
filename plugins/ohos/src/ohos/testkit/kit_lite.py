@@ -578,12 +578,12 @@ class QueryKit(ITestKit):
             raise ParamError("the request of queryKit is None",
                              error_no="02401")
         self.mount_kit.__setup__(device, request=request)
+        device.execute_command_with_timeout(command="cd /", timeout=0.2)
         if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-            command = f"chmod +x /storage{self.query} && /storage{self.query}"
+            command = f"chmod +x /storage{self.query} && ./storage{self.query}"
             output, _, _ = device.execute_command_with_timeout(
                 command=command, timeout=5)
         else:
-            device.execute_command_with_timeout(command="cd /", timeout=0.2)
             output, _, _ = device.execute_command_with_timeout(
                 command=".{}".format(self.query), timeout=5)
         LOG.debug(output)
