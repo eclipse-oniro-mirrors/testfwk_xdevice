@@ -482,7 +482,8 @@ class ShellKit(ITestKit):
             LOG.info("No teardown-localcommand to run, skipping!")
         else:
             for command in self.tear_down_local_command:
-                subprocess.run(command)
+                ret = subprocess.run(command, capture_output=True, text=True)
+                LOG.info("Teardown-localcommand run: {}".format(ret))
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.wifi)
