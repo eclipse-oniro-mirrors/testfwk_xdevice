@@ -23,6 +23,7 @@ import os
 import threading
 
 from xdevice import DeviceOsType
+from xdevice import DeviceProperties
 from xdevice import ConfigConst
 from xdevice import DeviceLabelType
 from xdevice import ModeType
@@ -107,7 +108,7 @@ def perform_device_action(func):
 @Plugin(type=Plugin.DEVICE, id=DeviceOsType.lite)
 class DeviceLite(IDevice):
     """
-    Class representing an device lite device.
+    Class representing a device lite device.
 
     Each object of this class represents one device lite device in xDevice.
 
@@ -127,6 +128,18 @@ class DeviceLite(IDevice):
         self.device_id = None
         self.extend_value = {}
         self.device_lock = threading.RLock()
+        self.device_props = {}
+
+    def __description__(self):
+        desc = {
+            DeviceProperties.sn: convert_serial(self.device_sn),
+            DeviceProperties.model: self.label,
+            DeviceProperties.type_: self.label,
+            DeviceProperties.platform: "OpenHarmony",
+            DeviceProperties.version: "",
+            DeviceProperties.others: self.device_props
+        }
+        return desc
 
     def __set_serial__(self, device=None):
         for item in device:
@@ -149,6 +162,11 @@ class DeviceLite(IDevice):
             return value
         else:
             return self.extend_value.get(key, default)
+
+    def update_device_props(self, props):
+        if self.device_props or not isinstance(props, dict):
+            return
+        self.device_props.update(props)
 
     def __set_device_kernel__(self, kernel_type=""):
         self.device_kernel = kernel_type
@@ -223,7 +241,6 @@ class DeviceLite(IDevice):
                     error_message = "ipcamera remote port cannot be" \
                                     " empty, please check"
                     raise LiteParamError(error_message, error_no="00108")
-
 
     def __check_config__(self, device=None):
         self.set_connect_type(device)

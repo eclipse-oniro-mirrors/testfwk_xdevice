@@ -19,8 +19,13 @@
 from dataclasses import dataclass
 
 
-__all__ = ["ComType", "HostDrivenTestType",
+__all__ = ["Constant", "ComType", "HostDrivenTestType",
            "ParserType", "DeviceLiteKernel", "CKit"]
+
+
+class Constant:
+    PRODUCT_PARAM_START = r"To Obtain Product Params Start"
+    PRODUCT_PARAM_END = r"To Obtain Product Params End"
 
 
 @dataclass

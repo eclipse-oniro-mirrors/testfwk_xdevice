@@ -60,7 +60,7 @@ class SuiteReporter:
         self.suite_data_path = os.path.join(
             self.report_path, "%s%s" % (
                 report_name, self.data_helper.DATA_REPORT_SUFFIX))
-        self.args = kwargs
+        self.kwargs = kwargs
         from xdevice import Scheduler
         if not check_pub_key_exist() and Scheduler.mode != ModeType.decc:
             SuiteReporter.suite_report_result.clear()
@@ -136,7 +136,7 @@ class SuiteReporter:
                 test_suites_attributes[need_update_attribute] += \
                     test_suite_attributes.get(need_update_attribute, 0)
         test_suites_attributes[ReportConstant.time] = \
-            round(test_suites_attributes[ReportConstant.time], 3)
+            round(test_suites_attributes.get(ReportConstant.time), 3)
 
         if test_suites_element:
             test_suite_element = test_suites_element[-1]
@@ -151,29 +151,33 @@ class SuiteReporter:
 
     def _initial_test_suites(self):
         test_suites_element = self.data_helper.initial_suites_element()
-        test_suites_attributes = {ReportConstant.name: self.report_name,
-                                  ReportConstant.time_stamp: time.strftime(
-                                      ReportConstant.time_format,
-                                      time.localtime()),
-                                  ReportConstant.time: 0,
-                                  ReportConstant.errors: 0,
-                                  ReportConstant.disabled: 0,
-                                  ReportConstant.failures: 0,
-                                  ReportConstant.tests: 0,
-                                  ReportConstant.ignored: 0,
-                                  ReportConstant.unavailable: 0,
-                                  ReportConstant.product_info: self.args.get(
-                                      ReportConstant.product_info_, "")}
-        if self.args.get(ReportConstant.module_name, ""):
-            test_suites_attributes[ReportConstant.name] = self.args.get(
-                ReportConstant.module_name, "")
-        need_update_attributes = [ReportConstant.time, ReportConstant.errors,
-                                  ReportConstant.tests, ReportConstant.ignored,
-                                  ReportConstant.disabled,
-                                  ReportConstant.failures,
-                                  ReportConstant.unavailable]
-        return test_suites_element, test_suites_attributes, \
-            need_update_attributes
+        test_suites_attributes = {
+            ReportConstant.name: self.report_name,
+            ReportConstant.time_stamp: time.strftime(ReportConstant.time_format, time.localtime()),
+            ReportConstant.time: 0,
+            ReportConstant.errors: 0,
+            ReportConstant.disabled: 0,
+            ReportConstant.failures: 0,
+            ReportConstant.tests: 0,
+            ReportConstant.ignored: 0,
+            ReportConstant.unavailable: 0,
+            ReportConstant.product_info: self.kwargs.get(ReportConstant.product_info_, ""),
+            # module's failure message
+            ReportConstant.message: self.kwargs.get(ReportConstant.message, "")
+        }
+        module_name = self.kwargs.get(ReportConstant.module_name, "")
+        if module_name:
+            test_suites_attributes[ReportConstant.name] = module_name
+        need_update_attributes = [
+            ReportConstant.time,
+            ReportConstant.errors,
+            ReportConstant.tests,
+            ReportConstant.ignored,
+            ReportConstant.disabled,
+            ReportConstant.failures,
+            ReportConstant.unavailable
+        ]
+        return test_suites_element, test_suites_attributes, need_update_attributes
 
     def _construct_test_suite(self, suite_result, case_results):
         # initial test suite element
@@ -196,7 +200,7 @@ class SuiteReporter:
                                                     test_case_attributes)
             test_case_elements.append(test_case_element)
         test_suite_attributes[ReportConstant.disabled] += max(int(
-            test_suite_attributes[ReportConstant.tests] -
+            test_suite_attributes.get(ReportConstant.tests) -
             len(test_case_elements)), 0)
         if test_case_elements:
             child = test_case_elements[-1]
@@ -236,19 +240,18 @@ class SuiteReporter:
 
     def _initial_test_suite(self, suite_result):
         test_suite_element = self.data_helper.initial_suite_element()
-        test_suite_attributes = {ReportConstant.name: suite_result.suite_name,
-                                 ReportConstant.time: round(float(
-                                     suite_result.run_time) / 1000, 3),
-                                 ReportConstant.errors: 0,
-                                 ReportConstant.disabled: 0,
-                                 ReportConstant.failures: 0,
-                                 ReportConstant.ignored: 0,
-                                 ReportConstant.tests: suite_result.test_num,
-                                 ReportConstant.message:
-                                     suite_result.stacktrace
-                                 }
-        if self.args.get(ReportConstant.module_name, ""):
-            test_suite_attributes[ReportConstant.module_name] = self.args.get(
+        test_suite_attributes = {
+            ReportConstant.name: suite_result.suite_name,
+            ReportConstant.time: round(float(suite_result.run_time) / 1000, 3),
+            ReportConstant.errors: 0,
+            ReportConstant.disabled: 0,
+            ReportConstant.failures: 0,
+            ReportConstant.ignored: 0,
+            ReportConstant.tests: suite_result.test_num,
+            ReportConstant.message: suite_result.stacktrace
+        }
+        if self.kwargs.get(ReportConstant.module_name, ""):
+            test_suite_attributes[ReportConstant.module_name] = self.kwargs.get(
                 ReportConstant.module_name, "")
         return test_suite_element, test_suite_attributes
 

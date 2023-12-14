@@ -476,8 +476,12 @@ class RemoteCppTestRunner:
 
     def run(self, listener):
         handler = self._get_shell_handler(listener)
-        command = "cd %s; chmod +x *; ./%s %s" \
-                  % (self.config.target_test_path, self.config.module_name,
+        bin_path = "{}/{}".format(self.config.target_test_path,
+                                  self.config.module_name)
+        command = "cd %s; chmod +x *; hilog -d %s; ./%s %s" \
+                  % (self.config.target_test_path,
+                     bin_path,
+                     self.config.module_name,
                      self.get_args_command())
 
         self.config.device.execute_shell_command(
@@ -490,8 +494,11 @@ class RemoteCppTestRunner:
             listener_copy.append(test_tracker)
             handler = self._get_shell_handler(listener_copy)
             try:
-                command = "cd %s; chmod +x *; ./%s %s" \
+                bin_path = "{}/{}".format(self.config.target_test_path,
+                                          self.config.module_name)
+                command = "cd %s; chmod +x *; hilog -d %s; ./%s %s" \
                           % (self.config.target_test_path,
+                             bin_path,
                              self.config.module_name,
                              self.get_args_command())
 

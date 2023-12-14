@@ -50,7 +50,7 @@ class Descriptor:
         self.con = con
         self.error = error
 
-    def get_conR(self):
+    def get_con(self):
         return self.con
 
     def get_unique_id(self):

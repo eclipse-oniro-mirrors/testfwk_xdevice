@@ -61,6 +61,9 @@ class Environment(object):
     def get_devices(self):
         return self.devices
 
+    def get_description(self):
+        return [d.__description__() for d in self.devices]
+
     def check_serial(self):
         if self.__get_serial__():
             return True
@@ -142,6 +145,8 @@ class EnvironmentManager(object):
                 device.extend_value = device_option.extend_value
                 LOG.debug("Device %s: extend value: %s", convert_serial(
                     device.device_sn), device.extend_value)
+                if hasattr(device, "extend_device_props"):
+                    device.extend_device_props()
             else:
                 LOG.debug("Require label is '%s', then next" %
                           device_option.label)

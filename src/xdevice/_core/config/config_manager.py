@@ -17,8 +17,8 @@
 #
 
 import os
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from xml.etree import ElementTree
 
 from _core.exception import ParamError
 from _core.logger import platform_logger
@@ -39,7 +39,7 @@ class UserConfigManager(object):
         from xdevice import Variables
         try:
             if env:
-                self.config_content = ET.fromstring(env)
+                self.config_content = ElementTree.fromstring(env)
             else:
                 if config_file:
                     self.file_path = config_file
@@ -58,7 +58,7 @@ class UserConfigManager(object):
 
                 LOG.debug("User config path: %s" % self.file_path)
                 if os.path.exists(self.file_path):
-                    tree = ET.parse(self.file_path)
+                    tree = ElementTree.parse(self.file_path)
                     self.config_content = tree.getroot()
                 else:
                     raise ParamError("%s not found" % self.file_path,
@@ -81,6 +81,22 @@ class UserConfigManager(object):
                 for sub in child:
                     data_dic[sub.tag] = sub.text
         return data_dic
+
+    @staticmethod
+    def _traversal_element(element, is_top=True):
+        """
+        element: ElementTree.Element, traversal element
+        is_top : bool, if is the top element
+        return : dict
+        """
+        if not isinstance(element, ElementTree.Element):
+            raise TypeError("element must be instance of xml.tree.ElementTree.Element")
+        data = {}
+        if len(element) == 0:
+            return {element.tag: element.text} if is_top else element.text
+        for sub in element:
+            data.setdefault(sub.tag, UserConfigManager._traversal_element(sub, is_top=False))
+        return data
 
     @staticmethod
     def remove_strip(value):
@@ -232,6 +248,12 @@ class UserConfigManager(object):
 
         return os.path.abspath(
             os.path.join(Variables.exec_dir, "resource"))
+
+    def get_resource_conf(self):
+        resource = self.config_content.find("resource")
+        if resource is None:
+            return {}
+        return self._traversal_element(resource)
 
     def get_log_level(self):
         data_dic = {}

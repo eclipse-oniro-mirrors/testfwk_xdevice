@@ -6,11 +6,11 @@
             "server": "NfsServer",
             "mount": [
                 {
-                    "source": "resource/tools/query.bin",
+                    "source": "resource/tools/querySmall.bin",
                     "target": "/test_root/tools"
                 }
             ],
-            "query" : "/test_root/tools/query.bin"
+            "query" : "/test_root/tools/querySmall.bin"
         },
         {
             "type": "RootFsKit",

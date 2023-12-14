@@ -92,6 +92,7 @@ class ReportConstant:
     not_run = "notrun"
     message = "message"
     report = "report"
+    devices = "devices"
 
     # case result constants
     module_name = "modulename"
@@ -577,7 +578,7 @@ class VisionHelper:
         return suites
 
     def render_data(self, title_name, parsed_data,
-                    render_target=ReportConstant.summary_vision_report):
+                    render_target=ReportConstant.summary_vision_report, devices=None):
         exec_info, summary, suites = parsed_data
         if not os.path.exists(self.template_name):
             LOG.error("Template file not exists, {}".format(self.template_name))
@@ -588,6 +589,9 @@ class VisionHelper:
                                             title_name, file_context)
             file_context = self._render_exec_info(file_context, exec_info)
             file_context = self._render_summary(file_context, summary)
+            if devices is not None and len(devices) != 0:
+                file_context = self._render_product_info(file_context, devices)
+                file_context = self._render_devices(file_context, devices)
             if render_target == ReportConstant.summary_vision_report:
                 file_context = self._render_suites(file_context, suites)
             elif render_target == ReportConstant.details_vision_report:
@@ -603,6 +607,51 @@ class VisionHelper:
             return file_context
 
     @classmethod
+    def _render_devices(cls, file_context, devices):
+        """render devices"""
+        table_body_content = ""
+        keys = ["index", "sn", "model", "type", "platform", "version", "others"]
+        for index, device in enumerate(devices, 1):
+            tds = []
+            for key in keys:
+                value = device.get(key, "")
+                if key == "index":
+                    td_content = index
+                elif key == "others":
+                    if len(value) == 0:
+                        td_content = f"""<div style="display: flex;">
+                            <div class="ellipsis">{value}</div>
+                        </div>"""
+                    else:
+                        td_content = f"""<div style="display: flex;">
+                            <div class="ellipsis">{value}</div>
+                            <div class="operate" onclick="showDialog('dialog{index}')"></div>
+                        </div>"""
+                else:
+                    td_content = value
+                tds.append("<td class='normal device-{}'>{}</td>".format(key, td_content))
+            table_body_content += "<tr>\n" + "\n  ".join(tds) + "\n</tr>"
+
+        render_result = """<table class="devices">
+  <thead>
+    <tr>
+      <th class="normal device-index">#</th>
+      <th class="normal device-sn">SN</th>
+      <th class="normal device-model">Model</th>
+      <th class="normal device-type">Type</th>
+      <th class="normal device-platform">Platform</th>
+      <th class="normal device-version">Version</th>
+      <th class="normal device-others">Others</th>
+    </tr>
+  </thead>
+  <tbody>
+    {}
+  </tbody>
+</table>""".format(table_body_content)
+        replace_str = "<!--{devices.context}-->"
+        return file_context.replace(replace_str, render_result)
+
+    @classmethod
     def _render_key(cls, prefix, key, new_str, update_context):
         old_str = "<!--{%s%s}-->" % (prefix, key)
         return update_context.replace(old_str, new_str)
@@ -613,51 +662,46 @@ class VisionHelper:
             value = self._get_hidden_style_value(getattr(
                 exec_info, key, "None"))
             file_context = self._render_key(prefix, key, value, file_context)
-        file_context = self._render_product_info(exec_info, file_context,
-                                                 prefix)
+        replace_str = "<!--{exec_info.task_log}-->"
+        file_context = file_context.replace(replace_str, self._get_task_log())
         return file_context
 
-    def _render_product_info(self, exec_info, file_context, prefix):
-        """Construct product info context and render it to file context
-
-        rendered product info sample:
-            <tr>
-                <td class="normal first">key:</td>
-                <td class="normal second">value</td>
-                <td class="normal third">key:</td>
-                <td class="normal fourth">value</td>
-            </tr>
-
-        Args:
-            exec_info: dict that used to update file_content
-            file_context: exist html content
-            prefix: target replace prefix key
-
-        Returns:
-            updated file context that includes rendered product info
-        """
-        row_start = True
-        try:
-            keys = list(exec_info.product_info.keys())
-        except AttributeError as _:
-            LOG.error("Product info error %s", exec_info.product_info)
-            keys = []
-
-        render_value = ""
-        for key in keys:
-            value = exec_info.product_info[key]
-            if row_start:
-                render_value = "%s<tr>\n" % render_value
-            render_value = "{}{}".format(
-                render_value, self._get_exec_info_td(key, value, row_start))
-            if not row_start:
-                render_value = "%s</tr>\n" % render_value
-            row_start = not row_start
-        if not row_start:
-            render_value = "%s</tr>\n" % render_value
-        file_context = self._render_key(prefix, ReportConstant.product_info_,
-                                        render_value, file_context)
-        return file_context
+    @staticmethod
+    def _render_product_info(file_context, devices):
+        """Construct product info context and render it to file context"""
+        render_result = ""
+        for index, device in enumerate(devices, 1):
+            others = device.get("others")
+            if len(others) == 0:
+                continue
+            tmp, count = "", 0
+            tbody_content = ""
+            for k, v in others.items():
+                tmp += f'<td class="key">{k}:</td>\n<td class="value">{v}</td>\n'
+                count += 1
+                if count == 2:
+                    tbody_content += "<tr>" + tmp + "<tr>\n"
+                    tmp, count = "", 0
+            if tmp != "":
+                tbody_content += "<tr>" + tmp + "<tr>\n"
+            render_dialog = f"""<div id="dialog{index}" , class="el-dialog">
+                <div style="margin: 15% auto; width: 60%;">
+                    <div class="el-dialog__header">
+                        <button class="el-dialog__close" onclick="hideDialog()">关闭</button>
+                    </div>
+                    <div class="el-dialog__body">
+                        <table class="el-dialog__table">
+                            <tbody>
+                                {tbody_content}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            """
+            render_result += render_dialog
+        replace_str = "<!--{devices.dialogs}-->"
+        return file_context.replace(replace_str, render_result)
 
     def _get_exec_info_td(self, key, value, row_start):
         if not value:
@@ -762,7 +806,6 @@ class VisionHelper:
         replace_str = "<!--{suites.context}-->"
 
         suites_context = "<table class='suites'>\n"
-        suites_context += self._get_task_log()
         suites_context += self._get_suites_title()
         for index, suite in enumerate(suites):
             # construct suite context
@@ -801,11 +844,7 @@ class VisionHelper:
     def _get_task_log(self):
         logs = [f for f in os.listdir(os.path.join(self.report_path, 'log')) if f.startswith('task_log.log')]
         link = ["<a href='log/{task_log}'>{task_log}</a>".format(task_log=file_name) for file_name in logs]
-        temp = "<tr>\n" \
-               "  <td class='tasklog'>TaskLog:</td>\n" \
-               "  <td class='normal' colspan='8' style='border-bottom: 1px #E8F0FD solid;'>{}</td>\n" \
-               "</tr>".format(' | '.join(link))
-        return temp
+        return ' '.join(link)
 
     def _get_testsuite_device_log(self, module_name, suite_name):
         log_index, log_name = 0, 'device_log'

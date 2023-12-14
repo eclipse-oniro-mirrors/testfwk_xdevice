@@ -171,6 +171,52 @@
             padding: 5px 34px 20px 0;
         }
 
+        table.devices {
+            width: 1160px;
+            margin-left: auto;
+            margin-right: auto;
+            margin-top: 30px;
+            table-layout: fixed;
+        }
+        table.devices th.normal {
+            font-family: Roboto-Medium, sans-serif;
+            color: #293040;
+            font-size: 12px;
+            height: 36px;
+            border-bottom: 1px #E8F0FD solid;
+            text-align: left;
+        }
+        table.devices td.normal {
+            font-family: Roboto-Regular, sans-serif;
+            color: #293040;
+            font-size: 14px;
+            height: 36px;
+            text-align: left;
+        }
+        table.devices th.device-index {
+            width: 3%;
+        }
+        table.devices th.device-sn,
+        table.devices th.device-model,
+        table.devices th.device-type,
+        table.devices th.device-platform,
+        table.devices th.device-version,
+        table.devices td.device-sn,
+        table.devices td.device-model,
+        table.devices td.device-type,
+        table.devices td.device-platform,
+        table.devices td.device-version {
+            width: 15%;
+            word-break: break-all;
+        }
+
+        .ellipsis {
+            overflow: hidden;
+            width: 180px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         table.suites {
             width: 1160px;
             margin-left: auto;
@@ -193,28 +239,19 @@
             text-align: left;
         }
         table.suites th.module {
-            width: 138px;
-            padding: 10px 0 0 20px;
-        }
-        table.suites th.test-suite {
-            width: 384px;
-            padding: 10px 0 0 0;
+            width: 210px;
         }
         table.suites th.total {
             width: 110px;
-            padding: 10px 0 0 0;
         }
         table.suites th.passed, table.suites th.failed, table.suites th.blocked {
             width: 90px;
-            padding: 10px 0 0 0;
         }
         table.suites th.ignored, table.suites th.time {
             width: 90px;
-            padding: 10px 0 0 0;
         }
         table.suites th.operate {
             width: 58px;
-            padding: 10px 0 0 0;
         }
         table.suites tr.background-color{
             background-color: #F9FAFC;
@@ -228,28 +265,19 @@
             word-break: break-all;
         }
         table.suites td.module {
-            width: 138px;
-            padding: 0 0 0 20px;
-        }
-        table.suites td.test-suite {
-            width: 384px;
-            padding: 0 0 0 0;
+            width: 210px;
         }
         table.suites td.total {
             width: 110px;
-            padding: 0 0 0 0;
         }
         table.suites td.passed, table.suites td.failed, table.suites td.blocked {
             width: 90px;
-            padding: 0 0 0 0;
         }
         table.suites td.ignored, table.suites td.time {
             width: 90px;
-            padding: 0 0 0 0;
         }
         table.suites td.operate {
             width: 58px;
-            padding: 0 0 0 0;
         }
 
         table.test-suite, table.failure-test {
@@ -264,7 +292,6 @@
             font-size: 14px;
             height: 22px;
             text-align: left;
-            wrap-option: no;
             overflow: hidden;
         }
         table.test-suite th.normal, table.failure-test th.normal {
@@ -276,28 +303,19 @@
             text-align: left;
         }
         table.test-suite th.module {
-            width: 138px;
-            padding: 5px 0 0 20px;
-        }
-        table.test-suite th.test-suite {
-            width: 384px;
-            padding: 5px 0 0 0;
+            width: 210px;
         }
         table.test-suite th.test {
             width: 427px;
-            padding: 5px 0 0 0;
         }
         table.test-suite th.time {
             width: 90px;
-            padding: 5px 0 0 0;
         }
         table.test-suite th.status {
             width: 11px;
-            padding: 5px 0 0 0;
         }
         table.test-suite th.result {
             width: 90px;
-            padding: 5px 0 0 0;
         }
         .circle-normal {
             border-radius: 50%;
@@ -336,66 +354,50 @@
             word-break: break-all;
         }
         table.test-suite td.module {
-            width: 138px;
-            padding: 0 0 0 20px;
-        }
-        table.test-suite td.test-suite {
-            width: 384px;
-            padding: 0 0 0 0;
+            width: 210px;
         }
         table.test-suite td.test {
             width: 427px;
-            padding: 0 0 0 0;
         }
         table.test-suite td.time {
             width: 90px;
-            padding: 0 0 0 0;
         }
         table.test-suite td.status {
             width: 11px;
-            padding: 0 0 0 0;
         }
         table.test-suite td.result {
             width: 90px;
-            padding: 0 0 0 0;
         }
 
         table.failure-test th.test {
             width: 569px;
-            padding: 5px 0 0 20px;
         }
         table.failure-test th.status {
             width: 11px;
-            padding: 5px 0 0 0;
         }
         table.failure-test th.result {
             width: 80px;
-            padding: 5px 0 0 0;
         }
         table.failure-test th.details {
             width: 480px;
-            padding: 5px 0 0 0;
         }
 
         table.failure-test td.test {
             vertical-align: top;
             width: 569px;
-            padding: 2px 0 0 20px;
         }
         table.failure-test td.status {
             vertical-align: top;
             width: 11px;
-            padding: 8px 0 0 0;
+            padding: 8px;
         }
         table.failure-test td.result {
             vertical-align: top;
             width: 80px;
-            padding: 2px 0 0 0;
         }
         table.failure-test td.details {
             vertical-align: top;
             width: 480px;
-            padding: 2px 0 0 0;
         }
 
         div.hidden {
@@ -404,15 +406,67 @@
 			text-overflow: ellipsis;
 			width: 424px;
 		}
+
+		.el-dialog {
+		    position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 9999;
+		}
+
+        .el-button {
+            margin-right: 10px;
+        }
+
+        .el-dialog__header {
+            background-color: #f5f7fa;
+            padding: 10px;
+            height: 30px;
+        }
+
+        .el-dialog__body {
+            background-color: #fff;
+            padding: 10px;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .el-dialog__close {
+            font-size: 16px;
+            float: right;
+        }
+
+        table.el-dialog__table {
+            width: 100%;
+            background-color: #FFFFFF;
+            font-family: PingFangSC-Regular, sans-serif;
+            /* font-family: PingFangSC-Medium, sans-serif; */
+        }
+
+        table.el-dialog__table td {
+            color: #5E6678;
+            font-size: 14px;
+            height: 30px;
+            text-align: left;
+            word-break: break-all;
+        }
+
+        table.el-dialog__table td.key {
+            width: 20%;
+            font-weight: bold;
+        }
+
+        table.el-dialog__table td.value {
+            width: 30%;
+        }
+
     </style>
 </head>
 <body>
-
-<table class="logo">
-    <th>
-        <!--<div class="logo"></div>-->
-    </th>
-</table>
 
 <div class="layout">
     <table class="exec-info" id="summary">
@@ -437,7 +491,10 @@
             <td class="normal third">Execution Time:</td>
             <td class="normal fourth"><!--{exec_info.execute_time}--></td>
         </tr>
-<!--{exec_info.product_info}-->
+        <tr>
+            <td class="normal first">Task Logs:</td>
+            <td class="normal second" colspan="3"><!--{exec_info.task_log}--></td>
+        </tr>
     </table>
 
     <table class="summary">
@@ -463,9 +520,26 @@
         </tr>
     </table>
 
+    <!--{devices.context}-->
+    <!--{devices.dialogs}-->
+    
+    <h4>Test Details</h4>
+
 <!--{suites.context}-->
 <!--{cases.context}-->
 <!--{failures.context}-->
 </div>
+<script>
+    function showDialog(dialog_id) {
+        const dialog = document.getElementById(dialog_id);
+        dialog.style.display = 'block';
+    }
+    function hideDialog() {
+        const dialogs = document.getElementsByClassName('el-dialog');
+        for (let i = 0; i < dialogs.length; i++) {
+            dialogs[i].style.display = 'none';
+        }
+    }
+</script>
 </body>
 </html>

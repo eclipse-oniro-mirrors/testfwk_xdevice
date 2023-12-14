@@ -86,7 +86,7 @@ class IDeviceManager(ABC):
 
 class IDevice(ABC):
     """
-    IDevice provides an reliable and slightly higher level API to access
+    IDevice provides a reliable and slightly higher level API to access
     devices
     """
     __slots__ = ()
@@ -99,6 +99,10 @@ class IDevice(ABC):
 
     @abstractmethod
     def __get_serial__(self):
+        pass
+
+    @abstractmethod
+    def __description__(self):
         pass
 
     @classmethod
@@ -152,7 +156,7 @@ class IDriver(ABC):
         """
 
     @classmethod
-    def __dry_run_execute__(self, request):
+    def __dry_run_execute__(cls, request):
         """
         Dry run tests according to the request.
         """

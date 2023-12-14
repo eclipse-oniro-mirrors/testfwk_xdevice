@@ -24,7 +24,7 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "TEST_DRIVER_SET", "LogType", "CKit",
            "DeviceLabelType", "GTestConst", "ManagerType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
-           "DeviceConnectorType", "AdvanceDeviceOption"]
+           "DeviceConnectorType", "AdvanceDeviceOption", "DeviceProperties", "ReportConst"]
 
 
 @dataclass
@@ -294,8 +294,12 @@ class ConfigConst(object):
     tag_enable = "enable"
     tag_loglevel = "loglevel"
     tag_clear = "clear"
-    query_resource = "query_resource"
     env_pool_cache = "env_pool_cache"
+
+    web_resource = "web_resource"
+    enable_web_resource = "enable_web_resource"
+
+    tag_url = "url"
 
 
 @dataclass
@@ -316,6 +320,16 @@ class FilePermission(object):
 @dataclass
 class DeviceConnectorType:
     hdc = "usb-hdc"
+
+
+@dataclass
+class DeviceProperties(object):
+    sn = "sn"
+    model = "model"
+    type_ = "type"
+    platform = "platform"
+    version = "version"
+    others = "others"
 
 
 @dataclass

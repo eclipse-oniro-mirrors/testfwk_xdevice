@@ -22,8 +22,11 @@ import threading
 import platform
 import subprocess
 import sys
+
 from xdevice import DeviceOsType
+from xdevice import DeviceProperties
 from xdevice import FilePermission
+from xdevice import ParamError
 from xdevice import ProductForm
 from xdevice import ReportException
 from xdevice import IDevice
@@ -40,12 +43,14 @@ from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
 from xdevice import get_cst_time
+from xdevice import get_file_absolute_path
 from xdevice import Platform
 from xdevice import AppInstallError
 from xdevice import RpcNotRunningError
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
+from ohos.utils import parse_strings_key_value
 
 __all__ = ["Device"]
 TIMEOUT = 300 * 1000
@@ -54,6 +59,8 @@ DEFAULT_UNAVAILABLE_TIMEOUT = 20 * 1000
 BACKGROUND_TIME = 2 * 60 * 1000
 LOG = platform_logger("Device")
 DEVICETEST_HAP_PACKAGE_NAME = "com.ohos.devicetest"
+DEVICE_TEMP_PATH = "/data/local/tmp"
+QUERY_DEVICE_PROP_BIN = "testcases/queryStandard"
 UITEST_NAME = "uitest"
 UITEST_SINGLENESS = "singleness"
 UITEST_PATH = "/system/bin/uitest"
@@ -194,10 +201,22 @@ class Device(IDevice):
         self.forward_ports = []
         self.forward_ports_abc = []
         self.proxy_listener = None
+        self.device_props = {}
 
     def __eq__(self, other):
         return self.device_sn == other.__get_serial__() and \
             self.device_os_type == other.device_os_type
+
+    def __description__(self):
+        desc = {
+            DeviceProperties.sn: convert_serial(self.device_sn),
+            DeviceProperties.model: self.get_property("const.product.model"),
+            DeviceProperties.type_: self.get_device_type(),
+            DeviceProperties.platform: "OpenHarmony",
+            DeviceProperties.version: self.get_property("const.product.software.version"),
+            DeviceProperties.others: self.device_props
+        }
+        return desc
 
     def __set_serial__(self, device_sn=""):
         self.device_sn = device_sn
@@ -205,6 +224,27 @@ class Device(IDevice):
 
     def __get_serial__(self):
         return self.device_sn
+
+    def extend_device_props(self):
+        if self.device_props:
+            return
+        query_bin_path = ""
+        try:
+            query_bin_path = get_file_absolute_path(QUERY_DEVICE_PROP_BIN)
+        except ParamError as e:
+            LOG.warning(e)
+        if query_bin_path == "":
+            return
+        self.push_file(query_bin_path, DEVICE_TEMP_PATH)
+        file_name = os.path.basename(query_bin_path)
+        cmd = f"cd {DEVICE_TEMP_PATH} && chmod +x {file_name} && ./{file_name}"
+        out = self.execute_shell_command(
+            cmd, time=5 * 1000, output_flag=False, retry=RETRY_ATTEMPTS, abort_on_exception=False).strip()
+        if not out:
+            return
+        LOG.info(out)
+        params = parse_strings_key_value(out)
+        self.device_props.update(params)
 
     def get(self, key=None, default=None):
         if not key:
@@ -231,6 +271,7 @@ class Device(IDevice):
                                   abort_on_exception=True)
         model = "default" if model == "" else model
         self.label = self.model_dict.get(model, ProductForm.phone)
+        return self.label
 
     def get_property(self, prop_name, retry=RETRY_ATTEMPTS,
                      abort_on_exception=False):
