@@ -468,6 +468,8 @@ class VisionHelper:
         self.summary_element = summary_element
         exec_info = self._set_exec_info(report_path, task_info)
         suites = self._set_suites_info()
+        if exec_info.test_type == "SSTS":
+            suites.sort(key=lambda x: x.module_name, reverse=True)
         summary = self._set_summary_info()
         return exec_info, summary, suites
 
