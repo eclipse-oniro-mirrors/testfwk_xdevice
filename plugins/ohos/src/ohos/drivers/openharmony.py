@@ -943,9 +943,9 @@ class OHYaraTestDriver(IDriver):
         if "fail" in self.system_version:
             self._get_full_name_by_tool_hap()
         
-        vul_info_file = get_config_value('vul-info-file',json_config.get_driver(), False)
+        vul_info_file = get_config_value('vul-info-file', json_config.get_driver(), False)
         # Extract patch labels into separate testcase
-        if  vul_info_file== "vul_info_patch_label_test":
+        if vul_info_file == "vul_info_patch_label_test":
             vul_items = list()
             item = VulItem()
             item.vul_id = "Patch-label-test"
@@ -979,7 +979,7 @@ class OHYaraTestDriver(IDriver):
                 vul_version = ".".join(vul_version_list)
             if vul_version is None:
                 LOG.debug("The system version is not in the maintenance scope, skip it. "
-                        "system versions is {}".format(self.system_version))
+                          "system versions is {}".format(self.system_version))
             else:
                 for _, item in enumerate(vul_items):
                     LOG.debug("Affected files: {}".format(item.affected_files))
@@ -992,12 +992,12 @@ class OHYaraTestDriver(IDriver):
                                 break
                         if not has_inter:
                             LOG.debug("Yara rule [{}] affected versions has no intersection "
-                                    "in mapping version, skip it. Mapping version is {}, "
-                                    "affected versions is {}".format(item.vul_id, vul_version,
-                                                                    item.affected_versions))
+                                      "in mapping version, skip it. Mapping version is {}, "
+                                      "affected versions is {}".format(item.vul_id, vul_version,
+                                                                       item.affected_versions))
                             continue
                         local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
-                                                request.get_module_name(), item.yara_rules[index].split('.')[0])
+                                                  request.get_module_name(), item.yara_rules[index].split('.')[0])
                         if not os.path.exists(local_path):
                             os.makedirs(local_path)
                         if item.object_type == "kernel_linux":
@@ -1045,7 +1045,7 @@ class OHYaraTestDriver(IDriver):
                         # if no risk delete files, if rule has risk keep it
                         if item.final_risk != OHYaraConfig.FAIL.value:
                             local_path = os.path.join(request.config.report_path, OHYaraConfig.AFFECTED_FILES.value,
-                                                    request.get_module_name(), item.yara_rules[index].split('.')[0])
+                                                      request.get_module_name(), item.yara_rules[index].split('.')[0])
                             if os.path.exists(local_path):
                                 LOG.debug(
                                     "Yara rule [{}] has no risk, remove affected files.".format(
@@ -1168,8 +1168,6 @@ class OHYaraTestDriver(IDriver):
                 LOG.error("An error occurred when pasing the kernel file.")
                 return None
         return output_file
-    
-
 
     def _get_vul_items(self):
         vul_items = list()
