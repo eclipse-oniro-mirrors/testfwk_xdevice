@@ -911,7 +911,8 @@ class OHYaraTestDriver(IDriver):
         # get absolute file path
         self.config.yara_bin = get_file_absolute_path(yara_bin)
         self.config.version_mapping_file = get_file_absolute_path(version_mapping_file)
-        self.config.vul_info_file = get_file_absolute_path(vul_info_file, [self.config.testcases_path])
+        if vul_info_file != "vul_info_patch_label_test":
+            self.config.vul_info_file = get_file_absolute_path(vul_info_file, [self.config.testcases_path])
 
         # get tool hap info
         # default value
@@ -934,6 +935,7 @@ class OHYaraTestDriver(IDriver):
         message_list = list()
 
         json_config = JsonParser(config_file)
+        self._get_driver_config(json_config)
         # get device info
         self.security_patch = self.config.device.execute_shell_command(
             "param get const.ohos.version.security_patch").strip()
@@ -964,7 +966,6 @@ class OHYaraTestDriver(IDriver):
             vul_items.append(item)  
         
         else:
-            self._get_driver_config(json_config)
             vul_items = self._get_vul_items()
             # parse version mapping file
             mapping_info = self._do_parse_json(self.config.version_mapping_file)
