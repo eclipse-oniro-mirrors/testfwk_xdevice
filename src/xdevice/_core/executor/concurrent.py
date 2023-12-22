@@ -149,9 +149,14 @@ class DriversThread(threading.Thread):
         """write device to result file"""
         if not os.path.exists(result_xml) or environment is None:
             return
-        root = ElementTree.parse(result_xml).getroot()
         desc = environment.get_description()
         if not desc:
+            return
+        try:
+            root = ElementTree.parse(result_xml).getroot()
+        except ElementTree.ParseError as e:
+            LOG.error(f"parse result xml error! xml file {result_xml}")
+            LOG.error(f"error message: {e}")
             return
         root.set("devices", literal_eval(str(desc)))
         result_fd = os.open(result_xml, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)

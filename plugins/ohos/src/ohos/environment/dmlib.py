@@ -229,9 +229,12 @@ class HdcMonitor:
         device_instance.host = self.channel.get("host")
         device_instance.port = self.channel.get("port")
         if self.changed:
-            LOG.debug("Dmlib get device instance %s %s %s" %
-                      (device_instance.device_sn,
-                       device_instance.host, device_instance.port))
+            if DeviceState.get_state(items[3]) == DeviceState.CONNECTED:
+                LOG.debug("Dmlib get device instance {} {} {}, status: {}".format(
+                    device_instance.device_sn, device_instance.host, device_instance.port, items[3]))
+            else:
+                LOG.debug("Dmlib ignore device instance {} {} {}, status: {}".format(
+                    device_instance.device_sn, device_instance.host, device_instance.port, items[3]))
         device_instance.device_state = DeviceState.get_state(items[3])
         return device_instance
 
