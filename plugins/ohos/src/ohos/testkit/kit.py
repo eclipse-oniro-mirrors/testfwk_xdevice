@@ -300,11 +300,12 @@ class PushKit(ITestKit):
         pattern = re.compile(r'^(\./)?resource/')
         if re.match(pattern, file_path) is None:
             return None
+        file_path = re.sub(pattern, "", file_path)
         save_file = os.path.join(
-            request_config.get(ConfigConst.resource_path), re.sub(pattern, "resource/", file_path))
+            request_config.get(ConfigConst.resource_path), file_path)
         if os.path.exists(save_file):
             return save_file
-        url = self.__query_resource_url(device, web_resource_url, file_path)
+        url = self.__query_resource_url(device, web_resource_url, "resource/" + file_path)
         if not url:
             return None
         save_path = os.path.dirname(save_file)
@@ -336,7 +337,7 @@ class PushKit(ITestKit):
             os_type = "standard system"
         if device_class == "DeviceLite" and device.label == DeviceLabelType.ipcamera:
             os_type = "small system"
-        os_version = getattr(device, "device_props", {}).get("DisplayVersion", "")
+        os_version = getattr(device, "device_props", {}).get("OsFullName", "")
         test_type = self.request.config.get(ConfigConst.task, "").upper()
         if not os_type or not os_version or re.search(r'(AC|DC|HA|HI|SS)TS', test_type) is None:
             LOG.warning("query resource params is none")
@@ -348,19 +349,24 @@ class PushKit(ITestKit):
             "osVersion": os_version,
             "testType": test_type
         }
+        LOG.debug(f"query resource's response params: {params}")
         try:
             import requests
             cli = requests.post(query_url, json=params, timeout=5, verify=False)
             rsp_code = cli.status_code
             rsp_body = cli.content.decode()
+            LOG.debug(f"query resource's response code: {rsp_code}")
+            LOG.debug(f"query resource's response body: {rsp_body}")
             if rsp_code == 200:
                 try:
-                    url = json.loads(rsp_body).get("body")
+                    data = json.loads(rsp_body)
+                    if data.get("code") == 200:
+                        url = data.get("body")
+                    else:
+                        msg = data.get("msg")
+                        LOG.error(f"query the resource of '{file_path}' downloading url failed. {msg}")
                 except ValueError:
                     LOG.error("query resource's response body is not json data")
-            else:
-                LOG.info(f"query resource's response code: {rsp_code}")
-                LOG.info(f"query resource's response body: {rsp_body}")
         except Exception as e:
             LOG.error(f"query the resource of '{file_path}' downloading url failed. {e}")
         finally:
