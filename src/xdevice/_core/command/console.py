@@ -336,7 +336,15 @@ class Console(object):
                                 dest=ConfigConst.auto_retry,
                                 type=int,
                                 default=0,
-                                help="- the count of auto retry")
+                                help="- the count of auto retry"),
+            parser.add_argument("-module_config",
+                                action=SplicingAction,
+                                type=str,
+                                nargs='+',
+                                dest=ConfigConst.module_config,
+                                default="",
+                                help="Specify module config json path"
+                                )
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:

@@ -271,6 +271,7 @@ class ConfigConst(object):
     kits_in_module = "kits_in_module"
     kits_params = "kits_params"
     auto_retry = "auto_retry"
+    module_config = "module_config"
 
     # Runtime Constant
     history_report_path = "history_report_path"
@@ -280,6 +281,7 @@ class ConfigConst(object):
     need_kit_setup = "need_kit_setup"
     task_kits = "task_kits"
     module_kits = "module_kits"
+    common_module_kits = "common_module_kits"
     spt = "spt"
     version = "version"
     component_mapper = "_component_mapper"

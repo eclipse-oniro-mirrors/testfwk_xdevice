@@ -36,6 +36,10 @@ from _core.plugin import Config
 from _core.utils import calculate_elapsed_time
 from _core.utils import get_instance_name
 from _core.utils import check_mode
+from _core.utils import get_file_absolute_path
+from _core.utils import get_kit_instances
+from _core.utils import check_device_name
+from _core.utils import check_device_env_index
 from _core.exception import ParamError
 from _core.exception import ExecuteTerminate
 from _core.exception import DeviceError
@@ -44,6 +48,7 @@ from _core.report.reporter_helper import ReportConstant
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import Suite
 from _core.report.reporter_helper import Case
+from _core.testkit.json_parser import JsonParser
 
 LOG = platform_logger("Concurrent")
 
@@ -87,6 +92,7 @@ class DriversThread(threading.Thread):
         self.message_queue = message_queue
         self.thread_id = None
         self.error_message = ""
+        self.module_config_kits = None
 
     def set_listeners(self, listeners):
         self.listeners = listeners
@@ -136,6 +142,7 @@ class DriversThread(threading.Thread):
                 get_instance_name(exception), str(exception))
 
         finally:
+            self._do_common_module_kit_teardown()
             self._handle_finally(driver, execute_message, start_time, test)
 
     @staticmethod
@@ -196,6 +203,40 @@ class DriversThread(threading.Thread):
         self.message_queue.put(execute_message)
         LOG.info("")
 
+    def _do_common_module_kit_setup(self, driver_request):
+        for device in self.environment.devices:
+            setattr(device, ConfigConst.common_module_kits, [])
+        from xdevice import Scheduler
+        for kit in self.module_config_kits:
+            run_flag = False
+            for device in self.environment.devices:
+                if not Scheduler.is_execute:
+                    raise ExecuteTerminate()
+                if not check_device_env_index(device, kit):
+                    continue
+                if check_device_name(device, kit):
+                    run_flag = True
+                    kit_copy = copy.deepcopy(kit)
+                    module_kits = getattr(device, ConfigConst.module_kits)
+                    module_kits.append(kit_copy)
+                    kit_copy.__setup__(device, request=driver_request)
+            if not run_flag:
+                kit_device_name = getattr(kit, "device_name", None)
+                error_msg = "device name '%s' of '%s' not exist" % (
+                    kit_device_name, kit.__class__.__name__)
+                LOG.error(error_msg, error_no="00108")
+                raise ParamError(error_msg, error_no="00108")
+
+    def _do_common_module_kit_teardown(self):
+        try:
+            for device in self.environment.devices:
+                for kit in getattr(device, ConfigConst.common_module_kits, []):
+                    if check_device_name(device, kit, step="teardown"):
+                        kit.__teardown__(device)
+                setattr(device, ConfigConst.common_module_kits, [])
+        except Exception as e:
+            LOG.error("Common module kit teardown error: {}".format(e))
+
     def _do_task_setup(self, driver_request):
         if check_mode(ModeType.decc) or getattr(
                 driver_request.config, ConfigConst.check_device, False):
@@ -203,6 +244,18 @@ class DriversThread(threading.Thread):
 
         if self.environment is None:
             return
+
+        if hasattr(driver_request.config, ConfigConst.module_config):
+            module_config_path = getattr(driver_request.config, ConfigConst.module_config, None)
+            LOG.debug("Common module config path: {}".format(module_config_path))
+            from xdevice import Variables
+            config_path = get_file_absolute_path(module_config_path,
+                                                 [os.path.join(Variables.exec_dir, "config")])
+            json_config = JsonParser(config_path)
+            self.module_config_kits = get_kit_instances(json_config,
+                                                        driver_request.config.resource_path,
+                                                        driver_request.config.testcases_path)
+            self._do_common_module_kit_setup(driver_request)
 
         from xdevice import Scheduler
         for device in self.environment.devices:
