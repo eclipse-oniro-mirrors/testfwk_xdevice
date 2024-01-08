@@ -217,7 +217,7 @@ class DriversThread(threading.Thread):
                 if check_device_name(device, kit):
                     run_flag = True
                     kit_copy = copy.deepcopy(kit)
-                    module_kits = getattr(device, ConfigConst.module_kits)
+                    module_kits = getattr(device, ConfigConst.common_module_kits)
                     module_kits.append(kit_copy)
                     kit_copy.__setup__(device, request=driver_request)
             if not run_flag:
