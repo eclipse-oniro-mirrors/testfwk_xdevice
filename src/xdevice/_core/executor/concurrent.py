@@ -245,7 +245,8 @@ class DriversThread(threading.Thread):
         if self.environment is None:
             return
 
-        if hasattr(driver_request.config, ConfigConst.module_config):
+        if hasattr(driver_request.config, ConfigConst.module_config) and \
+                getattr(driver_request.config, ConfigConst.module_config, None):
             module_config_path = getattr(driver_request.config, ConfigConst.module_config, None)
             LOG.debug("Common module config path: {}".format(module_config_path))
             from xdevice import Variables
