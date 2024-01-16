@@ -94,8 +94,8 @@
 
     | 可用参数 | 使用说明 | 实例 |
     | :--- | :--- | :--- |
-    | class | 可以指定运行测试套中的指定用例，多个用例间以逗号分隔。 | run -l SoundTriggerTest -ta class:android.harware.SoundTriggerTest#testKey，解释：只运行SoundTriggerTest测试套下的testKey用例，SoundTriggerTest中其他用例均不执行 |
-    | notClass | 指定不允许测试套中的哪些用例 | run -l SoundTriggerTest -ta notClass:android.harware.SoundTriggerTest#testKey，解释：除了SoundTriggerTest测试套下的testKey用例，SoundTriggerTest中其他用例均执行 |
+    | class | 可以指定运行测试套中的指定用例，多个用例间以逗号分隔。 | run -l SoundTriggerTest -ta class:SoundTriggerTest#testKey，解释：只运行SoundTriggerTest测试套下的testKey用例，SoundTriggerTest中其他用例均不执行 |
+    | notClass | 指定不允许测试套中的哪些用例 | run -l SoundTriggerTest -ta notClass:SoundTriggerTest#testKey，解释：除了SoundTriggerTest测试套下的testKey用例，SoundTriggerTest中其他用例均执行 |
     | stress | 指定测试套的运行次数 | run -l SoundTriggerTest -ta stress:100，解释：将测试套SoundTriggerTest运行100次 |
     | level | 用例级别，可选参数："0","1","2","3" | run -l SoundTriggerTest -ta level:1，解释：指定测试套SoundTriggerTest的用例级别为1 |
     | size | 用例粒度，可选参数："small","medium","large" | run -l SoundTriggerTest -ta size:small，解释：指定测试套SoundTriggerTest的用例粒度为small |
