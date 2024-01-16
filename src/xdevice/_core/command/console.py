@@ -392,11 +392,6 @@ class Console(object):
                 config_file=options.config, env=options.test_environment).\
                 get_testcases_dir()
             setattr(options, ConfigConst.testcases_path, testcases_path)
-        if options.testcases_path:
-            if Scheduler.task_type in ["ets", "hits"]:
-                testcases_path = "".join((options.testcases_path,
-                                          "/special/android-ets/testcases"))
-                setattr(options, "testcases_path", testcases_path)
         device_log_dict = UserConfigManager(
             config_file=options.config, env=options.test_environment). \
             get_device_log_status()
