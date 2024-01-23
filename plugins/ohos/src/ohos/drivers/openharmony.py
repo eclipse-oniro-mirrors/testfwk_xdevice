@@ -904,12 +904,15 @@ class OHYaraTestDriver(IDriver):
     def _get_driver_config(self, json_config):
         yara_bin = get_config_value('yara-bin',
                                     json_config.get_driver(), False)
+        vmlinux_to_elf_bin = get_config_value('vmlinux-to-elf-bin',
+                                              json_config.get_driver(), False)
         version_mapping_file = get_config_value('version-mapping-file',
                                                 json_config.get_driver(), False)
         vul_info_file = get_config_value('vul-info-file',
                                          json_config.get_driver(), False)
         # get absolute file path
         self.config.yara_bin = get_file_absolute_path(yara_bin)
+        self.config.vmlinux_to_elf_bin = get_file_absolute_path(vmlinux_to_elf_bin)
         self.config.version_mapping_file = get_file_absolute_path(version_mapping_file)
         if vul_info_file != "vul_info_patch_label_test":
             self.config.vul_info_file = get_file_absolute_path(vul_info_file, [self.config.testcases_path])
@@ -1133,14 +1136,6 @@ class OHYaraTestDriver(IDriver):
         return img_file
     
     def file_process_kernel(self, affected_file, local_path):
-        try:
-            from vmlinux_to_elf.elf_symbolizer import ElfSymbolizer
-            from vmlinux_to_elf.architecture_detecter import ArchitectureGuessError
-            from vmlinux_to_elf.vmlinuz_decompressor import obtain_raw_kernel_from_file
-        except ImportError:
-            LOG.error("Please install the tool of vmlinux_to_elf before running.")
-            return False
-        
         # 内核文件解析慢，解析过一次放到公共目录下，该月份下用例共用
         dir_path = os.path.dirname(local_path)
         processed_file = os.path.join(dir_path, "vmlinux.elf")
@@ -1162,12 +1157,12 @@ class OHYaraTestDriver(IDriver):
         if not input_file:
             LOG.error("An error occurred when decompressing the kernel file.")
             return False
-        with open(input_file, "rb") as kernel_bin:
-            try:
-                ElfSymbolizer(obtain_raw_kernel_from_file(kernel_bin.read()), output_file)
-            except ArchitectureGuessError:
-                LOG.error("An error occurred when pasing the kernel file.")
-                return None
+        parse_cmd = [self.config.vmlinux_to_elf_bin, input_file, output_file]
+        parse_result = exec_cmd(parse_cmd)
+        if "error" in parse_result:  
+            LOG.error("An error occurred when pasing the kernel file.")
+            return False
+        LOG.INFO("Kernel file extraction successful.")
         return output_file
 
     def _get_vul_items(self):
