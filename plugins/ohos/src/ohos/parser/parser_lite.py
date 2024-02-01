@@ -147,7 +147,6 @@ class CppTestParserLite(IParser):
         elif Constant.PRODUCT_PARAM_END in line:
             self.is_params = False
         if self.is_params:
-            # output like this: 2023-11-13 15:51:23.453 OsFullName = xx
             line = " ".join(line.split(" ")[2:])
             self.product_info.update(parse_line_key_value(line))
 
@@ -642,7 +641,6 @@ class CTestParser(IParser):
         elif Constant.PRODUCT_PARAM_END in line:
             self.is_params = False
         if self.is_params:
-            # output like this: 2023-11-13 15:51:23.453 OsFullName = xx
             line = " ".join(line.split(" ")[2:])
             self.product_info.update(parse_line_key_value(line))
 
