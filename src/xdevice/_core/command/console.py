@@ -571,10 +571,13 @@ class Console(object):
             key, value = key_value_pair.split(":", 1)
             if not value:
                 raise ParamError("'%s' no value" % key)
-            value_list = str(value).split(",")
-            exist_list = parse_result.get(key, [])
-            exist_list.extend(value_list)
-            parse_result[key] = exist_list
+            if ConfigConst.pass_through not in key:
+                value_list = str(value).split(",")
+                exist_list = parse_result.get(key, [])
+                exist_list.extend(value_list)
+                parse_result[key] = exist_list
+            else:
+                parse_result[key] = value
         return parse_result
 
     @classmethod
