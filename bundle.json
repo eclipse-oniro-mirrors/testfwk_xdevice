@@ -1,0 +1,29 @@
+{
+    "name": "@openharmony/xdevice",
+    "version": "2.30.0",
+    "description": "xdevice",
+    "license": "Apache License 2.0",
+    "publishAs": "code-segment",
+    "segment": {
+        "destPath": "test/testfwk/xdevice"
+    },
+    "scripts": {},  
+    "repository": "",
+    "dirs": {},
+    "component": {
+        "name": "xdevice",
+        "subsystem": "testfwk",
+        "syscap": [],
+      	"features" :[],
+        "adapted_system_type": [ "mini", "small", "standard" ],
+      	"rom": "0KB",
+      	"ram": "0KB",
+      	"deps": {},
+	"build": {
+	  "sub_component": [
+          ],
+	  "inner_kits": [],
+	    "test": []
+  	}
+  }
+}
