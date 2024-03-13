@@ -18,6 +18,8 @@
 
 import copy
 import os
+import re
+import shutil
 import socket
 import sys
 import time
@@ -115,8 +117,6 @@ def get_decode(stream):
 
 
 def is_proc_running(pid, name=None):
-    if hasattr(sys, ConfigConst.env_pool_cache) and getattr(sys, ConfigConst.env_pool_cache, False):
-        return True
     if platform.system() == "Windows":
         pid = "{}.exe".format(pid)
         proc_sub = subprocess.Popen(["C:\\Windows\\System32\\tasklist"],
@@ -395,6 +395,7 @@ def modify_props(device, local_prop_file, target_prop_file, new_props):
 def get_device_log_file(report_path, serial=None, log_name="device_log",
                         device_name="", module_name=None):
     from xdevice import Variables
+    # new a module folder to save log
     if module_name:
         log_path = os.path.join(report_path, Variables.report_vars.log_dir, module_name)
     else:
@@ -412,7 +413,7 @@ def get_device_log_file(report_path, serial=None, log_name="device_log",
 
 
 def check_result_report(report_root_dir, report_file, error_message="",
-                        report_name="", module_name=""):
+                        report_name="", module_name="", **kwargs):
     """
     Check whether report_file exits or not. If report_file is not exist,
     create empty report with error_message under report_root_dir
@@ -440,8 +441,9 @@ def check_result_report(report_root_dir, report_file, error_message="",
     suite_result.stacktrace = error_message
     if module_name:
         suite_name = module_name
-    suite_reporter = SuiteReporter([(suite_result, [])], suite_name,
-                                   result_dir, modulename=module_name)
+    suite_reporter = SuiteReporter(
+        [(suite_result, [])], suite_name, result_dir, modulename=module_name,
+        is_monkey=kwargs.get("is_monkey", False), device_up_info=kwargs.get("device_up_info", None))
     suite_reporter.create_empty_report()
     return "%s.xml" % os.path.join(result_dir, suite_name)
 
@@ -470,26 +472,6 @@ def is_python_satisfied():
         return True
     LOG.error("Please use python {} or higher version to start project".format(mini_version))
     return False
-
-
-def get_version():
-    from xdevice import Variables
-    ver = ''
-    ver_file_path = os.path.join(Variables.res_dir, 'version.txt')
-    if not os.path.isfile(ver_file_path):
-        return ver
-    flags = os.O_RDONLY
-    modes = stat.S_IWUSR | stat.S_IRUSR
-    with os.fdopen(os.open(ver_file_path, flags, modes),
-                   "rb") as ver_file:
-        content_list = ver_file.read().decode("utf-8").split("\n")
-        for line in content_list:
-            if line.strip() and "-v" in line:
-                ver = line.strip().split('-')[1]
-                ver = ver.split(':')[0][1:]
-                break
-
-    return ver
 
 
 def get_instance_name(instance):
@@ -523,6 +505,23 @@ def convert_serial(serial):
         length = len(serial) // 3
         return "{}{}{}".format(
             serial[0:length], "*" * (len(serial) - length * 2), serial[-length:])
+
+
+def convert_mac(message):
+    if isinstance(message, list):
+        return message
+    pattern = r'.+\'hcptest\':\'(.+)\''
+    pattern2 = r'.+pass_through:.+\'hcptest\':\'(.+)\''
+    result1 = re.match(pattern, message)
+    result2 = re.search(pattern2, message)
+    if result1 or result2:
+        result = result1 if result1 else result2
+        result = result.group(1)
+        length = len(result) // 8
+        convert_mes = "{}{}{}".format(result[0:length], "*" * (len(result) - length * 2), result[-length:])
+        return message.replace(result, convert_mes)
+    else:
+        return message
 
 
 def get_shell_handler(request, parser_type):
@@ -699,40 +698,112 @@ def do_module_kit_teardown(request):
         setattr(device, ConfigConst.module_kits, [])
 
 
+def get_current_time():
+    current_time = time.time()
+    local_time = time.localtime(current_time)
+    data_head = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
+    return "%s" % (data_head)
+
+
+def check_mode_in_sys(mode):
+    if not hasattr(sys, "mode"):
+        return False
+    return getattr(sys, "mode") == mode
+
+
 def get_cst_time():
-    cn_tz = timezone(timedelta(hours=8),
-                     name='Asia/ShangHai')
-    return datetime.now(tz=cn_tz)
+    sh_tz = timezone(
+        timedelta(hours=8),
+        name='Asia/Shanghai',
+    )
+    return datetime.now(tz=sh_tz)
 
 
 def get_delta_time_ms(start_time):
     end_time = get_cst_time()
-    delta = round(float((end_time - start_time).total_seconds()) * 1000, 3)
+    delta = (end_time - start_time).total_seconds() * 1000
     return delta
 
 
-def get_device_proc_pid(device, proc_name, double_check=False):
+def get_netstat_proc_pid(device, port):
     if not hasattr(device, "execute_shell_command") or \
             not hasattr(device, "log") or \
             not hasattr(device, "get_recover_state"):
         return ""
     if not device.get_recover_state():
         return ""
-    cmd = 'ps -ef | grep %s' % proc_name
+    cmd = 'netstat -anp | grep {}'.format(port)
     proc_running = device.execute_shell_command(cmd).strip()
     proc_running = proc_running.split("\n")
     for data in proc_running:
-        if proc_name in data and "grep" not in data:
-            device.log.debug('{} running status:{}'.format(proc_name, data))
+        if str(port) in data and "grep" not in data:
             data = data.split()
-            return data[1]
-    if double_check:
-        cmd = 'ps -A | grep %s' % proc_name
-        proc_running = device.execute_shell_command(cmd).strip()
-        proc_running = proc_running.split("\n")
-        for data in proc_running:
-            if proc_name in data:
-                device.log.debug('{} running status double_check:{}'.format(proc_name, data))
-                data = data.split()
-                return data[0]
+            data = data[len(data) - 1]
+            device.log.debug('{} proc:{}'.format(port, data))
+            data = data.split("/")
+            return data[0]
     return ""
+
+
+def calculate_elapsed_time(begin, end):
+    """计算时间间隔
+    Args:
+        begin: int/datetime, begin time
+        end  : int/datetime, end time
+    Returns:
+        elapsed time description
+    """
+    elapsed = []
+    # 传入datetime对象
+    if isinstance(begin, datetime) and isinstance(end, datetime):
+        total_seconds = (end - begin).total_seconds()
+    # 传入耗时秒数
+    else:
+        total_seconds = end - begin
+    total_seconds = float(round(total_seconds, 3))
+
+    seconds = int(total_seconds)
+    if seconds < 0:
+        return f"calculate error, total seconds is {total_seconds}"
+    if seconds == 0:
+        milliseconds = int((total_seconds - seconds) * 1000)
+        if milliseconds > 0:
+            return "{} ms".format(milliseconds)
+        else:
+            return "0 second"
+    d, s = divmod(seconds, 24 * 60 * 60)
+    if d == 1:
+        elapsed.append("1 day")
+    if d > 1:
+        elapsed.append("{} days".format(d))
+    h, s = divmod(s, 60 * 60)
+    if h == 1:
+        elapsed.append("1 hour")
+    if h > 1:
+        elapsed.append("{} hours".format(h))
+    m, s = divmod(s, 60)
+    if m == 1:
+        elapsed.append("1 minute")
+    if m > 1:
+        elapsed.append("{} minutes".format(m))
+    if s == 1:
+        elapsed.append("1 second")
+    if s > 1:
+        elapsed.append("{} seconds".format(s))
+    return " ".join(elapsed)
+
+
+def copy_folder(src, dst):
+    if not os.path.exists(src):
+        LOG.error(f"copy folder error, source path '{src}' does not exist")
+        return
+    if not os.path.exists(dst):
+        os.makedirs(dst)
+    for filename in os.listdir(src):
+        fr_path = os.path.join(src, filename)
+        to_path = os.path.join(dst, filename)
+        if os.path.isfile(fr_path):
+            shutil.copy(fr_path, to_path)
+        if os.path.isdir(fr_path):
+            os.makedirs(to_path)
+            copy_folder(fr_path, to_path)

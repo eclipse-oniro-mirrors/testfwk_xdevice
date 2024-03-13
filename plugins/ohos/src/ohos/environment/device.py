@@ -15,7 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import re
 import time
 import os
@@ -23,7 +22,8 @@ import threading
 import platform
 import subprocess
 import sys
-from xdevice import DeviceOsType, FilePermission
+from xdevice import DeviceOsType
+from xdevice import FilePermission
 from xdevice import ProductForm
 from xdevice import ReportException
 from xdevice import IDevice
@@ -35,12 +35,14 @@ from xdevice import HdcError
 from xdevice import DeviceAllocationState
 from xdevice import DeviceConnectorType
 from xdevice import TestDeviceState
-from xdevice import AdvanceDeviceOption
 from xdevice import convert_serial
 from xdevice import check_path_legal
 from xdevice import start_standing_subprocess
 from xdevice import stop_standing_subprocess
 from xdevice import get_cst_time
+from xdevice import Platform
+from xdevice import AppInstallError
+from xdevice import RpcNotRunningError
 
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
@@ -60,6 +62,7 @@ UITEST_COMMAND = "{} start-daemon 0123456789 &".format(UITEST_PATH)
 NATIVE_CRASH_PATH = "/data/log/faultlog/temp"
 JS_CRASH_PATH = "/data/log/faultlog/faultlogger"
 ROOT_PATH = "/data/log/faultlog"
+LOGLEVEL = ["DEBUG", "INFO", "WARN", "ERROR", "FATAL"]
 
 
 def perform_device_action(func):
@@ -151,7 +154,7 @@ class Device(IDevice):
     device_os_type = DeviceOsType.default
     test_device_state = None
     device_allocation_state = DeviceAllocationState.available
-    label = None
+    label = ProductForm.phone
     log = platform_logger("Device")
     device_state_monitor = None
     reboot_timeout = 2 * 60 * 1000
@@ -171,14 +174,17 @@ class Device(IDevice):
     oh_module_package = None
     module_ablity_name = None
     _device_report_path = None
+    test_platform = Platform.ohos
     _webview = None
 
     model_dict = {
         'default': ProductForm.phone,
+        'phone': ProductForm.phone,
         'car': ProductForm.car,
         'tv': ProductForm.television,
         'watch': ProductForm.watch,
         'tablet': ProductForm.tablet,
+        '2in1': ProductForm._2in1,
         'nosdcard': ProductForm.phone
     }
 
@@ -191,7 +197,7 @@ class Device(IDevice):
 
     def __eq__(self, other):
         return self.device_sn == other.__get_serial__() and \
-               self.device_os_type == other.device_os_type
+            self.device_os_type == other.device_os_type
 
     def __set_serial__(self, device_sn=""):
         self.device_sn = device_sn
@@ -215,13 +221,15 @@ class Device(IDevice):
                 self.device_sn, ConfigConst.recover_state))
             return False
 
-        result = self.device_state_monitor.wait_for_device_available()
+        result = self.device_state_monitor.wait_for_device_available(self.reboot_timeout)
         if result:
             self.device_log_collector.restart_catch_device_log()
         return result
 
     def get_device_type(self):
-        self.label = self.model_dict.get("default", None)
+        model = self.get_property("const.product.devicetype",
+                                  abort_on_exception=True)
+        self.label = self.model_dict.get(model, ProductForm.phone)
 
     def get_property(self, prop_name, retry=RETRY_ATTEMPTS,
                      abort_on_exception=False):
@@ -363,13 +371,7 @@ class Device(IDevice):
         """
         local = "\"{}\"".format(local)
         remote = "\"{}\"".format(remote)
-        if self.host != "127.0.0.1":
-            self.connector_command("file recv {} {}".format(remote, local))
-        else:
-            is_create = kwargs.get("is_create", False)
-            timeout = kwargs.get("timeout", TIMEOUT)
-            HdcHelper.pull_file(self, remote, local, is_create=is_create,
-                                timeout=timeout)
+        self.connector_command("file recv {} {}".format(remote, local))
 
     def enable_hdc_root(self):
         return True
@@ -393,15 +395,6 @@ class Device(IDevice):
         stdout = self.execute_shell_command(command, timeout=5 * 1000,
                                             output_flag=False, retry=retry,
                                             abort_on_exception=True).strip()
-        if stdout:
-            if "fail" in stdout:
-                cmd = [HdcHelper.CONNECTOR_NAME, "list", "targets"]
-
-                stdout = exec_cmd(cmd)
-                LOG.debug("exec cmd list targets:{},current device_sn:{}".format(stdout, self.device_sn))
-                if stdout and (self.device_sn in stdout):
-                    stdout = "true"
-            LOG.debug(stdout)
         return stdout
 
     def set_recover_state(self, state):
@@ -420,6 +413,24 @@ class Device(IDevice):
             state = getattr(self, ConfigConst.recover_state, default_state)
             return state
 
+    def wait_for_boot_completion(self):
+        """Waits for the device to boot up.
+
+        Returns:
+            True if the device successfully finished booting, False otherwise.
+        """
+        return self.device_state_monitor.wait_for_boot_complete(self.reboot_timeout)
+
+    @classmethod
+    def check_recover_result(cls, recover_result):
+        return "true" in recover_result
+
+    @property
+    def device_log_collector(self):
+        if self._device_log_collector is None:
+            self._device_log_collector = DeviceLogCollector(self)
+        return self._device_log_collector
+
     def close(self):
         self.reconnecttimes = 0
 
@@ -433,11 +444,11 @@ class Device(IDevice):
         if self.is_abc:
             self.stop_harmony_rpc(kill_all=False)
         else:
-            self.remove_ports()
             self.stop_harmony_rpc(kill_all=True)
             # do proxy clean
-            if self.proxy_listener is not None:
-                self.proxy_listener(is_exception=False)
+        if self.proxy_listener is not None:
+            self.proxy_listener(is_exception=False)
+        self.remove_ports()
         self.device_log_collector.stop_restart_catch_device_log()
 
     @property
@@ -455,6 +466,10 @@ class Device(IDevice):
                 # check uitest
                 self.check_uitest_status()
                 self._proxy = self.get_harmony()
+        except AppInstallError as error:
+            raise error
+        except RpcNotRunningError as error:
+            raise error
         except Exception as error:
             self._proxy = None
             self.log.error("DeviceTest-10012 proxy:%s" % str(error))
@@ -470,6 +485,8 @@ class Device(IDevice):
                 # check uitest
                 self.check_uitest_status()
                 self._abc_proxy = self.get_harmony(start_abc=True)
+        except RpcNotRunningError as error:
+            raise error
         except Exception as error:
             self._abc_proxy = None
             self.log.error("DeviceTest-10012 abc_proxy:%s" % str(error))
@@ -558,6 +575,8 @@ class Device(IDevice):
                 self.log.debug(str(error))
                 self.log.error('please check devicetest extension module is exist.')
                 raise Exception(ErrorMessage.Error_01437.Topic)
+            except AppInstallError as error:
+                raise error
             except Exception as error:
                 self.log.debug(str(error))
                 self.log.error('root device init RPC error.')
@@ -570,11 +589,15 @@ class Device(IDevice):
         cmd = "aa start -a {}.ServiceAbility -b {}".format(DEVICETEST_HAP_PACKAGE_NAME, DEVICETEST_HAP_PACKAGE_NAME)
         result = self.execute_shell_command(cmd)
         self.log.debug('start devicetest ability, {}'.format(result))
+        if "successfully" not in result:
+            raise RpcNotRunningError("harmony {} rpc start failed".format("system" if self.is_abc else "normal"),
+                                     error_no=ErrorMessage.Error_01439.Code)
         if not self.is_abc:
             self.start_uitest()
         time.sleep(1)
         if not self.check_rpc_status(check_abc=False):
-            raise Exception("harmony rpc not running")
+            raise RpcNotRunningError("harmony {} rpc process not found".format("system" if self.is_abc else "normal"),
+                                     error_no=ErrorMessage.Error_01440.Code)
 
     def start_abc_rpc(self, re_install_rpc=False):
         if re_install_rpc:
@@ -594,11 +617,12 @@ class Device(IDevice):
             return
         self.start_uitest()
         time.sleep(1)
+        from devicetest.core.error_message import ErrorMessage
         if not self.check_rpc_status(check_abc=True):
-            raise Exception("harmony abc rpc not running")
+            raise RpcNotRunningError("harmony abc rpc process not found", error_no=ErrorMessage.Error_01440.Code)
 
     def stop_harmony_rpc(self, kill_all=True):
-        # abc妯″紡涓嬩粎鏉€鎺塪evicetest锛屽惁鍒欓兘鏉€鎺?
+        # only kill devicetest in abc mode, or kill all
         proc_pids = self.get_devicetest_proc_pid()
         if not kill_all:
             proc_pids.pop()
@@ -716,8 +740,13 @@ class Device(IDevice):
         @summary: Reconnect the device.
         '''
         if not self.wait_for_boot_completion():
+            self._proxy = None
+            self._uitestdeamon = None
             raise Exception("Reconnect timed out.")
         if self._proxy:
+            # do proxy clean
+            if not self.is_abc and self.proxy_listener is not None:
+                self.proxy_listener(is_exception=True)
             self.start_harmony_rpc(re_install_rpc=True)
             self._h_port = self.get_local_port(start_abc=False)
             cmd = "fport tcp:{} tcp:{}".format(
@@ -728,10 +757,11 @@ class Device(IDevice):
             except Exception as _:
                 time.sleep(3)
                 self._proxy.init(port=self._h_port, addr=self.host, device=self)
-            # do proxy clean
-            if not self.is_abc and self.proxy_listener is not None:
-                self.proxy_listener(is_exception=True)
+
         if self.is_abc and self._abc_proxy:
+            # do proxy clean
+            if self.proxy_listener is not None:
+                self.proxy_listener(is_exception=True)
             self.start_abc_rpc(re_install_rpc=True)
             self._h_port = self.get_local_port(start_abc=True)
             cmd = "fport tcp:{} tcp:{}".format(
@@ -742,9 +772,6 @@ class Device(IDevice):
             except Exception as _:
                 time.sleep(3)
                 self._abc_proxy.init(port=self._h_port, addr=self.host, device=self)
-            # do proxt clean
-            if self.proxy_listener is not None:
-                self.proxy_listener(is_exception=True)
 
         if self._uitestdeamon is not None:
             self._uitestdeamon.init(self)
@@ -752,14 +779,6 @@ class Device(IDevice):
         if self._proxy:
             return self._proxy
         return None
-
-    def wait_for_boot_completion(self):
-        """Waits for the device to boot up.
-
-        Returns:
-            True if the device successfully finished booting, False otherwise.
-        """
-        return self.device_state_monitor.wait_for_device_available(self.reboot_timeout)
 
     def get_local_port(self, start_abc):
         from devicetest.utils.util import get_forward_port
@@ -796,10 +815,6 @@ class Device(IDevice):
                 cmd = "fport rm {}".format(data[0][1:-1])
                 self.connector_command(cmd, is_print=False)
 
-    @classmethod
-    def check_recover_result(cls, recover_result):
-        return "true" in recover_result
-
     def take_picture(self, name):
         '''
         @summary: 截取手机屏幕图片并保存
@@ -824,6 +839,12 @@ class Device(IDevice):
         except Exception as error:
             self.log.error("devicetest take_picture: {}".format(str(error)))
         return path
+
+    def set_device_report_path(self, path):
+        self._device_report_path = path
+
+    def get_device_report_path(self):
+        return self._device_report_path
 
     def execute_shell_in_daemon(self, command):
         if self.host != "127.0.0.1":
@@ -853,29 +874,31 @@ class Device(IDevice):
             self._webview = WebView(self)
         return self._webview
 
-    @property
-    def device_log_collector(self):
-        if self._device_log_collector is None:
-            self._device_log_collector = DeviceLogCollector(self)
-        return self._device_log_collector
-
-    def set_device_report_path(self, path):
-        self._device_log_path = path
-
-    def get_device_report_path(self):
-        return self._device_log_path
-
 
 class DeviceLogCollector:
     hilog_file_address = []
     log_file_address = []
     device = None
     restart_proc = []
+    device_log_level = None
+    is_clear = True
 
     def __init__(self, device):
         self.device = device
 
+    def _set_device_log_level(self, **kwargs):
+        # set device log level
+        if not self.device_log_level:
+            log_level = kwargs.get("log_level", "INFO")
+            if log_level not in LOGLEVEL:
+                self.device_log_level = "INFO"
+            else:
+                self.device_log_level = log_level
+        cmd = "hilog -b {}".format(self.device_log_level)
+        self.device.execute_shell_command(cmd)
+
     def restart_catch_device_log(self):
+        self._sync_device_time()
         for _, path in enumerate(self.hilog_file_address):
             hilog_open = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  FilePermission.mode_755)
@@ -892,20 +915,22 @@ class DeviceLogCollector:
         self.log_file_address.clear()
 
     def start_catch_device_log(self, log_file_pipe=None,
-                               hilog_file_pipe=None):
+                               hilog_file_pipe=None, **kwargs):
         """
         Starts hdc log for each device in separate subprocesses and save
         the logs in files.
         """
         self._sync_device_time()
+        self._set_device_log_level(**kwargs)
+
         device_hilog_proc = None
         if hilog_file_pipe:
             command = "hilog"
             if self.device.host != "127.0.0.1":
                 cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.device.host, self.device.port),
-                       "-t", self.device.device_sn, "shell", command]
+                       "-t", self.device.device_sn, command]
             else:
-                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device.device_sn, "shell", command]
+                cmd = [HdcHelper.CONNECTOR_NAME, "-t", self.device.device_sn, command]
             LOG.info("execute command: %s" % " ".join(cmd).replace(
                 self.device.device_sn, convert_serial(self.device.device_sn)))
             device_hilog_proc = start_standing_subprocess(
@@ -920,7 +945,8 @@ class DeviceLogCollector:
             stop_standing_subprocess(proc)
             self.device.log.debug("Stop catch device hilog.")
 
-    def start_hilog_task(self, log_size="10M"):
+    def start_hilog_task(self, **kwargs):
+        log_size = kwargs.get("log_size", "10M")
         log_size = log_size.upper()
         if re.search("^\d+[K?]$", log_size) is None \
                 and re.search("^\d+[M?]$", log_size) is None:
@@ -937,23 +963,30 @@ class DeviceLogCollector:
             log_size = "512M"
 
         self._sync_device_time()
+        self.is_clear = kwargs.get("is_clear", True)
+        # clear device crash log
         self.clear_crash_log()
-        # 先停止一下
+        # stop hilog task
         cmd = "hilog -w stop"
         self.device.execute_shell_command(cmd)
         # 清空日志
         cmd = "hilog -r"
         self.device.execute_shell_command(cmd)
         cmd = "rm -rf /data/log/hilog/*.gz"
-        self.device.execute_shell_command(cmd)
+        # set device log level
+        self._set_device_log_level(**kwargs)
         # 开始日志任务 设置落盘文件个数最大值1000, 单个文件20M，链接https://gitee.com/openharmony/hiviewdfx_hilog
         cmd = "hilog -w start -l {} -n 1000".format(log_size)
+        out = self.device.execute_shell_command(cmd)
+        LOG.info("Execute command: {}, result is {}".format(cmd, out))
+        # 开启kmsg日志落盘任务
+        cmd = "hilog -w start -t kmsg -l {} -n 1000".format(log_size)
         out = self.device.execute_shell_command(cmd)
         LOG.info("Execute command: {}, result is {}".format(cmd, out))
 
     def stop_hilog_task(self, log_name, **kwargs):
         cmd = "hilog -w stop"
-        out = self.device.execute_shell_command(cmd)
+        self.device.execute_shell_command(cmd)
         module_name = kwargs.get("module_name", None)
         if module_name:
             path = "{}/log/{}".format(self.device.get_device_report_path(), module_name)
@@ -976,14 +1009,18 @@ class DeviceLogCollector:
             LOG.info("Execute command: {}, result is {}".format(cmd, out))
             if out is not None and "No space left on device" not in out:
                 self.device.pull_file("/data/log/{}_hilog.tar.gz".format(log_name), path)
-                cmd = "rm -rf /data/log/{}_hilog.tar.gz".format(log_name)
+                cmd = "rm -f /data/log/{}_hilog.tar.gz".format(log_name)
                 self.device.execute_shell_command(cmd)
-        # 获取crash日志
+        # check if clear log
+        if self.is_clear:
+            cmd = "rm -f /data/log/hilog/*.gz"
+            self.device.execute_shell_command(cmd)
+        # get crash log
         self.start_get_crash_log(log_name, module_name=module_name)
-        # 获取额外路径的日志
+        # get extra log
         self.pull_extra_log_files(log_name, module_name, kwargs.get("extras_dirs", None))
 
-    def _get_log(self, log_cmd, *params):
+    def _get_log(self, log_path, *params):
         def filter_by_name(log_name, args):
             for starts_name in args:
                 if log_name.startswith(starts_name):
@@ -992,72 +1029,61 @@ class DeviceLogCollector:
 
         data_list = list()
         log_name_array = list()
-        log_result = self.device.execute_shell_command(log_cmd)
+        log_result = self.device.execute_shell_command("ls {}".format(log_path))
         if log_result is not None and len(log_result) != 0:
             log_name_array = log_result.strip().replace("\r", "").split("\n")
         for log_name in log_name_array:
             log_name = log_name.strip()
             if len(params) == 0 or \
                     filter_by_name(log_name, params):
-                data_list.append(log_name)
+                data_list.append("{}/{}".format(log_path, log_name))
         return data_list
 
-    def get_cur_crash_log(self, crash_path, log_name):
-        log_name_map = {'cppcrash': NATIVE_CRASH_PATH,
-                        "jscrash": JS_CRASH_PATH,
-                        "SERVICE_BLOCK": ROOT_PATH,
-                        "appfreeze": ROOT_PATH}
-        if not os.path.exists(crash_path):
-            os.makedirs(crash_path)
-        if "Not support std mode" in log_name:
-            return
-
-        def get_log_path(logname):
-            name_array = logname.split("-")
-            if len(name_array) <= 1:
-                return ROOT_PATH
-            return log_name_map.get(name_array[0])
-
-        log_path = get_log_path(log_name)
-        temp_path = "%s/%s" % (log_path, log_name)
-        self.device.pull_file(temp_path, crash_path)
-        LOG.debug("Finish pull file: %s" % log_name)
-
     def start_get_crash_log(self, task_name, **kwargs):
+        def get_cur_crash_log(local_path, device_path):
+            if not os.path.exists(local_path):
+                os.makedirs(local_path)
+            if "Not support std mode" in device_path:
+                return
+
+            self.device.pull_file(device_path, local_path)
+            LOG.debug("Finish pull file: %s" % device_path)
+
         module_name = kwargs.get("module_name", None)
         log_array = list()
-        native_crash_cmd = "ls {}".format(NATIVE_CRASH_PATH)
-        js_crash_cmd = '"ls {} | grep jscrash"'.format(JS_CRASH_PATH)
-        block_crash_cmd = '"ls {}"'.format(ROOT_PATH)
-        # 获取crash日志文件
-        log_array.extend(self._get_log(native_crash_cmd, "cppcrash"))
-        log_array.extend(self._get_log(js_crash_cmd, "jscrash"))
-        log_array.extend(self._get_log(block_crash_cmd, "SERVICE_BLOCK", "appfreeze"))
+
+        # get crash log
+        log_array.extend(self._get_log(NATIVE_CRASH_PATH, "cppcrash"))
+        log_array.extend(self._get_log(JS_CRASH_PATH, "jscrash", "appfreeze", "cppcrash"))
+        log_array.extend(self._get_log(ROOT_PATH, "SERVICE_BLOCK", "appfreeze"))
         LOG.debug("crash log file {}, length is {}".format(str(log_array), str(len(log_array))))
         if module_name:
-            crash_path = "{}/log/{}/{}_crash_log/".format(self.device.get_device_report_path(), module_name, task_name)
+            crash_path = "{}/log/{}/crash_log_{}/".format(self.device.get_device_report_path(), module_name, task_name)
         else:
             crash_path = "{}/log/crash_log_{}/".format(self.device.get_device_report_path(), task_name)
         for log_name in log_array:
             log_name = log_name.strip()
-            self.get_cur_crash_log(crash_path, log_name)
+            get_cur_crash_log(crash_path, log_name)
 
     def clear_crash_log(self):
-        clear_block_crash_cmd = "rm -f {}/*".format(ROOT_PATH)
-        clear_native_crash_cmd = "rm -f {}/*".format(NATIVE_CRASH_PATH)
-        clear_debug_crash_cmd = "rm -f {}/debug/*".format(ROOT_PATH)
-        clear_js_crash_cmd = "rm -f {}/*".format(JS_CRASH_PATH)
-        self.device.execute_shell_command(clear_block_crash_cmd)
-        self.device.execute_shell_command(clear_native_crash_cmd)
-        self.device.execute_shell_command(clear_debug_crash_cmd)
-        self.device.execute_shell_command(clear_js_crash_cmd)
+        if not self.is_clear:
+            LOG.debug("No need to clear crash log.")
+            return
+
+        def execute_clear_cmd(path: str, prefix: list):
+            for pre in prefix:
+                clear_cmd = "rm -f {}/{}*".format(path, pre)
+                self.device.execute_shell_command(clear_cmd)
+
+        execute_clear_cmd(ROOT_PATH, ["SERVICE_BLOCK", "appfreeze"])
+        execute_clear_cmd(NATIVE_CRASH_PATH, ["cppcrash"])
+        execute_clear_cmd(JS_CRASH_PATH, ["jscrash", "appfreeze", "cppcrash"])
 
     def _sync_device_time(self):
         # 先同步PC和设备的时间
         iso_time_format = '%Y-%m-%d %H:%M:%S'
         cur_time = get_cst_time().strftime(iso_time_format)
         self.device.execute_shell_command("date '{}'".format(cur_time))
-        self.device.execute_shell_command("hwclock --systohc")
 
     def add_log_address(self, log_file_address, hilog_file_address):
         # record to restart catch log when reboot device
@@ -1073,7 +1099,7 @@ class DeviceLogCollector:
             self.hilog_file_address.remove(hilog_file_address)
 
     def pull_extra_log_files(self, task_name, module_name, dirs: str):
-        if dirs is None:
+        if dirs is None or dirs == 'None':
             return
         dir_list = dirs.split(";")
         if len(dir_list) > 0:
@@ -1083,3 +1109,9 @@ class DeviceLogCollector:
                 os.makedirs(extra_log_path)
             for dir_path in dir_list:
                 self.device.pull_file(dir_path, extra_log_path)
+                # check if delete file
+                if self.device.is_directory(dir_path):
+                    clear_cmd = "rm -f {}/*".format(dir_path)
+                else:
+                    clear_cmd = "rm -f {}*".format(dir_path)
+                self.device.execute_shell_command(clear_cmd)

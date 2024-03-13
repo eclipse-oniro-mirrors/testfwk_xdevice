@@ -16,6 +16,9 @@
 # limitations under the License.
 #
 
+import collections
+import copy
+import json
 import os
 import platform
 import shutil
@@ -23,6 +26,7 @@ import time
 import zipfile
 from importlib import util
 from ast import literal_eval
+from xml.etree import ElementTree
 
 from _core.interface import IReporter
 from _core.plugin import Plugin
@@ -31,16 +35,50 @@ from _core.constants import TestType
 from _core.constants import FilePermission
 from _core.logger import platform_logger
 from _core.exception import ParamError
+from _core.utils import calculate_elapsed_time
+from _core.utils import copy_folder
 from _core.utils import get_filename_extension
 from _core.report.encrypt import check_pub_key_exist
 from _core.report.encrypt import do_rsa_encrypt
 from _core.report.encrypt import get_file_summary
+from _core.report.reporter_helper import CaseResult
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ExecInfo
 from _core.report.reporter_helper import VisionHelper
 from _core.report.reporter_helper import ReportConstant
+from _core.report.repeater_helper import RepeatHelper
+from xdevice import Variables
 
 LOG = platform_logger("ResultReporter")
+
+
+class ResultSummary:
+
+    def __init__(self):
+        self.modules = 0
+        self.runmodules = 0
+        self.tests = 0
+        self.passed = 0
+        self.failed = 0
+        self.blocked = 0
+        self.ignored = 0
+        self.unavailable = 0
+
+    def get_data(self):
+        LOG.info(f"Summary result: modules: {self.modules}, run modules: {self.runmodules}, "
+                 f"total: {self.tests}, passed: {self.passed}, failed: {self.failed}, "
+                 f"blocked: {self.blocked}, ignored: {self.ignored}, unavailable: {self.unavailable}")
+        data = {
+            "modules": self.modules,
+            "runmodules": self.runmodules,
+            "tests": self.tests,
+            "passed": self.passed,
+            "failed": self.failed,
+            "blocked": self.blocked,
+            "ignored": self.ignored,
+            "unavailable": self.unavailable
+        }
+        return data
 
 
 @Plugin(type=Plugin.REPORTER, id=TestType.all)
@@ -56,6 +94,13 @@ class ResultReporter(IReporter):
         self.parsed_data = None
         self.data_helper = None
         self.vision_helper = None
+        self.repeat_helper = None
+        self.summary = ResultSummary()
+
+        # task_record.info数据
+        self._failed_cases = []
+        self.record_params = {}
+        self.record_reports = {}
 
     def __generate_reports__(self, report_path, **kwargs):
         LOG.info("")
@@ -72,7 +117,7 @@ class ResultReporter(IReporter):
             self._generate_vision_reports()
 
             # generate task info record
-            self._generate_task_info_record()
+            self._generate_task_record()
 
             # generate summary ini
             self._generate_summary()
@@ -107,7 +152,217 @@ class ResultReporter(IReporter):
         self.exec_info = task_info
         self.data_helper = DataHelper()
         self.vision_helper = VisionHelper()
+        self.vision_helper.report_path = report_path
+        self.repeat_helper = RepeatHelper(report_path)
         return True
+
+    def _generate_test_report(self):
+        report_template = os.path.join(Variables.res_dir, "template")
+        copy_folder(report_template, self.report_path)
+        content = json.dumps(self._get_summary_data())
+        data_js = os.path.join(self.report_path, "static", "data.js")
+        data_fd = os.open(data_js, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
+        with os.fdopen(data_fd, mode="w", encoding="utf-8") as jsf:
+            jsf.write(f"window.reportData = {content}")
+        test_report = os.path.join(self.report_path, ReportConstant.summary_vision_report).replace("\\", "/")
+        LOG.info(f"Log path: {self.report_path}")
+        LOG.info(f"Generate test report: file:///{test_report}")
+        # 重新生成对象，避免在retry场景数据统计有误
+        self.summary = ResultSummary()
+
+    def _get_summary_data(self):
+        modules = []
+        for data_report, _ in self.data_reports:
+            if data_report.endswith(ReportConstant.summary_data_report):
+                continue
+            info = self._parse_module(data_report)
+            if info is not None:
+                modules.append(info)
+        if self.summary.failed != 0 or self.summary.blocked != 0 or self.summary.unavailable != 0:
+            from xdevice import Scheduler
+            Scheduler.is_need_auto_retry = True
+        data = {
+            "exec_info": self._get_exec_info(),
+            "summary": self.summary.get_data(),
+            "modules": modules,
+        }
+        return data
+
+    def _get_exec_info(self):
+        start_time = self.task_info.test_time
+        end_time = time.strftime(ReportConstant.time_format, time.localtime())
+        test_time = "%s/ %s" % (start_time, end_time)
+        execute_time = calculate_elapsed_time(
+            time.mktime(time.strptime(start_time, ReportConstant.time_format)),
+            time.mktime(time.strptime(end_time, ReportConstant.time_format)))
+        host_info = platform.platform()
+        device_name = getattr(self.task_info, ReportConstant.device_name, "None")
+        device_type = getattr(self.task_info, ReportConstant.device_label, "None")
+        platform_info = getattr(self.task_info, ReportConstant.platform, "None")
+        test_type = getattr(self.task_info, ReportConstant.test_type, "None")
+
+        # 为报告文件summary.ini提供数据
+        exec_info = ExecInfo()
+        exec_info.device_name = device_name
+        exec_info.device_label = device_type
+        exec_info.execute_time = execute_time
+        exec_info.host_info = host_info
+        exec_info.log_path = self.report_path
+        exec_info.platform = platform_info
+        exec_info.test_time = test_time
+        exec_info.test_type = test_type
+        self.exec_info = exec_info
+
+        info = {
+            "platform": platform_info,
+            "test_type": test_type,
+            "device_name": device_name,
+            "device_type": device_type,
+            "test_time": test_time,
+            "execute_time": execute_time,
+            "host_info": host_info
+        }
+        return info
+
+    def _parse_module(self, xml_file):
+        """解析测试模块"""
+        file_name = os.path.basename(xml_file)
+        try:
+            ele_module = ElementTree.parse(xml_file).getroot()
+        except ElementTree.ParseError:
+            LOG.error(f"parse module result error, result file {file_name}")
+            return None
+        module = ResultReporter._count_result(ele_module)
+        module_name = file_name[:-4] if module.name == "" else module.name
+        suites = [self._parse_testsuite(ele_suite) for ele_suite in ele_module]
+
+        # 为报告文件task_record.info提供数据
+        self.record_reports.update({module_name: xml_file})
+        if len(self._failed_cases) != 0:
+            self.record_params.update({module_name: copy.copy(self._failed_cases)})
+            self._failed_cases.clear()
+
+        self.summary.modules += 1
+        self.summary.tests += module.tests
+        self.summary.passed += module.passed
+        self.summary.failed += module.failed
+        self.summary.blocked += module.blocked
+        self.summary.ignored += module.ignored
+        if module.unavailable == 0:
+            self.summary.runmodules += 1
+        else:
+            self.summary.unavailable += 1
+
+        module_report, module_time = module.report, module.time
+        if len(suites) == 1 and suites[0].get(ReportConstant.name) == module_name:
+            report = suites[0].get(ReportConstant.report)
+            if report != "":
+                module_report = report
+            module_time = suites[0].get(ReportConstant.time)
+        info = {
+            "name": module_name,
+            "report": module_report,
+            "time": module_time,
+            "execute_time": calculate_elapsed_time(0, module_time),
+            "tests": module.tests,
+            "passed": module.passed,
+            "failed": module.failed,
+            "blocked": module.blocked,
+            "ignored": module.ignored,
+            "unavailable": module.unavailable,
+            "passingrate": "0%" if module.tests == 0 else "{:.0%}".format(module.passed / module.tests),
+            "productinfo": ResultReporter._parse_product_info(ele_module),
+            "suites": suites
+        }
+        return info
+
+    def _parse_testsuite(self, ele_suite):
+        """解析测试套"""
+        suite = ResultReporter._count_result(ele_suite)
+        cases = [self._parse_testcase(case) for case in ele_suite]
+        info = {
+            "name": suite.name,
+            "report": suite.report,
+            "time": suite.time,
+            "tests": suite.tests,
+            "passed": suite.passed,
+            "failed": suite.failed,
+            "blocked": suite.blocked,
+            "ignored": suite.ignored,
+            "passingrate": "0%" if suite.tests == 0 else "{:.0%}".format(suite.passed / suite.tests),
+            "cases": cases
+        }
+        return info
+
+    def _parse_testcase(self, ele_case):
+        """解析测试用例"""
+        name = ele_case.get(ReportConstant.name)
+        class_name = ele_case.get(ReportConstant.class_name, "")
+        result = ResultReporter._get_case_result(ele_case)
+        if result != CaseResult.passed:
+            self._failed_cases.append(f"{class_name}#{name}")
+        return [name, class_name, result, ResultReporter._parse_time(ele_case),
+                ele_case.get(ReportConstant.message, ""), ele_case.get(ReportConstant.report, "")]
+
+    @staticmethod
+    def _parse_time(ele):
+        try:
+            _time = float(ele.get(ReportConstant.time, "0"))
+        except ValueError:
+            _time = 0.0
+            LOG.error("parse test time error, set it to 0.0")
+        return _time
+
+    @staticmethod
+    def _parse_product_info(ele_module):
+        product_info = ele_module.get(ReportConstant.product_info, "")
+        if product_info == "":
+            return {}
+        try:
+            return literal_eval(product_info)
+        except SyntaxError:
+            return {}
+
+    @staticmethod
+    def _count_result(ele):
+        name = ele.get(ReportConstant.name, "")
+        report = ele.get(ReportConstant.report, "")
+        _time = ResultReporter._parse_time(ele)
+        tests = int(ele.get(ReportConstant.tests, "0"))
+        failed = int(ele.get(ReportConstant.failures, "0"))
+        disabled = ele.get(ReportConstant.disabled, "0")
+        if disabled == "":
+            disabled = "0"
+        errors = ele.get(ReportConstant.errors, "0")
+        if errors == "":
+            errors = "0"
+        blocked = int(disabled) + int(errors)
+        ignored = int(ele.get(ReportConstant.ignored, "0"))
+        unavailable = int(ele.get(ReportConstant.unavailable, "0"))
+
+        tmp_pass = tests - failed - blocked - ignored
+        passed = tmp_pass if tmp_pass > 0 else 0
+
+        Result = collections.namedtuple(
+            'Result',
+            ['name', 'report', 'time', 'tests', 'passed', 'failed', 'blocked', 'ignored', 'unavailable'])
+        return Result(name, report, _time, tests, passed, failed, blocked, ignored, unavailable)
+
+    def _get_case_result(ele_case):
+        result_kind = ele_case.get(ReportConstant.result_kind, "")
+        if result_kind != "":
+            return result_kind
+        result = ele_case.get(ReportConstant.result, "")
+        status = ele_case.get(ReportConstant.status, "")
+        if result == ReportConstant.false and (status == ReportConstant.run or status == ""):
+            return CaseResult.failed
+        if status in [ReportConstant.blocked, ReportConstant.disabled, ReportConstant.error]:
+            return CaseResult.blocked
+        if status in [ReportConstant.skip, ReportConstant.not_run]:
+            return CaseResult.ignored
+        if status in [ReportConstant.unavailable]:
+            return CaseResult.unavailable
+        return CaseResult.passed
 
     def _generate_data_report(self):
         # initial element
@@ -145,7 +400,9 @@ class ResultReporter(IReporter):
             if module_name == ReportConstant.empty_name:
                 module_name = self._get_module_name(data_report, root)
             total = int(root.get(ReportConstant.tests, 0))
-            modules[module_name] = modules.get(module_name, 0) + total
+            if module_name not in modules.keys():
+                modules[module_name] = list()
+            modules[module_name].append(total)
 
             self._append_product_info(test_suites_attributes, root)
             for child in root:
@@ -177,14 +434,7 @@ class ResultReporter(IReporter):
             return False
 
         # set test suites element attributes and children
-        modules_zero = [module_name for module_name, total in modules.items()
-                        if total == 0]
-        if modules_zero:
-            LOG.info("The total tests of %s module is 0", ",".join(
-                modules_zero))
-        test_suites_attributes[ReportConstant.run_modules] = \
-            len(modules) - len(modules_zero)
-        test_suites_attributes[ReportConstant.modules] = len(modules)
+        self._handle_module_tests(modules, test_suites_attributes)
         self.data_helper.set_element_attributes(test_suites_element,
                                                 test_suites_attributes)
         test_suites_element.extend(test_suite_elements)
@@ -299,7 +549,8 @@ class ResultReporter(IReporter):
                  summary.result.ignored, summary.result.unavailable)
         LOG.info("Log path: %s", self.exec_info.log_path)
 
-        if summary.result.failed != 0 or summary.result.blocked != 0 or summary.result.unavailable != 0:
+        if summary.result.failed != 0 or summary.result.blocked != 0 or\
+                summary.result.unavailable != 0:
             from xdevice import Scheduler
             Scheduler.is_need_auto_retry = True
 
@@ -321,6 +572,16 @@ class ResultReporter(IReporter):
             self._generate_vision_report(
                 parsed_data, ReportConstant.failures_title,
                 ReportConstant.failures_vision_report)
+
+        # generate passes vision report
+        if summary.result.passed != 0:
+            self._generate_vision_report(
+                parsed_data, ReportConstant.passes_title, ReportConstant.passes_vision_report)
+
+        # generate ignores vision report
+        if summary.result.ignored != 0:
+            self._generate_vision_report(
+                parsed_data, ReportConstant.ignores_title, ReportConstant.ignores_vision_report)
 
     def _generate_vision_report(self, parsed_data, title, render_target):
 
@@ -395,15 +656,18 @@ class ResultReporter(IReporter):
             return
         summary_ini_content = \
             "[default]\n" \
-            "Platform=%s\n" \
-            "Test Type=%s\n" \
-            "Device Name=%s\n" \
-            "Host Info=%s\n" \
-            "Test Start/ End Time=%s\n" \
-            "Execution Time=%s\n" % (
+            "Platform={}\n" \
+            "Test Type={}\n" \
+            "Device Name={}\n" \
+            "Host Info={}\n" \
+            "Test Start/ End Time={}\n" \
+            "Execution Time={}\n" \
+            "Device Type={}\n".format(
                 self.exec_info.platform, self.exec_info.test_type,
                 self.exec_info.device_name, self.exec_info.host_info,
-                self.exec_info.test_time, self.exec_info.execute_time)
+                self.exec_info.test_time, self.exec_info.execute_time,
+                self.exec_info.device_label)
+
         if self.exec_info.product_info:
             for key, value in self.exec_info.product_info.items():
                 summary_ini_content = "{}{}".format(
@@ -436,13 +700,13 @@ class ResultReporter(IReporter):
                 file_handler.write(bytes(summary_ini_content, 'utf-8'))
             file_handler.flush()
             LOG.info("Generate summary ini: %s", summary_filepath)
+        self.repeat_helper.__generate_repeat_xml__(self.summary_data_path)
 
     def _copy_report(self):
         from xdevice import Scheduler
         if Scheduler.upload_address or self._check_mode(ModeType.decc):
             return
 
-        from xdevice import Variables
         dst_path = os.path.join(Variables.temp_dir, "latest")
         try:
             shutil.rmtree(dst_path, ignore_errors=True)
@@ -461,11 +725,11 @@ class ResultReporter(IReporter):
     def _compress_report_folder(self):
         if self._check_mode(ModeType.decc) or \
                 self._check_mode(ModeType.factory):
-            return
+            return None
 
         if not os.path.isdir(self.report_path):
             LOG.error("'%s' is not folder!" % self.report_path)
-            return
+            return None
 
         # get file path list
         file_path_list = []
@@ -510,7 +774,7 @@ class ResultReporter(IReporter):
         from xdevice import Scheduler
         return Scheduler.mode == mode
 
-    def _generate_task_info_record(self):
+    def _generate_task_record(self):
         # under encryption status, don't handle anything directly
         if check_pub_key_exist() and not self._check_mode(ModeType.decc):
             return
@@ -521,18 +785,16 @@ class ResultReporter(IReporter):
             return
         _, command, report_path = Scheduler.command_queue[-1]
 
-        # handle parsed data
-        record = self._parse_record_from_data(command, report_path)
+        record_info = self._parse_record_from_data(command, report_path)
 
         def encode(content):
             # inner function to encode
             return ' '.join([bin(ord(c)).replace('0b', '') for c in content])
 
         # write into file
-        import json
         record_file = os.path.join(self.report_path,
                                    ReportConstant.task_info_record)
-        _record_json = json.dumps(record, indent=2)
+        _record_json = json.dumps(record_info, indent=2)
 
         with open(file=record_file, mode="wb") as file:
             if Scheduler.mode == ModeType.decc:
@@ -579,7 +841,7 @@ class ResultReporter(IReporter):
         data_reports = dict()
         if self._check_mode(ModeType.decc):
             from xdevice import SuiteReporter
-            for module_name, report_path, report_result in \
+            for module_name, report_path, _ in \
                     SuiteReporter.get_history_result_list():
                 if module_name in module_set:
                     data_reports.update({module_name: report_path})
@@ -600,8 +862,10 @@ class ResultReporter(IReporter):
             return ()
 
         def decode(content):
-            return ''.join([chr(i) for i in [int(b, 2) for b in
-                                             content.split(' ')]])
+            result_list = []
+            for b in content.split(' '):
+                result_list.append(chr(int(b, 2)))
+            return ''.join(result_list)
 
         record_path = os.path.join(history_path,
                                    ReportConstant.task_info_record)
@@ -609,7 +873,6 @@ class ResultReporter(IReporter):
             LOG.error("%s not exists!", ReportConstant.task_info_record)
             return ()
 
-        import json
         from xdevice import Scheduler
         with open(record_path, mode="rb") as file:
             if Scheduler.mode == ModeType.decc:
@@ -634,6 +897,7 @@ class ResultReporter(IReporter):
     def get_result_of_summary_report(cls):
         if cls.summary_report_result:
             return cls.summary_report_result[0][1]
+        return None
 
     @classmethod
     def summary_report_result_exists(cls):
@@ -643,6 +907,7 @@ class ResultReporter(IReporter):
     def get_path_of_summary_report(cls):
         if cls.summary_report_result:
             return cls.summary_report_result[0][0]
+        return None
 
     @classmethod
     def _write_long_size_file(cls, zip_object, long_size_file):
@@ -658,12 +923,10 @@ class ResultReporter(IReporter):
                 shutil.copyfileobj(src, des, 1024 * 1024 * 8)
 
     def _transact_all(self):
-        from xdevice import Variables
-        tools_dir = os.path.join(Variables.res_dir, "tools", "binder.pyc")
-        if not os.path.exists(tools_dir):
+        pyc_path = os.path.join(Variables.res_dir, "tools", "binder.pyc")
+        if not os.path.exists(pyc_path):
             return
-        module_spec = util.spec_from_file_location(
-            "binder", tools_dir)
+        module_spec = util.spec_from_file_location("binder", pyc_path)
         if not module_spec:
             return
         module = util.module_from_spec(module_spec)
@@ -671,3 +934,19 @@ class ResultReporter(IReporter):
         if hasattr(module, "transact") and callable(module.transact):
             module.transact(self, LOG)
         del module
+
+    @classmethod
+    def _handle_module_tests(cls, modules, test_suites_attributes):
+        modules_list = list()
+        modules_zero = list()
+        for module_name, detail_list in modules.items():
+            for total in detail_list:
+                modules_list.append(total)
+                if total == 0:
+                    modules_zero.append(module_name)
+        test_suites_attributes[ReportConstant.run_modules] = \
+            len(modules_list) - len(modules_zero)
+        test_suites_attributes[ReportConstant.modules] = len(modules_list)
+        if modules_zero:
+            LOG.info("The total tests of %s module is 0", ",".join(
+                modules_zero))
