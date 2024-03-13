@@ -173,8 +173,7 @@ class EnvironmentManager(object):
             if not support_labels:
                 continue
             if device_option.label is None:
-                if manager_type != "ManagerDevice" and \
-                        manager_type != "ManagerAospDevice":
+                if manager_type != "ManagerDevice":
                     continue
             else:
                 if support_labels and \
@@ -213,8 +212,7 @@ class EnvironmentManager(object):
                 if device_option.required_manager not in support_types:
                     continue
                 if device_option.label is None:
-                    if manager_type != "ManagerDevice" and \
-                        manager_type != "ManagerAospDevice":
+                    if manager_type != "ManagerDevice":
                         continue
                 else:
                     if support_labels and \

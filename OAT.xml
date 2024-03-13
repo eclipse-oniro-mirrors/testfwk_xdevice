@@ -57,6 +57,9 @@ Note:If the text contains special characters, please escape them according to th
             <filefilter name="binaryFileTypePolicyFilter" desc="Filters for binaryFile" >
                 <filteritem type="filename" name="*.gif" desc="all gif file have check "/>
             </filefilter>
+            <filefilter name="defaultFilter" desc="Filters for default" >
+                <filteritem type="filename" name="*.py" desc="py files do not to be added "/>
+            </filefilter>
         </filefilterlist>
     </oatconfig>
 </configuration>
