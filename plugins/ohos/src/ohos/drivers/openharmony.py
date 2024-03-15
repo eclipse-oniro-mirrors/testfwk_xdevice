@@ -1126,8 +1126,13 @@ class OHYaraTestDriver(IDriver):
     def kernel_packing(self, affected_file, img_file):
         cmd_result = self.config.device.execute_shell_command(f"ls -al {affected_file}").strip()
         LOG.debug("kernel file detail: {}".format(cmd_result))
-        if "No such file or directory" in cmd_result:
-            return False
+        if "No such file or directory" in cmd_result or "Not a directory" in cmd_result:
+            affected_file = self.config.device.execute_shell_command("find /dev/block/platform "
+                                                                     "-name boot_linux").strip()
+            LOG.info("kernel path is : {}".format(affected_file))
+            cmd_result = self.config.device.execute_shell_command(f"ls -al {affected_file}").strip()
+            if "No such file or directory" in cmd_result:
+                return False
         link_file = cmd_result.split(" ")[-1]
         pack_result = self.config.device.execute_shell_command(f"dd if={link_file} of={img_file}")
         LOG.debug("kernel package detail: {}".format(pack_result))
@@ -1145,7 +1150,7 @@ class OHYaraTestDriver(IDriver):
         # 1 解压
         try:
             exec_cmd("7z")
-        except NameError:
+        except (OSError, NameError):
             LOG.error("Please install the command of 7z before running.")
             return False
         decompress_result = exec_cmd(f"7z x {affected_file} -o{local_path}")
@@ -1162,7 +1167,7 @@ class OHYaraTestDriver(IDriver):
         if "error" in parse_result:  
             LOG.error("An error occurred when pasing the kernel file.")
             return False
-        LOG.INFO("Kernel file extraction successful.")
+        LOG.info("Kernel file extraction successful.")
         return output_file
 
     def _get_vul_items(self):
