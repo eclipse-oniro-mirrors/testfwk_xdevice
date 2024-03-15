@@ -1127,7 +1127,8 @@ class OHYaraTestDriver(IDriver):
         cmd_result = self.config.device.execute_shell_command(f"ls -al {affected_file}").strip()
         LOG.debug("kernel file detail: {}".format(cmd_result))
         if "No such file or directory" in cmd_result or "Not a directory" in cmd_result:
-            affected_file = self.config.device.execute_shell_command("find /dev/block/platform -name boot_linux").strip()
+            affected_file = self.config.device.execute_shell_command("find /dev/block/platform "
+                                                                     "-name boot_linux").strip()
             LOG.info("kernel path is : {}".format(affected_file))
             cmd_result = self.config.device.execute_shell_command(f"ls -al {affected_file}").strip()
             if "No such file or directory" in cmd_result:
