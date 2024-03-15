@@ -1149,7 +1149,7 @@ class OHYaraTestDriver(IDriver):
         # 1 解压
         try:
             exec_cmd("7z")
-        except:
+        except (OSError, NameError):
             LOG.error("Please install the command of 7z before running.")
             return False
         decompress_result = exec_cmd(f"7z x {affected_file} -o{local_path}")
