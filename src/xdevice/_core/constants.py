@@ -34,7 +34,6 @@ class DeviceOsType(object):
     """
     default = "default"
     lite = "lite"
-    aosp = "aosp"
 
 
 @dataclass
@@ -209,7 +208,6 @@ class CommonParserType:
 class ManagerType:
     device = "device"
     lite_device = "device_lite"
-    aosp_device = "device_aosp"
 
 
 @dataclass
