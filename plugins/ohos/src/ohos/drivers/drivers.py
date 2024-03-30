@@ -366,6 +366,7 @@ class CppTestDriver(IDriver):
     def _collect_test_to_run(self):
         if self.rerun:
             self.runner.add_instrumentation_arg("gtest_list_tests", True)
+            self.runner.add_instrumentation_arg("gtest_color", "no")
             run_results = self.runner.dry_run()
             self.runner.remove_instrumentation_arg("gtest_list_tests")
             return run_results
