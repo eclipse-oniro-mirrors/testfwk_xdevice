@@ -111,7 +111,6 @@ class CppTestParser(IParser):
         self.state_machine.current_suites = None
 
     def parse(self, line):
-
         if self.state_machine.suites_is_started() or line.startswith(
                 _TEST_RUN_MARKER):
             if line.startswith(_START_TEST_RUN_MARKER):
@@ -376,6 +375,7 @@ class CppTestListParser(IParser):
         self.result_data = ""
 
     def parse(self, line):
+        line = line[:str(line).rfind("\r")]
         class_matcher = re.match('^([a-zA-Z]+.*)\\.$', line)
         method_matcher = re.match('\\s+([a-zA-Z_]+[\\S]*)(.*)?(\\s+.*)?$',
                                   line)
