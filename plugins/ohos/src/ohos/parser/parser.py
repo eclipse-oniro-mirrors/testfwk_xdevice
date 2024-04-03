@@ -57,7 +57,7 @@ _END_JSUNIT_RUN_MARKER = "[end] run suites end"
 _PASS_JSUNIT_MARKER = "[pass]"
 _FAIL_JSUNIT_MARKER = "[fail]"
 _ERROR_JSUNIT_MARKER = "[error]"
-_ACE_LOG_MARKER = "jsapp"
+_ACE_LOG_MARKER = " a0c0d0"
 
 """
 OpenHarmony Kernel Test
@@ -685,13 +685,7 @@ class JSUnitParser(IParser):
     def parse_test_description(self, message):
         pattern = r".*\[(pass|fail|error)\]"
         year = time.strftime("%Y")
-        match_list = ["app Log:", "JSApp:", "JsApp:", "JSAPP:"]
         filter_message = ""
-        for keyword in match_list:
-            if keyword in message:
-                filter_message = \
-                    message.split(r"{0}".format(keyword))[1].strip()
-                break
         end_time = "%s-%s" % \
                    (year, re.match(self.pattern, message).group().strip())
         start_time = "%s-%s" % \
