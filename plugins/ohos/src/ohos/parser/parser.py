@@ -1217,6 +1217,7 @@ class OHJSUnitTestParser(IParser):
         if not test_info.test_name or not test_info.test_class:
             LOG.warning("Test case name or class is invalid. test_name: {}, test_class: {}"
                         .format(test_info.test_name, test_info.test_class))
+            return
         if test_info.run_time == 0 or test_info.run_time < self.test_time:
             test_info.run_time = self.test_time
         for listener in self.get_listeners():
