@@ -685,7 +685,7 @@ class JSUnitParser(IParser):
     def parse_test_description(self, message):
         pattern = r".*\[(pass|fail|error)\]"
         year = time.strftime("%Y")
-        filter_message = ""
+        filter_message = message
         end_time = "%s-%s" % \
                    (year, re.match(self.pattern, message).group().strip())
         start_time = "%s-%s" % \
