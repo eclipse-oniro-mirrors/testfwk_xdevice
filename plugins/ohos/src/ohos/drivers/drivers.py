@@ -593,7 +593,7 @@ class JSUnitTestDriver(IDriver):
         label_list, suite_info, is_suites_end = self.read_device_log_timeout(
             self.hilog, message_list, timeout)
         if not is_suites_end:
-            message_list.append(_ACE_LOG_MARKER + ": [end] run suites end\n")
+            message_list.append(_ACE_LOG_MARKER + "  [end] run suites end\n")
             LOG.warning("there is no suites end")
         if len(label_list[0]) > 0 and sum(label_list[0]) != 0:
             # the problem happened! when the sum of label list is not zero
@@ -611,13 +611,13 @@ class JSUnitTestDriver(IDriver):
                 continue
             # check the start label, then peek next position
             if i + 1 == len(label_list[0]):  # next position at the tail
-                message_list.insert(-1, _ACE_LOG_MARKER + ": [suite end]\n")
+                message_list.insert(-1, _ACE_LOG_MARKER + " [suite end]\n")
                 LOG.warning("there is no suite end")
                 continue
             if label_list[0][i + 1] != 1:  # 0 present the end label
                 continue
             message_list.insert(label_list[1][i + 1],
-                                _ACE_LOG_MARKER + ": [suite end]\n")
+                                _ACE_LOG_MARKER + "  [suite end]\n")
             LOG.warning("there is no suite end")
             for j in range(i + 1, len(label_list[1])):
                 label_list[1][j] += 1  # move the index to next
@@ -700,7 +700,7 @@ class JSUnitTestDriver(IDriver):
                     if not line:
                         time.sleep(5)  # wait for log write to file
                         break
-                    if line.lower().find(_ACE_LOG_MARKER + ":") != -1:
+                    if line.lower().find(_ACE_LOG_MARKER) != -1:
                         if "[suites info]" in line:
                             _, pos = re.match(".+\\[suites info]", line).span()
                             suite_info.append(line[pos:].strip())
