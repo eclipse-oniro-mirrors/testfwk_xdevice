@@ -1075,6 +1075,7 @@ class OHJSUnitTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            line = line[:str(line).rfind("\r")]
             LOG.debug(line)
             self.parse(line)
 
@@ -1213,6 +1214,9 @@ class OHJSUnitTestParser(IParser):
 
     def handle_case_end(self):
         test_info = self.state_machine.test()
+        if not test_info.test_name or not test_info.test_class:
+            LOG.warning("Test case name or class is invalid. test_name: {}, test_class: {}"
+                        .format(test_info.test_name, test_info.test_class))
         if test_info.run_time == 0 or test_info.run_time < self.test_time:
             test_info.run_time = self.test_time
         for listener in self.get_listeners():
@@ -1367,6 +1371,7 @@ class OHJSUnitTestListParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            line = line[:str(line).rfind("\r")]
             self.result_data = "{}{}".format(self.result_data, line)
             self.parse(line)
 
