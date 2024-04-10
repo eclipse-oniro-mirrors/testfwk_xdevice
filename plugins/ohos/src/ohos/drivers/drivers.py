@@ -551,6 +551,7 @@ class RemoteCppTestRunner:
             parser_instance.listeners = listener
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
+        handler.add_process_method(_cpp_output_method)
         return handler
 
 
