@@ -375,7 +375,7 @@ class CppTestListParser(IParser):
         self.result_data = ""
 
     def parse(self, line):
-        line = line[:str(line).rfind("\r")]
+        line = str(line).strip().rstrip("\r")
         class_matcher = re.match('^([a-zA-Z]+.*)\\.$', line)
         method_matcher = re.match('\\s+([a-zA-Z_]+[\\S]*)(.*)?(\\s+.*)?$',
                                   line)
@@ -1075,7 +1075,7 @@ class OHJSUnitTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
-            line = line[:str(line).rfind("\r")]
+            line = str(line).strip().rstrip("\r")
             LOG.debug(line)
             self.parse(line)
 
@@ -1372,7 +1372,7 @@ class OHJSUnitTestListParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
-            line = line[:str(line).rfind("\r")]
+            line = str(line).strip().rstrip("\r")
             self.result_data = "{}{}".format(self.result_data, line)
             self.parse(line)
 

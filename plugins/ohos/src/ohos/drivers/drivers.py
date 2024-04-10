@@ -466,6 +466,7 @@ class RemoteCppTestRunner:
             parser_instance = parser.__class__()
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
+        handler.add_process_method(_cpp_output_method)
 
         command = "cd %s; chmod +x *; ./%s %s" \
                   % (self.config.target_test_path, self.config.module_name,
@@ -1053,3 +1054,19 @@ def _ltp_output_method(handler, output, end_mark="\n"):
         # not return the tail element of this list contains unfinished str,
         # so we set position -1
         return lines
+
+
+def _cpp_output_method(handler, output, end_mark="\n"):
+    content = output
+    if handler.unfinished_line:
+        content = "".join((handler.unfinished_line, content))
+        handler.unfinished_line = ""
+    lines = content.split(end_mark)
+    if content.endswith(end_mark):
+        # get rid of the tail element of this list contains empty str
+        return lines[:-1]
+    else:
+        handler.unfinished_line = lines[-1]
+        # not return the tail element of this list contains unfinished str,
+        # so we set position -1
+        return lines[:-1]
