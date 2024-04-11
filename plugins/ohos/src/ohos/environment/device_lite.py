@@ -129,8 +129,11 @@ class DeviceLite(IDevice):
         self.extend_value = {}
         self.device_lock = threading.RLock()
         self.device_props = {}
+        self.device_description = {}
 
-    def __description__(self):
+    def init_description(self):
+        if self.device_description:
+            return
         desc = {
             DeviceProperties.sn: convert_serial(self.device_sn),
             DeviceProperties.model: self.label,
@@ -139,7 +142,7 @@ class DeviceLite(IDevice):
             DeviceProperties.version: "",
             DeviceProperties.others: self.device_props
         }
-        return desc
+        self.device_description.update(desc)
 
     def __set_serial__(self, device=None):
         for item in device:

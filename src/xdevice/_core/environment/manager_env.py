@@ -62,7 +62,13 @@ class Environment(object):
         return self.devices
 
     def get_description(self):
-        return [d.__description__() for d in self.devices]
+        descriptions = []
+        for d in self.devices:
+            try:
+                descriptions.append(d.device_description)
+            except Exception as e:
+                LOG.error(f"get device description error: {e}")
+        return descriptions
 
     def check_serial(self):
         if self.__get_serial__():
@@ -147,6 +153,7 @@ class EnvironmentManager(object):
                     device.device_sn), device.extend_value)
                 if hasattr(device, "extend_device_props"):
                     device.extend_device_props()
+                device.init_description()
             else:
                 LOG.debug("Require label is '%s', then next" %
                           device_option.label)
