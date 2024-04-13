@@ -33,6 +33,7 @@ from xdevice import Plugin
 from xdevice import get_plugin
 from xdevice import JsonParser
 from xdevice import ShellHandler
+from xdevice import driver_output_method
 from xdevice import TestDescription
 from xdevice import get_device_log_file
 from xdevice import check_result_report
@@ -620,6 +621,7 @@ class OHJSUnitTestRunner:
             parser_instance = parser.__class__()
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
+        handler.add_process_method(driver_output_method)
         command = self._get_dry_run_command()
         self.config.device.execute_shell_command(
             command, timeout=self.config.timeout, receiver=handler, retry=0)

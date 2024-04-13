@@ -86,6 +86,7 @@ from _core.testkit.kit import unlock_screen
 from _core.testkit.kit import unlock_device
 from _core.testkit.kit import get_class
 from _core.driver.parser_lite import ShellHandler
+from _core.driver.parser_lite import driver_output_method
 from _core.report.encrypt import check_pub_key_exist
 from _core.utils import get_file_absolute_path
 from _core.utils import check_result_report
@@ -144,7 +145,7 @@ from _core.report.reporter_helper import DataHelper
 from _core.report.__main__ import main_report
 from _core.command.console import Console
 
-VERSION = "2.30.0.1104"
+VERSION = "2.39.0.1042"
 
 __all__ = [
     "VERSION",
@@ -232,6 +233,7 @@ __all__ = [
     "unlock_device",
     "get_class",
     "ShellHandler",
+    "driver_output_method",
     "ResultCode",
     "check_pub_key_exist",
     "check_result_report",
