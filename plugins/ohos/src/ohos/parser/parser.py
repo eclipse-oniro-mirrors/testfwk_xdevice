@@ -96,6 +96,7 @@ class CppTestParser(IParser):
         if not self.state_machine.suites_is_started():
             self.state_machine.trace_logs.extend(lines)
         for line in lines:
+            line = str(line).strip().rstrip("\r")
             LOG.debug(line)
             self.parse(line)
 
@@ -366,6 +367,7 @@ class CppTestListParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            line = str(line).strip().rstrip("\r")
             self.result_data = "{}{}\n".format(self.result_data, line)
             self.parse(line)
 
@@ -375,7 +377,6 @@ class CppTestListParser(IParser):
         self.result_data = ""
 
     def parse(self, line):
-        line = str(line).strip().rstrip("\r")
         class_matcher = re.match('^([a-zA-Z]+.*)\\.$', line)
         method_matcher = re.match('\\s+([a-zA-Z_]+[\\S]*)(.*)?(\\s+.*)?$',
                                   line)
