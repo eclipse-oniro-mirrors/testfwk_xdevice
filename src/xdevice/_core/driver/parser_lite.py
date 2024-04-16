@@ -22,9 +22,29 @@ from _core.interface import IParser
 from _core.report.encrypt import check_pub_key_exist
 from _core.logger import platform_logger
 
-__all__ = ["ShellHandler"]
+__all__ = ["ShellHandler", "driver_output_method"]
 
 LOG = platform_logger("ParserLite")
+
+
+def driver_output_method(handler, output, end_mark="\n"):
+    """
+    Some driver output should remove last line when last line is not finish
+    Such as ltp driver, cpp driver, new js driver
+    """
+    content = output
+    if handler.unfinished_line:
+        content = "".join((handler.unfinished_line, content))
+        handler.unfinished_line = ""
+    lines = content.split(end_mark)
+    if content.endswith(end_mark):
+        # get rid of the tail element of this list contains empty str
+        return lines[:-1]
+    else:
+        handler.unfinished_line = lines[-1]
+        # not return the tail element of this list contains unfinished str,
+        # so we set position -1
+        return lines[:-1]
 
 
 class ShellHandler:

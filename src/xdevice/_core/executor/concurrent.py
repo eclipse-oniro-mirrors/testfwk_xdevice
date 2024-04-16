@@ -93,6 +93,7 @@ class DriversThread(threading.Thread):
         self.thread_id = None
         self.error_message = ""
         self.module_config_kits = None
+        self.start_time = time.time()
 
     def set_listeners(self, listeners):
         self.listeners = listeners
@@ -108,9 +109,8 @@ class DriversThread(threading.Thread):
     def run(self):
         from xdevice import Scheduler
         LOG.debug("Thread id: %s start" % self.thread_id)
-        start_time = time.time()
-        execute_message = ExecuteMessage('', self.environment,
-                                         self.test_driver, self.thread_id)
+        execute_message = ExecuteMessage(
+            '', self.environment, self.test_driver, self.thread_id)
         driver, test = None, None
         try:
             if self.test_driver and Scheduler.is_execute:
@@ -143,7 +143,7 @@ class DriversThread(threading.Thread):
 
         finally:
             self._do_common_module_kit_teardown()
-            self._handle_finally(driver, execute_message, start_time, test)
+            self._handle_finally(driver, test, execute_message)
 
     @staticmethod
     def reset_device(config):
@@ -152,12 +152,9 @@ class DriversThread(threading.Thread):
                 device.reboot()
 
     @staticmethod
-    def _write_device_to_report(result_xml, environment):
-        """write device to result file"""
-        if not os.path.exists(result_xml) or environment is None:
-            return
-        desc = environment.get_description()
-        if not desc:
+    def update_report_xml(result_xml, props):
+        """update devices, start time, end time, etc. to the result file"""
+        if not os.path.exists(result_xml) or not props:
             return
         try:
             root = ElementTree.parse(result_xml).getroot()
@@ -165,22 +162,36 @@ class DriversThread(threading.Thread):
             LOG.error(f"parse result xml error! xml file {result_xml}")
             LOG.error(f"error message: {e}")
             return
-        root.set("devices", literal_eval(str(desc)))
+        for k, v in props.items():
+            if k == ReportConstant.devices:
+                v = literal_eval(str(v))
+            root.set(k, v)
         result_fd = os.open(result_xml, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
         with os.fdopen(result_fd, mode="w", encoding="utf-8") as result_file:
             result_file.write(ElementTree.tostring(root).decode())
 
-    def _handle_finally(self, driver, execute_message, start_time, test):
+    def _handle_finally(self, driver, test, execute_message):
         from xdevice import Scheduler
-        source_content = (self.test_driver[1].source.source_file
-                          or self.test_driver[1].source.source_string)
+        source_content = test.source.source_file or test.source.source_string
+        end_time = time.time()
         LOG.info("Executed: %s, Execution Time: %s" % (
-            source_content, calculate_elapsed_time(start_time, time.time())))
+            source_content, calculate_elapsed_time(self.start_time, end_time)))
 
         # inherit history report under retry mode
         if driver and test:
             execute_result = driver.__result__()
-            self._write_device_to_report(execute_result, driver.config.environment)
+
+            # update result xml
+            update_props = {
+                ReportConstant.start_time: time.strftime(
+                    ReportConstant.time_format, time.localtime(int(self.start_time))),
+                ReportConstant.end_time: time.strftime(
+                    ReportConstant.time_format, time.localtime(int(end_time))),
+                ReportConstant.test_type: test.source.test_type
+            }
+            if self.environment is not None:
+                update_props.update({ReportConstant.devices: self.environment.get_description()})
+            self.update_report_xml(execute_result, update_props)
             LOG.debug("Execute result: %s" % execute_result)
             if getattr(self.task.config, "history_report_path", ""):
                 execute_result = self._inherit_execute_result(

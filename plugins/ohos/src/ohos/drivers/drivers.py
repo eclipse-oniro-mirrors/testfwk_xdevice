@@ -20,23 +20,18 @@ import os
 import re
 import time
 import json
-import shutil
-import zipfile
-import tempfile
 import stat
-from dataclasses import dataclass
 
 from xdevice import ConfigConst
 from xdevice import ParamError
-from xdevice import ExecuteTerminate
 from xdevice import IDriver
 from xdevice import platform_logger
 from xdevice import Plugin
 from xdevice import get_plugin
 from xdevice import JsonParser
 from xdevice import ShellHandler
+from xdevice import driver_output_method
 from xdevice import TestDescription
-from xdevice import ResourceManager
 from xdevice import get_device_log_file
 from xdevice import check_result_report
 from xdevice import get_kit_instances
@@ -48,22 +43,9 @@ from xdevice import CommonParserType
 from xdevice import FilePermission
 from xdevice import CollectingTestListener
 from xdevice import ShellCommandUnresponsiveException
-from xdevice import HapNotSupportTest
-from xdevice import HdcCommandRejectedException
-from xdevice import HdcError
-from xdevice import DeviceConnectorType
-from xdevice import get_filename_extension
-from xdevice import junit_para_parse
 from xdevice import gtest_para_parse
-from xdevice import reset_junit_para
-from xdevice import disable_keyguard
-from xdevice import unlock_screen
-from xdevice import unlock_device
-from xdevice import get_cst_time
 
 from ohos.environment.dmlib import process_command_ret
-from ohos.environment.dmlib import DisplayOutputReceiver
-from ohos.testkit.kit import junit_dex_para_parse
 from ohos.parser.parser import _ACE_LOG_MARKER
 
 __all__ = ["CppTestDriver", "DexTestDriver", "HapTestDriver",
@@ -466,7 +448,7 @@ class RemoteCppTestRunner:
             parser_instance = parser.__class__()
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
-        handler.add_process_method(_cpp_output_method)
+        handler.add_process_method(driver_output_method)
 
         command = "cd %s; chmod +x *; ./%s %s" \
                   % (self.config.target_test_path, self.config.module_name,
@@ -551,7 +533,7 @@ class RemoteCppTestRunner:
             parser_instance.listeners = listener
             parser_instances.append(parser_instance)
         handler = ShellHandler(parser_instances)
-        handler.add_process_method(_cpp_output_method)
+        handler.add_process_method(driver_output_method)
         return handler
 
 
@@ -1055,19 +1037,3 @@ def _ltp_output_method(handler, output, end_mark="\n"):
         # not return the tail element of this list contains unfinished str,
         # so we set position -1
         return lines
-
-
-def _cpp_output_method(handler, output, end_mark="\n"):
-    content = output
-    if handler.unfinished_line:
-        content = "".join((handler.unfinished_line, content))
-        handler.unfinished_line = ""
-    lines = content.split(end_mark)
-    if content.endswith(end_mark):
-        # get rid of the tail element of this list contains empty str
-        return lines[:-1]
-    else:
-        handler.unfinished_line = lines[-1]
-        # not return the tail element of this list contains unfinished str,
-        # so we set position -1
-        return lines[:-1]

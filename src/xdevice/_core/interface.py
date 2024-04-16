@@ -102,7 +102,7 @@ class IDevice(ABC):
         pass
 
     @abstractmethod
-    def __description__(self):
+    def init_description(self):
         pass
 
     @classmethod

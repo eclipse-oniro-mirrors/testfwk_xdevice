@@ -202,12 +202,15 @@ class Device(IDevice):
         self.forward_ports_abc = []
         self.proxy_listener = None
         self.device_props = {}
+        self.device_description = {}
 
     def __eq__(self, other):
         return self.device_sn == other.__get_serial__() and \
             self.device_os_type == other.device_os_type
 
-    def __description__(self):
+    def init_description(self):
+        if self.device_description:
+            return
         desc = {
             DeviceProperties.sn: convert_serial(self.device_sn),
             DeviceProperties.model: self.get_property("const.product.model"),
@@ -216,7 +219,7 @@ class Device(IDevice):
             DeviceProperties.version: self.get_property("const.product.software.version"),
             DeviceProperties.others: self.device_props
         }
-        return desc
+        self.device_description.update(desc)
 
     def __set_serial__(self, device_sn=""):
         self.device_sn = device_sn
