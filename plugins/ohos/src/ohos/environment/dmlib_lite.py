@@ -26,7 +26,6 @@ from ohos.exception import LiteDeviceTimeout
 from ohos.exception import LiteDeviceConnectError
 from ohos.exception import LiteDeviceExecuteCommandError
 
-
 __all__ = ["generate_report", "LiteHelper"]
 
 CPP_TEST_STANDARD_SIGN = "[==========]"
@@ -42,6 +41,8 @@ CPP_TEST_MOUNT_SIGN = "not mount properly"
 _START_JSUNIT_RUN_MARKER = "[start] start run suites"
 _END_JSUNIT_RUN_MARKER = "[end] run suites end"
 INSTALL_END_MARKER = "resultMessage is install success !"
+PRODUCT_PARAMS_START = "To Obtain Product Params Start"
+PRODUCT_PARAMS_END = "To Obtain Product Params End"
 
 PATTERN = re.compile(r'\x1B(\[([0-9]{1,2}(;[0-9]{1,2})*)?m)*')
 TIMEOUT = 90
@@ -87,6 +88,12 @@ def check_read_test_end(result=None, input_command=None):
                                                 error_no="00402")
     elif input_command.startswith("zcat"):
         return False
+    elif input_command == "uname":
+        if "Linux" in result_output and "# " in result_output:
+            return False
+    elif input_command.startswith("chmod +x") and input_command.find("query.bin"):
+        if PRODUCT_PARAMS_END in result_output:
+            return True
     else:
         if "OHOS #" in result_output or "# " in result_output:
             if input_command == "reboot" or input_command == "reset":
