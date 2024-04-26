@@ -59,6 +59,8 @@ class ReportConstant:
     failures_title = "Failures Report"
     passes_title = "Passes Report"
     ignores_title = "Ignores Report"
+    task_run_log = "task_log.log"
+    module_run_log = "module_run.log"
 
     # exec_info constants
     platform = "platform"

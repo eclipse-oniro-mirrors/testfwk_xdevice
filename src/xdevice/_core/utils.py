@@ -393,13 +393,13 @@ def modify_props(device, local_prop_file, target_prop_file, new_props):
 
 
 def get_device_log_file(report_path, serial=None, log_name="device_log",
-                        device_name="", module_name=None):
+                        device_name="", module_name=None, repeat=1, repeat_round=1):
     from xdevice import Variables
     # new a module folder to save log
+    round_folder = f"round{repeat_round}" if repeat > 1 else ""
+    log_path = os.path.join(report_path, Variables.report_vars.log_dir, round_folder)
     if module_name:
-        log_path = os.path.join(report_path, Variables.report_vars.log_dir, module_name)
-    else:
-        log_path = os.path.join(report_path, Variables.report_vars.log_dir)
+        log_path = os.path.join(log_path, module_name)
     os.makedirs(log_path, exist_ok=True)
 
     serial = serial or time.time_ns()
@@ -769,29 +769,21 @@ def calculate_elapsed_time(begin, end):
     if seconds == 0:
         milliseconds = int((total_seconds - seconds) * 1000)
         if milliseconds > 0:
-            return "{} ms".format(milliseconds)
+            return "{}ms".format(milliseconds)
         else:
-            return "0 second"
+            return "0s"
     d, s = divmod(seconds, 24 * 60 * 60)
-    if d == 1:
-        elapsed.append("1 day")
-    if d > 1:
-        elapsed.append("{} days".format(d))
+    if d >= 1:
+        elapsed.append(f"{d}d")
     h, s = divmod(s, 60 * 60)
-    if h == 1:
-        elapsed.append("1 hour")
-    if h > 1:
-        elapsed.append("{} hours".format(h))
+    if h >= 1:
+        elapsed.append(f"{h}h")
     m, s = divmod(s, 60)
-    if m == 1:
-        elapsed.append("1 minute")
-    if m > 1:
-        elapsed.append("{} minutes".format(m))
-    if s == 1:
-        elapsed.append("1 second")
-    if s > 1:
-        elapsed.append("{} seconds".format(s))
-    return " ".join(elapsed)
+    if m >= 1:
+        elapsed.append(f"{m}m")
+    if s >= 1:
+        elapsed.append(f"{s}s")
+    return "".join(elapsed)
 
 
 def copy_folder(src, dst):

@@ -32,6 +32,8 @@ from _core.constants import ModeType
 from _core.constants import ReportConst
 from _core.executor.request import Request
 from _core.logger import platform_logger
+from _core.logger import redirect_driver_log_begin
+from _core.logger import redirect_driver_log_end
 from _core.plugin import Config
 from _core.utils import calculate_elapsed_time
 from _core.utils import get_instance_name
@@ -106,28 +108,34 @@ class DriversThread(threading.Thread):
     def set_thread_id(self, thread_id):
         self.thread_id = thread_id
 
+    def get_driver_log_file(self, test):
+        log_file = os.path.join(
+            self.task.config.log_path,
+            test.source.module_name, ReportConstant.module_run_log)
+        return log_file
+
     def run(self):
         from xdevice import Scheduler
+        driver, test = None, None
+        if self.test_driver and Scheduler.is_execute:
+            driver, test = self.test_driver
+        if driver is None or test is None:
+            return
+        redirect_driver_log_begin(self.ident, self.get_driver_log_file(test))
         LOG.debug("Thread id: %s start" % self.thread_id)
         execute_message = ExecuteMessage(
             '', self.environment, self.test_driver, self.thread_id)
-        driver, test = None, None
         try:
-            if self.test_driver and Scheduler.is_execute:
-                # construct params
-                driver, test = self.test_driver
-                driver_request = self._get_driver_request(test,
-                                                          execute_message)
-                if driver_request is None:
-                    return
-
-                # setup device
-                self._do_task_setup(driver_request)
-
-                # driver execute
-                self.reset_device(driver_request.config)
-                driver.__execute__(driver_request)
-
+            # construct params
+            driver, test = self.test_driver
+            driver_request = self._get_driver_request(test, execute_message)
+            if driver_request is None:
+                return
+            # setup device
+            self._do_task_setup(driver_request)
+            # driver execute
+            self.reset_device(driver_request.config)
+            driver.__execute__(driver_request)
         except Exception as exception:
             error_no = getattr(exception, "error_no", "00000")
             if self.environment is None:
@@ -144,6 +152,7 @@ class DriversThread(threading.Thread):
         finally:
             self._do_common_module_kit_teardown()
             self._handle_finally(driver, test, execute_message)
+        redirect_driver_log_end(self.ident)
 
     @staticmethod
     def reset_device(config):

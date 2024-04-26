@@ -130,12 +130,14 @@ class OHKernelTestDriver(IDriver):
             self.device_log = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
-                "device_log")
+                "device_log",
+                module_name=request.get_module_name())
 
             self.hilog = get_device_log_file(
                 request.config.report_path,
                 request.config.device.__get_serial__(),
-                "device_hilog")
+                "device_hilog",
+                module_name=request.get_module_name())
 
             device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT |
                                       os.O_APPEND, FilePermission.mode_755)
@@ -297,10 +299,11 @@ class OHJSUnitTestDriver(IDriver):
                     request.root.source.source_string, error_no="00110")
             LOG.debug("Test case file path: %s" % suite_file)
             self.config.device.set_device_report_path(request.config.report_path)
-            self.hilog = get_device_log_file(request.config.report_path,
-                                        request.config.device.__get_serial__() + "_" + request.
-                                        get_module_name(),
-                                        "device_hilog")
+            self.hilog = get_device_log_file(
+                request.config.report_path,
+                request.config.device.__get_serial__(),
+                "device_hilog",
+                module_name=request.get_module_name())
 
             hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                                  0o755)

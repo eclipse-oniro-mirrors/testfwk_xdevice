@@ -17,10 +17,12 @@
 #
 
 import logging
+import os
 import sys
 import time
 import threading
 import queue
+from logging import LogRecord
 from logging.handlers import RotatingFileHandler
 
 from _core.constants import LogType
@@ -31,8 +33,10 @@ from _core.exception import ParamError
 
 __all__ = ["Log", "platform_logger", "device_logger", "shutdown",
            "add_task_file_handler", "remove_task_file_handler",
-           "change_logger_level", "add_encrypt_file_handler",
-           "remove_encrypt_file_handler", "LogQueue"]
+           "change_logger_level",
+           "add_encrypt_file_handler", "remove_encrypt_file_handler",
+           "redirect_driver_log_begin", "redirect_driver_log_end",
+           "LogQueue"]
 
 _HANDLERS = []
 _LOGGERS = []
@@ -42,6 +46,40 @@ MAX_LOG_NUMS = 1000
 MAX_LOG_CACHE_SIZE = 10
 
 
+def _new_file_handler(log_file, log_level, mode="a"):
+    from xdevice import Variables
+    handler = RotatingFileHandler(log_file, mode=mode, maxBytes=MAX_LOG_LENGTH,
+                                  backupCount=MAX_LOG_NUMS, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(Variables.report_vars.log_format))
+    handler.setLevel(log_level)
+    return handler
+
+
+class DriverLogFilter(logging.Filter):
+
+    def __init__(self, thread_id):
+        super().__init__()
+        self.thread_id = thread_id
+
+    def filter(self, record: LogRecord) -> bool:
+        return record.thread == self.thread_id
+
+
+class SchedulerLogFilter(logging.Filter):
+    
+    def __init__(self):
+        super().__init__()
+        self.driver_thread_ids = []
+
+    def filter(self, record: LogRecord) -> bool:
+        return record.thread not in self.driver_thread_ids
+
+    def add_driver_thread_id(self, thread_id):
+        self.driver_thread_ids.append(thread_id)
+
+    def del_driver_thread_id(self, thread_id):
+        self.driver_thread_ids.remove(thread_id)
+
 
 class Log:
     task_file_handler = None
@@ -50,8 +88,11 @@ class Log:
         self.level = logging.INFO
         self.handlers = []
         self.loggers = {}
+        self.task_file_filter = None
         self.task_file_handler = None
         self.encrypt_file_handler = None
+        self.driver_log_handler = {}
+        self._lock = threading.Lock()
 
     def __initial__(self, log_handler_flag, log_file=None, level=None,
                     log_format=None):
@@ -94,14 +135,51 @@ class Log:
                 log.add_task_log(self.task_file_handler)
             return log
 
+    def add_driver_log_handler(self, thread_id, log_file):
+        log_dir = os.path.dirname(log_file)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        try:
+            self._lock.acquire()
+            # 1.仅输出当前驱动执行线程的日志到文件
+            handler = _new_file_handler(log_file, self.level)
+            handler.addFilter(DriverLogFilter(thread_id))
+            # 2.添加驱动执行线程的日志处理器，使得新建的日志对象可用
+            self.handlers.append(handler)
+            # 3.为已有的日志对象添加驱动执行线程日志处理器
+            for _, log in self.loggers.items():
+                log.add_platform_handler(handler)
+            # 4.为调度日志对象记录器，添加当前执行线程的日志过滤标识
+            if self.task_file_filter is not None \
+                    and isinstance(self.task_file_filter, SchedulerLogFilter):
+                self.task_file_filter.add_driver_thread_id(thread_id)
+            self.driver_log_handler.setdefault(thread_id, handler)
+        finally:
+            self._lock.release()
+
+    def del_driver_log_handler(self, thread_id):
+        try:
+            self._lock.acquire()
+            # 为调度日志对象记录器，移除当前执行线程的日志过滤标识
+            if self.task_file_filter is not None \
+                    and isinstance(self.task_file_filter, SchedulerLogFilter):
+                self.task_file_filter.del_driver_thread_id(thread_id)
+            if thread_id in self.driver_log_handler.keys():
+                # 关闭驱动执行线程日志处理器
+                handler = self.driver_log_handler.pop(thread_id)
+                handler.close()
+                # 移除驱动执行线程日志处理器
+                self.handlers.remove(handler)
+                # 为已有的日志对象，移除驱动执行线程日志处理器
+                for _, log in self.loggers.items():
+                    log.del_platform_handler(handler)
+        finally:
+            self._lock.release()
+
     def add_task_file_handler(self, log_file):
-        from xdevice import Variables
-        file_handler = RotatingFileHandler(
-                log_file, mode="a", maxBytes=MAX_LOG_LENGTH, backupCount=MAX_LOG_NUMS,
-                encoding="UTF-8")
-        file_handler.setFormatter(logging.Formatter(
-            Variables.report_vars.log_format))
-        self.task_file_handler = file_handler
+        self.task_file_filter = SchedulerLogFilter()
+        self.task_file_handler = _new_file_handler(log_file, self.level)
+        self.task_file_handler.addFilter(self.task_file_filter)
         for _, log in self.loggers.items():
             log.add_task_log(self.task_file_handler)
 
@@ -150,6 +228,12 @@ class FrameworkLog:
         if cache and isinstance(cache, dict):
             cache.clear()
         self.platform_log.setLevel(level)
+
+    def add_platform_handler(self, handler):
+        self.platform_log.addHandler(handler)
+
+    def del_platform_handler(self, handler):
+        self.platform_log.removeHandler(handler)
 
     def add_task_log(self, handler):
         if self.task_log:
@@ -293,6 +377,20 @@ def shutdown():
         handler.close()
     _HANDLERS.clear()
     _LOGGERS.clear()
+
+
+def redirect_driver_log_begin(thread_id, log_file):
+    plugins = get_plugin(Plugin.LOG, LogType.tool)
+    for log_plugin in plugins:
+        if log_plugin.get_plugin_config().enabled:
+            log_plugin.add_driver_log_handler(thread_id, log_file)
+
+
+def redirect_driver_log_end(thread_id):
+    plugins = get_plugin(Plugin.LOG, LogType.tool)
+    for log_plugin in plugins:
+        if log_plugin.get_plugin_config().enabled:
+            log_plugin.del_driver_log_handler(thread_id)
 
 
 def add_task_file_handler(log_file=None):
