@@ -90,7 +90,7 @@ def check_read_test_end(result=None, input_command=None):
         return False
     elif input_command == "uname":
         if "Linux" in result_output and "# " in result_output:
-            return False
+            return True
     elif input_command.startswith("chmod +x") and input_command.find("query.bin"):
         if PRODUCT_PARAMS_END in result_output:
             return True
