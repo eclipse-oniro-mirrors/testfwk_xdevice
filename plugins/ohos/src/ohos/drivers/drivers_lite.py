@@ -715,9 +715,9 @@ class CTestDriver(IDriver):
                 execute_command_with_timeout(
                     command=reset_cmd, case_type=DeviceTestType.ctest_lite,
                     key=ComType.deploy_com, timeout=timeout, receiver=handler)
-            device_log_file = get_device_log_file(request.config.report_path,
-                                                  request.config.device.
-                                                  __get_serial__())
+            device_log_file = get_device_log_file(
+                request.config.report_path,
+                request.config.device.__get_serial__())
             device_log_file_open = \
                 os.open(device_log_file, os.O_WRONLY | os.O_CREAT |
                         os.O_APPEND, FilePermission.mode_755)
@@ -779,9 +779,9 @@ class CTestDriver(IDriver):
                 execute_command_with_timeout(
                 command=[], case_type=DeviceTestType.ctest_lite,
                 key=ComType.deploy_com, timeout=timeout, receiver=handler)
-            device_log_file = get_device_log_file(request.config.report_path,
-                                                  request.config.device.
-                                                  __get_serial__())
+            device_log_file = get_device_log_file(
+                request.config.report_path,
+                request.config.device.__get_serial__())
             device_log_file_open = \
                 os.open(device_log_file, os.O_WRONLY | os.O_CREAT |
                         os.O_APPEND, FilePermission.mode_755)
@@ -825,9 +825,9 @@ class CTestDriver(IDriver):
             else:
                 handler.__read__(result)
                 handler.__done__()
-            device_log_file = get_device_log_file(request.config.report_path,
-                                                  request.config.device.
-                                                  __get_serial__())
+            device_log_file = get_device_log_file(
+                request.config.report_path,
+                request.config.device.__get_serial__())
             device_log_file_open = \
                 os.open(device_log_file, os.O_WRONLY | os.O_CREAT |
                         os.O_APPEND, FilePermission.mode_755)
@@ -1197,9 +1197,9 @@ class JSUnitTestLiteDriver(IDriver):
                   (self.config.bundle_name, self.config.ability)
         result, _, error = self.config.device.execute_command_with_timeout(
             command=command, timeout=300, receiver=handler)
-        device_log_file = get_device_log_file(request.config.report_path,
-                                              request.config.device.
-                                              __get_serial__())
+        device_log_file = get_device_log_file(
+            request.config.report_path,
+            request.config.device.__get_serial__())
         device_log_file_open =\
             os.open(device_log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                     FilePermission.mode_755)

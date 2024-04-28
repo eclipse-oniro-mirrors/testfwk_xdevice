@@ -749,6 +749,8 @@ class Scheduler(object):
         driver_thread.set_listeners(self._create_listeners(task))
         driver_thread.start()
         current_driver_threads.setdefault(thread_id, driver_thread)
+        LOG.info(f"Driver executing in thread {driver_thread.ident}")
+        LOG.info(f"Thread id: {thread_id} execute started")
 
     @classmethod
     def _do_taskkit_teardown(cls, used_devices, task_unused_env):
