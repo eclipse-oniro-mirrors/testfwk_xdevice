@@ -24,7 +24,8 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "TEST_DRIVER_SET", "LogType", "CKit",
            "DeviceLabelType", "GTestConst", "ManagerType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
-           "DeviceConnectorType", "AdvanceDeviceOption", "DeviceProperties", "ReportConst"]
+           "DeviceConnectorType", "AdvanceDeviceOption", "DeviceProperties", "ReportConst",
+           "LifeStage", "Platform"]
 
 
 @dataclass
