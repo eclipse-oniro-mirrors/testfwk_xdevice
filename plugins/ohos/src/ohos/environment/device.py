@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import json
 import re
 import time
 import os
@@ -47,7 +48,9 @@ from xdevice import get_file_absolute_path
 from xdevice import Platform
 from xdevice import AppInstallError
 from xdevice import RpcNotRunningError
+from xdevice import Variables
 
+from ohos.constants import Constant
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 from ohos.utils import parse_strings_key_value
@@ -211,15 +214,43 @@ class Device(IDevice):
     def init_description(self):
         if self.device_description:
             return
-        desc = {
-            DeviceProperties.sn: convert_serial(self.device_sn),
-            DeviceProperties.model: self.get_property("const.product.model"),
-            DeviceProperties.type_: self.get_device_type(),
-            DeviceProperties.platform: "OpenHarmony",
-            DeviceProperties.version: self.get_property("const.product.software.version"),
-            DeviceProperties.others: self.device_props
-        }
-        self.device_description.update(desc)
+        try:
+            self.__add_trusted_root_ca()
+            desc = {
+                DeviceProperties.sn: convert_serial(self.device_sn),
+                DeviceProperties.model: self.get_property("const.product.model"),
+                DeviceProperties.type_: self.get_device_type(),
+                DeviceProperties.platform: "OpenHarmony",
+                DeviceProperties.version: self.get_property("const.product.software.version"),
+                DeviceProperties.others: self.device_props
+            }
+            self.device_description.update(desc)
+        except Exception as e:
+            LOG.error("init device description error")
+            LOG.error(e, exc_info=True)
+
+    def __add_trusted_root_ca(self):
+        self.execute_shell_command("mount -o rw,remount /")
+        local = os.path.join(Variables.temp_dir, Constant.TRUSTED_ROOT_CA)
+        remote = Constant.TRUSTED_ROOT_CA_PATH
+        self.pull_file(remote, local)
+        data = {}
+        if os.path.exists(local):
+            try:
+                with open(local, encoding="utf-8") as json_f:
+                    data = json.load(json_f)
+            except ValueError:
+                pass
+        if Constant.TRUSTED_ROOT_CA_KEY in data.keys():
+            LOG.debug("trusted root ca already exists")
+            return
+        LOG.debug("trusted root ca does not exist, push it")
+        data.update({Constant.TRUSTED_ROOT_CA_KEY: Constant.TRUSTED_ROOT_CA_VAL})
+        content = json.dumps(data, indent=4, separators=(",", ":"))
+        json_fd = os.open(local, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
+        with os.fdopen(json_fd, mode="w", encoding="utf-8") as json_f:
+            json_f.write(content)
+        self.push_file(local, remote)
 
     def __set_serial__(self, device_sn=""):
         self.device_sn = device_sn
