@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <script type="text/javascript">
+    function displayMedia() {
+      let video_elements = document.getElementById("logs").getElementsByTagName("video");
+      for (let i = 0; i < video_elements.length; i++) {
+        let a_element = video_elements[i].parentNode;
+        let img_element = video_elements[i];
+        img_element.src = a_element.href;
+        img_element.style.display = "block";
+      }
+      let img_elements = document.getElementById("logs").getElementsByTagName("img");
+      for (let i = 0; i < img_elements.length; i++) {
+        let a_element = img_elements[i].parentNode;
+        let img_element = img_elements[i];
+        img_element.src = a_element.href;
+        img_element.style.display = "block";
+      }
+    }
+
+    function hideMedia() {
+      let video_elements = document.getElementById("logs").getElementsByTagName("video");
+      for (let i = 0; i < video_elements.length; i++) {
+        let a_element = video_elements[i].parentNode;
+        let img_element = video_elements[i];
+        img_element.src = a_element.href;
+        img_element.style.display = "none";
+      }
+      let img_elements = document.getElementById("logs").getElementsByTagName("img");
+      for (let i = 0; i < img_elements.length; i++) {
+        let a_element = img_elements[i].parentNode;
+        let img_element = img_elements[i];
+        img_element.src = a_element.href;
+        img_element.style.display = "none";
+      }
+    }
+
+    function gotoTrace() {
+      let errorMsg = document.getElementsByClassName('col_error')[0].innerHTML;
+      let elements = document.getElementById('logs').getElementsByClassName('error');
+      for (let i = 0; i < elements.length; i++) {
+        let element = elements[i];
+        if (element.innerHTML.indexOf(errorMsg) >= 0) {
+          document.documentElement.scrollTop = element.offsetTop;
+          break;
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-size: 0.875em;
+      margin-right: 50px;
+      margin-left: 50px;
+    }
+
+    a:link {
+      text-decoration: none;
+    }
+
+    #logs div {
+      white-space: pre-wrap;
+    }
+
+    .aw {
+      font-weight: bold;
+      color: #1E90FF;
+    }
+
+    .aw1 {
+      color: #008B45;
+    }
+
+    .aw2 {
+      color: #00CD00;
+    }
+
+    .error,
+    .fail,
+    .failed,
+    .investigated,
+    .unavailable {
+      color: red;
+    }
+
+    .pass,
+    .passed {
+      color: green;
+    }
+
+    .warn,
+    .warning {
+      color: #FFCC00;
+    }
+
+    .operations {
+      background-color: white;
+      position: sticky;
+      top: 0;
+    }
+
+    table.case_result {
+      border-collapse: collapse;
+      border: 1px solid #ddd;
+    }
+
+    table.case_result thead,
+    table.case_result tbody tr {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+    }
+
+    table.case_result tbody {
+      display: block;
+      max-height: 360px;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    table.case_result tbody::-webkit-scrollbar {
+      width: 0;
+    }
+
+    table.case_result th,
+    table.case_result td {
+      padding: 1px 5px;
+      text-align: left;
+      border-right: 1px solid #ddd;
+      border-bottom: 1px solid #ddd;
+    }
+
+    table.case_result th {
+      background: #C6C6C6;
+    }
+
+    table.case_result td {
+      word-break: break-all;
+    }
+
+    .col_name {
+      width: 25em;
+      font-weight: bold;
+    }
+
+    .col_result {
+      width: 6em;
+    }
+
+    .col_begin {
+      width: 10em;
+    }
+
+    .col_elapsed {
+      width: 10em;
+    }
+  </style>
+  <title>{{ suite.name }}</title>
+</head>
+
+<body>
+  <h1>{{ suite.name }}</h1>
+  <h2>Summary</h2>
+  <table>
+    <tbody>
+      <tr>
+        <td>Begin/End/Elapsed:</td>
+        <td>{{ suite.begin }}/{{ suite.end }}/{{ suite.elapsed }}</td>
+      </tr>
+      {% if suite.result %}
+      <tr>
+        <td>Result:</td>
+        <td>{{ suite.result }}</td>
+      </tr>
+      {% endif %}
+      {% if suite.error %}
+      <tr>
+        <td>Error:</td>
+        <td>{{ suite.error | replace('\n', '<br>') }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <table id='cases' class='case_result'>
+    <thead>
+      <tr>
+        <th class='col_name'>Name</th>
+        <th class='col_result'>Result</th>
+        <th class='col_error'>Error</th>
+        <th class='col_begin'>Begin</th>
+        <th class='col_elapsed'>Elapsed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for case in suite.cases %}
+      <tr>
+        <td class='col_name'>
+          <a href='{{ case.report }}'>{{ case.name }}</a>
+        </td>
+        <td class='col_result {{ case.result | lower }}'>{{ case.result }}</td>
+        <td class='col_error error'>{{ case.error | replace('\n', '<br>') }}</td>
+        <td class='col_begin'>{{ case.begin }}</td>
+        <td class='col_elapsed'>{{ case.elapsed }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Execution Log</h2>
+  <div id='opts' class='operations'>
+    <a href="javascript:" onclick="displayMedia()">display media</a> |
+    <a href="javascript:" onclick="hideMedia()">hide media</a> |
+    <a href='javascript:' onclick='gotoTrace()'>goto trace</a>
+  </div>
+  <div id='logs'>
+    {% for log in suite.logs %}
+    <div>{{ log | replace('\n', '<br>') }}</div>
+    {% endfor %}
+  </div>
+</body>
+
+</html>
