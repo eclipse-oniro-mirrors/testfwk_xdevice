@@ -28,7 +28,6 @@ LOCAL_IP = "127.0.0.1"
 LOCAL_PORT = 6001
 URL = "/"
 FORWARD_PORT = 9501
-SCREENRECORDER_COMMAND = "aa {} -b com.huawei.ohos.screenrecorder -a com.huawei.ohos.screenrecorder.ServiceExtAbility"
 
 
 class ScreenAgent:

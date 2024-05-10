@@ -367,6 +367,9 @@ class CppTestListParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            if line.endswith("\r") or line.endswith("\n"):
+                line = str(line).replace("\r", "").replace("\n", "")
+            line = line.strip()
             line = str(line).strip().rstrip("\r")
             self.result_data = "{}{}\n".format(self.result_data, line)
             self.parse(line)
