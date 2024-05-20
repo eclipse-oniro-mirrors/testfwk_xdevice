@@ -57,7 +57,7 @@ _END_JSUNIT_RUN_MARKER = "[end] run suites end"
 _PASS_JSUNIT_MARKER = "[pass]"
 _FAIL_JSUNIT_MARKER = "[fail]"
 _ERROR_JSUNIT_MARKER = "[error]"
-_ACE_LOG_MARKER = " a0c0d0"
+_ACE_LOG_MARKER = [" a0c0d0", " a03d00"]
 
 """
 OpenHarmony Kernel Test
@@ -656,6 +656,7 @@ class JSUnitParser(IParser):
         self.expect_tests_dict = dict()
         self.marked_suite_set = set()
         self.exclude_list = list()
+        self.ace_log_marker = ""
 
     def get_listeners(self):
         return self.listeners
@@ -672,7 +673,7 @@ class JSUnitParser(IParser):
     def parse(self, line):
         if (self.state_machine.suites_is_started() or line.find(
                 _START_JSUNIT_RUN_MARKER) != -1) and \
-                line.lower().find(_ACE_LOG_MARKER) != -1:
+                self._is_match_marker(line):
             if line.find(_START_JSUNIT_RUN_MARKER) != -1:
                 self.handle_suites_started_tag()
             elif line.endswith(_END_JSUNIT_RUN_MARKER):
@@ -888,6 +889,16 @@ class JSUnitParser(IParser):
             for listener in self.get_listeners():
                 suite = copy.copy(test_suite)
                 listener.__ended__(LifeCycle.TestSuite, suite, is_clear=True)
+
+    def _is_match_marker(self, line):
+        if self.ace_log_marker:
+            return line.lower().find(self.ace_log_marker) != -1
+        else:
+            for mark_str in _ACE_LOG_MARKER:
+                if line.lower().find(mark_str) != -1:
+                    self.ace_log_marker = mark_str
+                    return True
+            return False
 
 
 @Plugin(type=Plugin.PARSER, id=CommonParserType.oh_kernel_test)
