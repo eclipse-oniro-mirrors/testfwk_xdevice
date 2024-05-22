@@ -89,7 +89,8 @@ def check_read_test_end(result=None, input_command=None):
     elif input_command.startswith("zcat"):
         return False
     elif input_command == "uname":
-        if "Linux" in result_output and "# " in result_output:
+        if ("Linux" in result_output and "# " in result_output) \
+              or ("OHOS #" in result_output or "#" in result_output):
             return True
     elif input_command.startswith("chmod +x") and input_command.find("query.bin"):
         if PRODUCT_PARAMS_END in result_output:
