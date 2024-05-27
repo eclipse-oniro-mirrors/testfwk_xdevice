@@ -60,6 +60,9 @@ Note:If the text contains special characters, please escape them according to th
             <filefilter name="defaultFilter" desc="Filters for default" >
                 <filteritem type="filename" name="*.py" desc="py files do not to be added "/>
             </filefilter>
+            <filefilter name="binaryFileTypePolicyFilter" desc="Filters for binaryFile" >
+                <filteritem type="filename" name="*.png" desc="all png file have check  "/>
+            </filefilter>
         </filefilterlist>
     </oatconfig>
 </configuration>
