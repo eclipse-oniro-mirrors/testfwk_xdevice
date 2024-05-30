@@ -55,6 +55,12 @@ def _new_file_handler(log_file, log_level, mode="a"):
     return handler
 
 
+def _query_log_level():
+    log_level = getattr(sys, "log_level", logging.INFO) if hasattr(
+        sys, "log_level") else logging.DEBUG
+    return log_level
+
+
 class DriverLogFilter(logging.Filter):
 
     def __init__(self, thread_id):
@@ -142,13 +148,14 @@ class Log:
         try:
             self._lock.acquire()
             # 1.仅输出当前驱动执行线程的日志到文件
-            handler = _new_file_handler(log_file, self.level)
+            log_level = _query_log_level()
+            handler = _new_file_handler(log_file, log_level)
             handler.addFilter(DriverLogFilter(thread_id))
             # 2.添加驱动执行线程的日志处理器，使得新建的日志对象可用
             self.handlers.append(handler)
             # 3.为已有的日志对象添加驱动执行线程日志处理器
             for _, log in self.loggers.items():
-                log.add_platform_handler(handler)
+                log.add_driver_handler(handler)
             # 4.为调度日志对象记录器，添加当前执行线程的日志过滤标识
             if self.task_file_filter is not None \
                     and isinstance(self.task_file_filter, SchedulerLogFilter):
@@ -172,13 +179,14 @@ class Log:
                 self.handlers.remove(handler)
                 # 为已有的日志对象，移除驱动执行线程日志处理器
                 for _, log in self.loggers.items():
-                    log.del_platform_handler(handler)
+                    log.remove_driver_handler(handler)
         finally:
             self._lock.release()
 
     def add_task_file_handler(self, log_file):
         self.task_file_filter = SchedulerLogFilter()
-        self.task_file_handler = _new_file_handler(log_file, self.level)
+        log_level = _query_log_level()
+        self.task_file_handler = _new_file_handler(log_file, log_level)
         self.task_file_handler.addFilter(self.task_file_filter)
         for _, log in self.loggers.items():
             log.add_task_log(self.task_file_handler)
@@ -220,6 +228,7 @@ class FrameworkLog:
         self.platform_log = logging.Logger(name)
         self.task_log = None
         self.encrypt_log = None
+        self.driver_log = None
 
     def set_level(self, level):
         # apply to dynamic change logger level, and
@@ -239,8 +248,7 @@ class FrameworkLog:
         if self.task_log:
             return
         self.task_log = logging.Logger(self.name)
-        log_level = getattr(sys, "log_level", logging.INFO) if hasattr(
-            sys, "log_level") else logging.DEBUG
+        log_level = _query_log_level()
         self.task_log.setLevel(log_level)
         self.task_log.addHandler(handler)
 
@@ -265,6 +273,17 @@ class FrameworkLog:
         self.encrypt_log.removeHandler(handler)
         self.encrypt_log = None
 
+    def add_driver_handler(self, handler):
+        if not self.driver_log:
+            self.driver_log = logging.Logger(self.name)
+            log_level = _query_log_level()
+            self.driver_log.setLevel(log_level)
+        self.driver_log.addHandler(handler)
+
+    def remove_driver_handler(self, handler):
+        if self.driver_log:
+            self.driver_log.removeHandler(handler)
+
     def info(self, msg, *args, **kwargs):
         additional_output = self._get_additional_output(**kwargs)
         updated_msg = self._update_msg(additional_output, msg)
@@ -273,6 +292,8 @@ class FrameworkLog:
             self.task_log.info(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.info(updated_msg, *args)
+        if self.driver_log:
+            self.driver_log.info(updated_msg, *args)
 
     def debug(self, msg, *args, **kwargs):
         additional_output = self._get_additional_output(**kwargs)
@@ -282,6 +303,8 @@ class FrameworkLog:
             self.platform_log.debug(updated_msg, *args)
             if self.task_log:
                 self.task_log.debug(updated_msg, *args)
+            if self.driver_log:
+                self.driver_log.debug(updated_msg, *args)
         else:
             if self.encrypt_log:
                 self.encrypt_log.debug(updated_msg, *args)
@@ -294,6 +317,8 @@ class FrameworkLog:
         self.platform_log.error(updated_msg, *args)
         if self.task_log:
             self.task_log.error(updated_msg, *args)
+        if self.driver_log:
+            self.driver_log.error(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.error(updated_msg, *args)
 
@@ -304,6 +329,8 @@ class FrameworkLog:
         self.platform_log.warning(updated_msg, *args)
         if self.task_log:
             self.task_log.warning(updated_msg, *args)
+        if self.driver_log:
+            self.driver_log.warning(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.warning(updated_msg, *args)
 
@@ -318,6 +345,8 @@ class FrameworkLog:
         self.platform_log.exception(updated_msg, exc_info=exc_info, *args)
         if self.task_log:
             self.task_log.exception(updated_msg, exc_info=exc_info, *args)
+        if self.driver_log:
+            self.driver_log.exception(updated_msg, exc_info=exc_info, *args)
         if self.encrypt_log:
             self.encrypt_log.exception(updated_msg, exc_info=exc_info, *args)
 

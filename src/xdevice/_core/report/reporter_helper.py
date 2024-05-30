@@ -675,7 +675,7 @@ class VisionHelper:
         """Construct product info context and render it to file context"""
         render_result = ""
         for index, device in enumerate(devices, 1):
-            others = device.get("others")
+            others = device.get("others", "")
             if len(others) == 0:
                 continue
             tmp, count = "", 0
