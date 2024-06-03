@@ -167,7 +167,7 @@ class Device(IDevice):
     label = ProductForm.phone
     log = platform_logger("Device")
     device_state_monitor = None
-    reboot_timeout = 2 * 60 * 1000
+    reboot_timeout = 5 * 60 * 1000
     _device_log_collector = None
 
     _proxy = None
