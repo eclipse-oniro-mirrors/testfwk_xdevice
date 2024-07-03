@@ -1052,6 +1052,8 @@ def run_command(device, command):
     stdout = None
     if command.strip() == "remount":
         remount(device)
+    if command.strip() == "target mount":
+        device.connector_command(command.split(" "))
     elif command.strip() == "reboot":
         device.reboot()
     elif command.strip() == "reboot-delay":
