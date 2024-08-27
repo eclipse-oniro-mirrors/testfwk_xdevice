@@ -31,10 +31,12 @@ class StackCaseResult(CaseResult):
 
 @dataclass
 class StackStateRecorder:
-    current_suite_list = []
-    current_test = None
-    trace_logs = []
-    running_test_index = 0
+
+    def __init__(self):
+        self.current_suite_list = []
+        self.current_test = None
+        self.trace_logs = []
+        self.running_test_index = 0
 
     def suite(self, reset=False):
         if reset or not self.current_suite_list:
@@ -62,4 +64,3 @@ class StackStateRecorder:
         if self.current_suite_list:
             return self.current_suite_list.pop()
         return None
-

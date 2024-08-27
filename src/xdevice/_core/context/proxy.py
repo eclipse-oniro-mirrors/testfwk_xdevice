@@ -71,3 +71,13 @@ class Binder:
         from _core.context.center import Context
         if Context.get_scheduler():
             Context.get_scheduler().notify_stage(stage_event)
+
+    @staticmethod
+    def get_tdd_config():
+        from _core.context.tdd import TSD
+        return TSD
+
+    @staticmethod
+    def get_runtime_log():
+        from _core.context.log import RuntimeLogs
+        return RuntimeLogs

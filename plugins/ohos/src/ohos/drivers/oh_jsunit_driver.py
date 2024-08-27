@@ -542,7 +542,7 @@ class OHJSUnitTestRunner:
             listener_fixed.append(listener)
         from xdevice import ListenerType
         plugins = get_plugin(Plugin.LISTENER, ListenerType.stack_report)
-        stack_listener = copy.deepcopy(plugins[0])
+        stack_listener = plugins[0].__class__()
         stack_listener.report_path = self.config.report_path
         listener_fixed.append(stack_listener)
         return listener_fixed
