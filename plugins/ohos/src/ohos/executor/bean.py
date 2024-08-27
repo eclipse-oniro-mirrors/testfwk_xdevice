@@ -17,7 +17,6 @@
 #
 
 import uuid
-from dataclasses import dataclass
 
 from xdevice import SuiteResult
 from xdevice import CaseResult
@@ -29,7 +28,6 @@ class StackCaseResult(CaseResult):
     parent_index = ""
 
 
-@dataclass
 class StackStateRecorder:
 
     def __init__(self):

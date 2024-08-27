@@ -118,8 +118,8 @@ class BaseScheduler(Sub, ABC):
 
     def __execute__(self, task):
         if not self._channel.is_empty():
-            LOG.debug("Run command: {}".format(convert_mac(self._channel.get_last())))
             task_id = str(uuid.uuid1()).split("-")[0]
+            LOG.debug("Run command: {}".format(convert_mac(self._channel.get_last())))
             run_command = self._channel.pop()
             self._channel.append((task_id, run_command, task.config.report_path))
             if self._channel.size() > self.__max_command_size__():
