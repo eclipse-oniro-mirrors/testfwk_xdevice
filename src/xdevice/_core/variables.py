@@ -24,10 +24,10 @@ from dataclasses import dataclass
 
 __all__ = ["Variables"]
 
-SRC_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-MODULES_DIR = os.path.abspath(os.path.dirname(__file__))
+SRC_DIR = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+MODULES_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 TOP_DIR = os.path.abspath(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 sys.path.insert(0, SRC_DIR)
 sys.path.insert(1, MODULES_DIR)
 sys.path.insert(2, TOP_DIR)
@@ -53,7 +53,9 @@ class Variables:
     temp_dir = ""
     report_vars = ReportVariables()
     task_name = ""
+    task_id = ""
     source_code_rootpath = ""
+    config = None
 
 
 def _init_global_config():
@@ -66,7 +68,7 @@ def _init_global_config():
     Variables.res_dir = os.path.abspath(os.path.join(
         MODULES_DIR, "_core", "resource"))
 
-    # create xdevice temp folder
+    # create xdevice temp folder  /temp
     Variables.temp_dir = os.path.join(_get_temp_dir(), "xdevice_data")
     if not os.path.exists(Variables.temp_dir):
         os.makedirs(Variables.temp_dir)
