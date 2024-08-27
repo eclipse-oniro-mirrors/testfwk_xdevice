@@ -23,6 +23,7 @@ from devicetest.log.logger import DeviceTestLog as log
 from devicetest.utils.file_util import create_dir
 from xdevice import stop_standing_subprocess
 from xdevice import DeviceConnectorType
+from xdevice import TestDeviceState
 
 LOCAL_IP = "127.0.0.1"
 LOCAL_PORT = 6001
@@ -114,30 +115,24 @@ class ScreenAgent:
         pass
 
     @classmethod
-    def _do_capture(cls, _device, link, path, ext=".png"):
-        if hasattr(_device, "is_oh"):
-            remote = "/data/local/tmp/xdevice_screenshot{}".format(ext)
-            new_ext = ".jpeg"
-            link = link[:link.rfind(ext)] + new_ext
-            path = path[:path.rfind(ext)] + new_ext
-            remote = remote[:remote.rfind(ext)] + new_ext
-            _device.execute_shell_command(
-                "snapshot_display -f {}".format(remote), timeout=60000)
-            # 适配非root
-            if hasattr(_device, "is_root") and not getattr(_device, "is_root", False):
-                time.sleep(1)
-            _device.pull_file(remote, path)
-            _device.execute_shell_command("rm -f {}".format(remote))
+    def _do_capture(cls, _device, link, path, title, ext=".png"):
+        # 设备处于断开状态，不执行截图
+        if hasattr(_device, 'test_device_state') and _device.test_device_state != TestDeviceState.ONLINE:
+            _device.log.warning("device is offline")
+            return '', ''
+
+        if hasattr(_device, "capture"):
+            # 截图需要设备对象实现capture方法
+            link, path = _device.capture(link, path, ext)
+            # 压缩图片为80%
+            cls.compress_image(path)
         else:
-            remote = "/data/local/tmp/screen.png"
-            _device.connector.shell("screencap -p {}".format(remote), timeout=60000)
-            _device.pull_file(remote, path, timeout=30000)
-            _device.execute_shell_command("rm -f {}".format(remote))
-            try:
-                # 压缩图片为80%
-                cls.compress_image(path)
-            except NameError:
-                pass
+            _device.log.debug("The device not implement capture function, don't capture!")
+        if path and link:
+            _device.log.info(
+                '<a href="{}" target="_blank">Screenshot: {}'
+                '<img style="display: block;" {} title="{}" src="{}"/>'
+                '</a>'.format(link, path, cls.resize_image(path), title, link))
         return path, link
 
     @classmethod
@@ -149,20 +144,24 @@ class ScreenAgent:
         """
         path, link = cls.get_image_dir_path(_device, name, ext, exe_type=exe_type)
         # 截图文件后缀在方法内可能发生更改
-        path, link = cls._do_capture(_device, link, path, ext)
-        _device.log.info(
-            '<a href="{}" target="_blank">Screenshot: {}<img style="display: none;" {}/>'
-            '</a>'.format(link, path, cls.resize_image(path)))
-        return path, link
+        return cls._do_capture(_device, link, path, name, ext)
 
     @classmethod
-    def capture_step_picture(cls, _device, name, ext=".png"):
+    def capture_step_picture(cls, file_name, step_name, _device, ext=".png"):
+        """截取step步骤图片并保存
+        file_name: str, 保存的图片名称
+        step_name: str, step步骤名称
+        _device  : object, the device object to capture
+        ext : str, 保存图片后缀,支持".png"、".jpg"格式
         """
-        @summary: 截取step步骤图片并保存
-        @param  name: 保存的图片名称,通过getTakePicturePath方法获取保存全路径
-                ext: 保存图片后缀,支持".png"、".jpg"格式
-        """
-        return None, ""
+        try:
+            path, save_name = cls.get_take_picture_path(_device, file_name, ext, exe_type="stepImage")
+            link = os.path.join(DeccVariable.cur_case().name, save_name)
+            # 截图文件后缀在方法内可能发生更改
+            return cls._do_capture(_device, link, path, step_name, ext)
+        except Exception as e:
+            log.error(f"take screenshot on step failed, reason: {e}")
+        return '', ''
 
     @classmethod
     def compress_image(cls, img_path, ratio=0.5, quality=80):
@@ -184,7 +183,7 @@ class ScreenAgent:
         增加了 exeType参数，默认为takeImage;可取值:takeImage/dumpWindow
         """
         try:
-            if hasattr(_device, "is_oh"):
+            if hasattr(_device, "is_oh") or hasattr(_device, "is_mac"):
                 phone_time = _device.execute_shell_command("date '+%Y%m%d_%H%M%S'").strip()
             else:
                 phone_time = _device.connector.shell("date '+%Y%m%d_%H%M%S'").strip()
@@ -200,15 +199,16 @@ class ScreenAgent:
     @classmethod
     def resize_image(cls, file_path, max_height=480, file_type="image"):
         width, height = 1080, 1920
+        ratio = 1
         try:
-            import cv2
-            from PIL import Image
             if os.path.exists(file_path):
                 if file_type == "image":
+                    from PIL import Image
                     img = Image.open(file_path)
                     width, height = img.width, img.height
                     img.close()
                 elif file_type == "video":
+                    import cv2
                     try:
                         video_info = cv2.VideoCapture(file_path)
                         width = int(video_info.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -221,9 +221,10 @@ class ScreenAgent:
             if height < max_height:
                 return 'width="%d" height="%d"' % (width, height)
             ratio = max_height / height
+        except ImportError:
+            log.error("Pillow or opencv-python is not installed ")
         except ZeroDivisionError:
             log.error("shot image height is 0")
-            ratio = 1
         return 'width="%d" height="%d"' % (width * ratio, max_height)
 
     def terminate(self):

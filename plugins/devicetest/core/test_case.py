@@ -15,20 +15,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import os
+
 import re
 import sys
 import time
 import traceback
 import warnings
 from functools import wraps
+from typing import Union
 
 from xdevice import convert_serial
 from xdevice import get_decode
 from xdevice import get_cst_time
 from xdevice import ConfigConst
+from xdevice import IDevice
+from xdevice import EnvPool
+from xdevice import is_env_pool_run_mode
+from xdevice import AgentMode
+from xdevice import Variables
 
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import BaseTestError
 from devicetest.core.exception import HdcCommandRejectedException
 from devicetest.core.exception import ShellCommandUnresponsiveException
@@ -47,6 +52,7 @@ from devicetest.core.constants import RunSection
 from devicetest.core.constants import RunStatus
 from devicetest.core.variables import DeccVariable
 from devicetest.core.variables import CurCase
+from devicetest.error import ErrorMessage
 from devicetest.utils.time_util import TS
 from devicetest.utils.type_utils import T
 from devicetest.log.logger import DeviceTestLog as log
@@ -63,8 +69,7 @@ def validate_test_name(name):
         BaseTestError is raised if the name is null.
     """
     if name == "" or name is None or len(name) < 1:
-        raise BaseTestError("Invalid test case name found: {}, "
-                            "test method couldn't be none.".format(name))
+        raise BaseTestError(ErrorMessage.TestCase.Code_0203004.format(name))
 
 
 class DeviceRoot:
@@ -82,7 +87,7 @@ class DeviceRoot:
         return DeviceRoot.is_root_device
 
 
-class BaseCase:
+class CoreCase:
     """Base class for all test classes to inherit from.
     This class gets all the controller objects from test_runner and executes
     the test cases requested within itself.
@@ -97,14 +102,14 @@ class BaseCase:
         self.test_method_result = RunResult.PASSED
         self.section = RunSection.SETUP
         self.error_msg = ''
+        self.trace_info = ''
         self.start_time = get_cst_time()
         self.log = self.configs["log"]
         self.set_project(self.configs["project"])
         self.con_fail_times = 0
         self.fail_times = 0
         self.step_flash_fail_msg = False
-        self.pass_through = None
-        self._test_args_para_parse(self.configs.get("testargs", None))
+        self.pass_through = Variables.config.pass_through
         # loop执行场景标记，避免exec_one_testcase覆写loop里设置的结果
         self._is_loop_scenario = False
         # proxy function
@@ -118,34 +123,35 @@ class BaseCase:
     def __exit__(self, *args):
         self._exec_func(self.clean_up)
 
-    def _test_args_para_parse(self, paras):
-        if not paras:
-            return
-        paras = dict(paras)
-        for para_name in paras.keys():
-            para_name = para_name.strip()
-            para_values = paras.get(para_name, [])
-            if para_name == ConfigConst.pass_through:
-                self.pass_through = para_values
-            else:
-                continue
-
-    def _print_error(self, exception, error=None, result=RunResult.FAILED, refresh_method_result=False):
+    def _print_error(self, error: str, result: RunResult = RunResult.FAILED,
+                     refresh_method_result: bool = False, screenshot: bool = True):
+        """打印异常信息
+        error : str, error message
+        result: RunResult, RunResult class variables
+        refresh_method_result: bool, refresh result flag
+        screenshot: bool, 运行keyword/checkepr装饰的接口异常，默认是有失败截图，可将其设为False，可避免重复截图
+        """
+        self.log.error(error)
+        self.error_msg = str(error)
         self.result = result
         if refresh_method_result:
             self.test_method_result = result
-        if error is not None:
-            self.error_msg = self.generate_fail_msg("{}: {}".format(error.Topic, exception))
-            self.log.error(error.Message.en, error_no=error.Code)
-        else:
-            self.error_msg = str(exception)
+        if screenshot:
+            # 在非keyword装饰的接口执行失败的时候，对每个设备进行截图
+            for device in self.devices:
+                ScreenAgent.screen_take_picture([device], False, "shot_on_fail")
+
         trace_info = traceback.format_exc()
-        self.log.error(self.error_msg)
-        self.log.error(trace_info)
         index = self.cur_case.step_index
         if index == -1:
+            self.log.error(self.error_msg)
+            self.log.error(trace_info)
             return
-        UpdateStep(index, result="fail\n" + _get_fail_line_from_exception(trace_info, self.TAG))
+        step_error_id = f'step_error_{index}'
+        self.log.error(f'<span id="{step_error_id}">{self.error_msg}</span>')
+        self.log.error(traceback.format_exc())
+        _error = f'<a href="javascript:" onclick="gotoStep(\'{step_error_id}\')">{self.error_msg}</a>'
+        UpdateStep(index, error=_error)
 
     def setup(self):
         """Setup function that will be called before executing any test case
@@ -184,35 +190,29 @@ class BaseCase:
             # Test skipped.
             _result = True
             self.log.debug("TestSkip")
-
-        except (DeviceNotFound, TestAssertionError, TestTerminated, TestAbortManual,
-                TestError, BaseTestError, DeviceTestError) as exception:
-            error = exception
-            self._print_error(exception, refresh_method_result=True)
+        except (AppInstallError, BaseTestError, DeviceNotFound, DeviceTestError,
+                TestAssertionError, TestError, TestFailure, TestTerminated, TestAbortManual) as exception:
+            # 上述异常，已设置错误码，无需再次设置
+            error = str(exception)
+            self._print_error(error, refresh_method_result=True, screenshot=False)
         except HdcCommandRejectedException as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01211, refresh_method_result=True)
+            error = ErrorMessage.Device.Code_0202302.format(exception)
+            self._print_error(error, refresh_method_result=True)
         except ShellCommandUnresponsiveException as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01212, refresh_method_result=True)
-        except AppInstallError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01213, refresh_method_result=True)
+            error = ErrorMessage.Device.Code_0202304.format(exception)
+            self._print_error(error, refresh_method_result=True)
         except RpcNotRunningError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01440, refresh_method_result=True)
+            error = ErrorMessage.Device.Code_0202305.format(exception)
+            self._print_error(error, refresh_method_result=True)
         except ConnectionRefusedError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01217, refresh_method_result=True)
+            error = ErrorMessage.Device.Code_0202306.format(exception)
+            self._print_error(error, refresh_method_result=True)
         except ImportError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01100, refresh_method_result=True)
-        except TestFailure as exception:
-            error = exception
-            self._print_error(exception, refresh_method_result=True)
+            error = ErrorMessage.TestCase.Code_0203006.format(exception)
+            self._print_error(error, refresh_method_result=True, screenshot=False)
         except Exception as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01203, refresh_method_result=True)
+            error = ErrorMessage.TestCase.Code_0203002.format(exception)
+            self._print_error(error, refresh_method_result=True)
         else:
             # loop执行场景，由其方法内设置测试结果
             if self._is_loop_scenario:
@@ -229,11 +229,9 @@ class BaseCase:
                 error_msg = "test func '{}' The actual input value of " \
                             "the checkpoint is inconsistent with the " \
                             "expected result.".format(test_func.__name__)
-                self.log.error(
-                    ErrorMessage.Error_01200.Message.en.format(error_msg),
-                    error_no=ErrorMessage.Error_01200.Code)
+                self.log.error(error_msg)
                 self.test_method_result = self.result = RunResult.FAILED
-                self.error_msg = "{}:{}".format(ErrorMessage.Error_01200.Topic, error_msg)
+                self.error_msg = error_msg
                 _result = False
 
         finally:
@@ -255,48 +253,30 @@ class BaseCase:
         try:
             func(*args)
             ret = True
-        except (TestError, TestAbortManual, TestTerminated,
-                TestAssertionError, DeviceTestError, DeviceNotFound) as exception:
-            error = exception
-            self._print_error(exception)
+        except (AppInstallError, DeviceNotFound, DeviceTestError,
+                TestAssertionError, TestError, TestAbortManual, TestTerminated) as exception:
+            # 上述异常，已设置错误码，无需再次设置
+            error = str(exception)
+            self._print_error(error, screenshot=False)
         except HdcCommandRejectedException as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01211)
+            error = ErrorMessage.Device.Code_0202302.format(exception)
+            self._print_error(error)
         except ShellCommandUnresponsiveException as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01212)
-        except AppInstallError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01213)
+            error = ErrorMessage.Device.Code_0202304.format(exception)
+            self._print_error(error)
         except RpcNotRunningError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01440)
+            error = ErrorMessage.Device.Code_0202305.format(exception)
+            self._print_error(error)
         except ConnectionRefusedError as exception:
-            error = exception
-            self._print_error(exception, ErrorMessage.Error_01217)
+            error = ErrorMessage.Device.Code_0202306.format(exception)
+            self._print_error(error)
         except Exception as exception:
-            error = exception
-            self._print_error(exception)
+            error = ErrorMessage.TestCase.Code_0203002.format(exception)
+            self._print_error(error)
         finally:
             if self.execption_callback is not None and error is not None:
                 self.execption_callback(error)
         return ret
-
-    def get_error_code(self):
-        if self.section == RunSection.SETUP:
-            self.log.error(ErrorMessage.Error_01202.Message.en,
-                           error_no=ErrorMessage.Error_01202.Code)
-            return ErrorMessage.Error_01202.Topic
-
-        elif self.section == RunSection.TEARDOWN:
-            self.log.error(ErrorMessage.Error_01204.Message.en,
-                           error_no=ErrorMessage.Error_01204.Code)
-            return ErrorMessage.Error_01204.Topic
-
-        else:
-            self.log.error(ErrorMessage.Error_01203.Message.en,
-                           error_no=ErrorMessage.Error_01203.Code)
-            return ErrorMessage.Error_01203.Topic
 
     def _get_test_funcs(self):
         # All tests are selected if test_cases list is None.
@@ -335,7 +315,10 @@ class BaseCase:
         if RunStatus.FINISHED == self.run_setup():
             return
         self.run_tests(test_names)
+        run_result = self.result
         self.run_teardown()
+        # 避免teardown报错导致结果失败1/./
+        self.result = run_result
         if self.case_end_callback is not None:
             self.case_end_callback()
 
@@ -425,22 +408,6 @@ class BaseCase:
             self.error_msg = ""
             self.result = RunResult.PASSED
             return
-        # 设置因fail退出，用例fail
-        if fail_break:
-            self.result = RunResult.FAILED
-            return
-        desc = ["(", ", ".join(fail_models[:4])]
-        if fail_cnt > 4:
-            desc.append(", etc.")
-        desc.append(")")
-        fail_desc = "".join(desc)
-        # 所有model执行失败
-        if fail_cnt == total:
-            self.error_msg = "All test models fail to be executed {}".format(fail_desc)
-            self.result = RunResult.FAILED
-            return
-        # 部分model通过
-        self.error_msg = "Some test models fail to be executed {}".format(fail_desc)
         self.result = RunResult.FAILED
 
     def test_method_end(self, test_name):
@@ -559,11 +526,16 @@ class BaseCase:
 
         if not hasattr(self, "tests"):
             setattr(self, "tests", ["process"])
+        request = self.configs.get("request", None)
+        repeat, repeat_round = 1, 1
+        if request is not None:
+            repeat, repeat_round = request.config.repeat, request.get_repeat_round()
         self.cur_case.set_step_total(1)
-        self.cur_case.set_case_screenshot_dir(self.project.test_suite_path,
-                                              self.project.task_report_dir,
-                                              self.project.cur_case_full_path)
-        self.cur_case.report_path = self.cur_case.case_screenshot_dir + ".html"
+        self.cur_case.set_case_screenshot_dir(
+            self.project.test_suite_path,
+            self.project.task_report_dir,
+            self.project.cur_case_full_path,
+            repeat=repeat, repeat_round=repeat_round)
 
     @classmethod
     def step(cls, _ad, stepepr):
@@ -574,29 +546,98 @@ class BaseCase:
             pass
         return result
 
-    def set_screenrecorder_and_screenshot(self, screenrecorder: bool, screenshot: bool = True):
-        """
-        Set whether to enable screen recording or screenshot for the device in the test case.
-        """
+
+class BaseCase:
+    """Base class for simple test classes to inherit from.
+    This class gets all the controller objects from test_runner and executes
+    the test cases requested within itself.
+    """
+
+    def __init__(self, tag, controllers: Union[IDevice, dict]):
+        self.log = None
+        if isinstance(controllers, dict):
+            if controllers.get("devices", None):
+                if not isinstance(controllers["devices"], list):
+                    devices = list()
+                    devices.append(controllers["devices"])
+                    self.devices = devices
+                else:
+                    self.devices = controllers["devices"]
+        else:
+            devices = list()
+            devices.append(controllers)
+            self.devices = devices
+        self.result = RunResult.PASSED
+        self.error_msg = ''
+        self.trace_info = ''
+        self.start_time = get_cst_time()
+        self.test_method_result = None
+        self._set_device_attr(controllers)
+        self._auto_record_steps = False
+        self.configs = controllers
+        self.configs.setdefault("report_path", EnvPool.report_path)
+        # loop执行场景标记，避免exec_one_testcase覆写loop里设置的结果
+        self._is_loop_scenario = False
+        # proxy function
+        self.execption_callback = None
+        # case end function
+        self.case_end_callback = None
+        self.pass_through = self.configs.get(ConfigConst.testargs, {}).get(ConfigConst.pass_through, {})
+        self.cur_case = DeccVariable.cur_case()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def _set_device_attr(self, controllers):
+        index = 1
         for device in self.devices:
-            setattr(device, "screenshot", screenshot)
-            if hasattr(device, "is_oh"):
-                setattr(device, "screenrecorder", screenrecorder)
+            setattr(self, "Phone{}".format(index), device)
+            setattr(self, "device{}".format(index), device)
+            if controllers.get("screenshot", None):
+                setattr(device, "screenshot", controllers["screenshot"])
+            if controllers.get("screenshot_fail", None):
+                setattr(device, "screenshot_fail", controllers["screenshot_fail"])
+            else:
+                setattr(device, "screenshot_fail", True)
+            # 控制agent的模式, 默认是bin模式
+            mode = controllers.get("agent_mode", AgentMode.bin)
+            device.set_agent_mode(mode)
+
+    def set_auto_record_steps(self, flag):
+        """
+        flag: bool, A switch be used to disable record steps automatically
+        """
+        self._auto_record_steps = flag
+
+    def get_auto_record_steps_status(self):
+        """
+        return if record steps automatically
+        """
+        return self._auto_record_steps
+
+    def get_case_result(self):
+        return self.result
 
 
-class TestCase(BaseCase):
+class TestCase(CoreCase, BaseCase):
     """Base class for all test classes to inherit from.
     This class gets all the controller objects from test_runner and executes
     the test cases requested within itself.
     """
 
     def __init__(self, tag, configs):
-        super().__init__(tag, configs)
-        self.devices = []
-        self.device1 = None
-        self.device2 = None
-        self.set_devices(self.configs["devices"])
-        self.testLoop = 0
+        if is_env_pool_run_mode():
+            BaseCase.__init__(self, tag, configs)
+        else:
+            CoreCase.__init__(self, tag, configs)
+            self.devices = []
+            self.device1 = None
+            self.device2 = None
+            self.set_devices(self.configs["devices"])
+            self.testLoop = 0
 
     def _exec_func(self, func, *args):
         """Executes a function with exception safeguard.
@@ -607,7 +648,7 @@ class TestCase(BaseCase):
             Whatever the function returns, or False if unhandled exception
             occured.
         """
-        return BaseCase._exec_func(self, func, *args)
+        return CoreCase._exec_func(self, func, *args)
 
     def loop_start(self):
         pass
@@ -674,13 +715,10 @@ class TestCase(BaseCase):
 
         if not continues_fail and self.fail_times >= fail_times:
             self.error_msg += " -- Loop fail %d times" % self.fail_times
-            self.log.error(
-                "DeviceTest-[{}] {} fail {} times".format(ErrorMessage.Error_01438.Code, test_name, self.fail_times))
+            self.log.error("{} fail {} times".format(test_name, self.fail_times))
         elif continues_fail and self.con_fail_times >= fail_times:
             self.error_msg += " -- Loop continues fail %d times" % self.con_fail_times
-            self.log.error(
-                "DeviceTest-[{}] {} continues fail {} times".format(ErrorMessage.Error_01438.Code, test_name,
-                                                                    self.con_fail_times))
+            self.log.error("{} continues fail {} times".format(test_name, self.con_fail_times))
         else:
             self.result = RunResult.PASSED
             self.error_msg = ""
@@ -700,10 +738,9 @@ class TestCase(BaseCase):
                 setattr(self, _ad.device_id, _ad)
                 setattr(self, "device{}".format(num), _ad)
         except Exception as error:
-            log.error(ErrorMessage.Error_01218.Message.en,
-                      error_no=ErrorMessage.Error_01218.Code,
-                      is_traceback=True)
-            raise DeviceTestError(ErrorMessage.Error_01218.Topic) from error
+            err_msg = ErrorMessage.TestCase.Code_0203007
+            log.error(err_msg, is_traceback=True)
+            raise DeviceTestError(err_msg) from error
 
     def set_property(self, index):
         if isinstance(self.project.property_config, dict):
@@ -723,19 +760,23 @@ class TestCase(BaseCase):
             log.debug("get property {}:{}".format(property, get_value))
             return get_value
         else:
-            log.warning("'Device' bject has no attribute 'propertys'")
+            log.warning("'Device' object has no attribute 'propertys'")
             return None
 
     def get_case_report_path(self):
-        report_path = self.configs.get("report_path")
-        temp_task = "{}temp{}task".format(os.sep, os.sep)
-        if report_path and isinstance(report_path, str) and temp_task in report_path:
-            report_dir_path = report_path.split(temp_task)[0]
-            return report_dir_path
-        return report_path
+        return self.configs.get("report_path")
 
     def get_case_result(self):
         return self.result
+
+    def set_case_result_content(self, content: dict):
+        """set result content for testcase（供用例拓展结果内容）
+        content: dict, result content
+        """
+        if not isinstance(content, dict) or not content:
+            return
+        self.log.info(f"setting result content: {content}")
+        setattr(self, "result_content", content)
 
     def set_auto_record_steps(self, flag):
         """
@@ -749,7 +790,7 @@ class TestCase(BaseCase):
         DeccVariable.cur_case().auto_record_steps_info = flag
 
 
-class WindowsTestCase(BaseCase):
+class WindowsTestCase(CoreCase):
     """Base class for all windows test classes to inherit from.
     This class gets all the controller objects from test_runner and executes
     the test cases requested within itself.
@@ -767,7 +808,7 @@ class WindowsTestCase(BaseCase):
             Whatever the function returns, or False if unhandled exception
             occurred.
         """
-        return BaseCase._exec_func(self, func, *args)
+        return CoreCase._exec_func(self, func, *args)
 
     def clear_device_callback_method(self):
         pass
@@ -802,13 +843,13 @@ def _get_msg_args(kwargs):
     msg_args = None
     if "failMsg" in kwargs:
         msg_args = kwargs.pop("failMsg")
-        msg_args = '' if msg_args is None \
-            else ErrorMessage.Error_01500.Topic.format(msg_args)
+        msg_args = '' if msg_args is None else ErrorMessage.TestCase.Code_0203002.format(msg_args)
 
     return msg_args, kwargs
 
 
 def _get_ignore_fail():
+    # 忽略定义在teardown里的接口的运行报错，使得teardown里的每个接口都能被执行
     return DeccVariable.cur_case().run_section == RunSection.TEARDOWN
 
 
@@ -818,7 +859,6 @@ def _screenshot_and_flash_error_msg(ignore_fail, is_raise_exception, msg_args,
     if not ignore_fail:
         # 非teardown阶段
         if is_raise_exception:
-            DeccVariable.cur_case().test_method.func_ret.clear()
             _flash_error_msg(msg_args, error_msg)
             raise DeviceTestError(error_msg)
         else:
@@ -843,17 +883,16 @@ def _check_ret_in_run_keyword(func, args, kwargs, _ret, cost_time,
     cur_case = DeccVariable.cur_case()
     if _is_in_top_aw():
         cost = 0 if cost_time is None else round(cost_time / 1000, 3)
-        log.info("<div class='aw'>{} return: {}, cost: {}s</div>".format(aw_info, _ret, cost))
+        log.info("<div class='aw'>{} cost: {}s</div>".format(aw_info, cost))
         cur_case.test_method.func_ret.clear()
         ScreenAgent.screen_take_picture(args, result, func.__name__, is_raise_exception=is_raise_exception)
 
     if not cur_case.checkepr and not result:
         if is_raise_exception and not ignore_fail:
-            _flash_error_msg(msg_args, ErrorMessage.Error_01200.Topic)
+            _flash_error_msg(msg_args, "测试用例执行失败")
             if msg_args:
                 raise DeviceTestError(msg_args)
-            raise TestFailure("{}: Step {} result TestError!".format(
-                ErrorMessage.Error_01200.Topic, aw_info))
+            raise TestFailure(ErrorMessage.TestCase.Code_0203003.format(aw_info))
 
 
 def _check_ret_in_run_checkepr(func, args, kwargs, _ret, ignore_fail,
@@ -864,20 +903,18 @@ def _check_ret_in_run_checkepr(func, args, kwargs, _ret, ignore_fail,
         result = False if isinstance(_ret, bool) and not _ret else True
         ScreenAgent.screen_take_picture(args, result, func.__name__, is_raise_exception=is_raise_exception)
         if not _ret:
+            aw_info = _gen_aw_invoke_info_no_div(func, args, kwargs)
             if cur_case.cur_check_cmd.get_cur_check_status():
                 msg = cur_case.cur_check_cmd.get_cur_check_msg()
             else:
-                msg = "Check Result: {} = {}!".format(
-                    _ret, _gen_aw_invoke_info_no_div(func, args, kwargs))
+                msg = "Check Result: {} = {}!".format(_ret, aw_info)
                 log.info("Return: {}".format(_ret))
 
             if is_raise_exception and not ignore_fail:
-                _flash_error_msg(msg_args, ErrorMessage.Error_01200.Topic)
+                _flash_error_msg(msg_args, "测试用例执行失败")
                 if msg_args:
                     raise DeviceTestError(msg_args)
-                raise TestFailure("{}: Step {} result TestError!".format(
-                    ErrorMessage.Error_01200.Topic,
-                    _gen_aw_invoke_info_no_div(func, args, kwargs)))
+                raise TestFailure(ErrorMessage.TestCase.Code_0203003.format(aw_info))
             else:
                 log.info(msg)
             time.sleep(0.01)  # 避免日志顺序混乱
@@ -890,11 +927,11 @@ def _check_exception(exception, in_method=False):
     # 测试设备断连找不见, 直接抛出异常
     find_result = re.search(r'device \w* not found|offline', str(exception))
     if find_result is not None:
-        log.error(ErrorMessage.Error_01217.Message.en,
-                  error_no=ErrorMessage.Error_01217.Code)
+        err_msg = ErrorMessage.Device.Code_0202306
+        log.error(err_msg)
         if in_method:
             return True
-        raise DeviceNotFound(ErrorMessage.Error_01217.Topic)
+        raise DeviceNotFound(err_msg)
     return False
 
 
@@ -948,69 +985,63 @@ def run_keyword(func, *args, **kwargs):
                 if _ret['code'] != 200 and (_ret['success'] == 'false'
                                             or _ret['success'] is False):
                     raise TestAssertionError('result error.')
-
     except (DeviceNotFound, DeviceTestError) as e:
+        # 设备异常或DeviceTestError，直接将异常抛出，可解决错误码重复添加的问题
         raise e
     except TestAssertionError as exception:
         # 断言的自定义异常优先于aw自定义的failMsg
         _screenshot_and_flash_error_msg(
             ignore_fail, is_raise_exception, str(exception), func_name, args, '')
-
-    except TypeError:
-        log.error(ErrorMessage.Error_01209.Message.en,
-                  error_no=ErrorMessage.Error_01209.Code,
-                  is_traceback=True)
+    except TypeError as exception:
+        error_msg = ErrorMessage.TestCase.Code_0203008.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01209.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except HdcCommandRejectedException as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01211.Message.en,
-                  error_no=ErrorMessage.Error_01211.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202302.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01211.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except ShellCommandUnresponsiveException as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01212.Message.en,
-                  error_no=ErrorMessage.Error_01212.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202304.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01212.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except AppInstallError as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01213.Message.en,
-                  error_no=ErrorMessage.Error_01213.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202307.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01213.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except RpcNotRunningError as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01440.Message.en,
-                  error_no=ErrorMessage.Error_01440.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202305.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01440.Topic)
-
-    except ConnectionRefusedError as error:
-        # 设备掉线connector_clinet连接拒绝
-        log.error(ErrorMessage.Error_01217.Message.en,
-                  error_no=ErrorMessage.Error_01217.Code)
-        raise DeviceNotFound(ErrorMessage.Error_01217.Topic) from error
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
+    except ConnectionRefusedError as exception:
+        # 设备掉线connector client连接拒绝
+        error_msg = ErrorMessage.Device.Code_0202306.format(exception)
+        log.error(error_msg)
+        raise DeviceNotFound(error_msg) from exception
     except Exception as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01210.Message.en,
-                  error_no=ErrorMessage.Error_01210.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.TestCase.Code_0203002.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args,
-            "{}: {}".format(ErrorMessage.Error_01210.Topic, exception))
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     finally:
         DeccVariable.cur_case().test_method.func_ret.append("Ends")
+        # 1.若执行接口出现异常，会进入_screenshot_and_flash_error_msg方法
+        # 2.当接口不是定义在teardown里，且没有接口参数没有设置EXCEPTION=False，
+        # 那么_screenshot_and_flash_error_msg方法会重新抛出DeviceTestError异常
+        # 3.若接口不是定义在teardown里，执行出现异常，且回到了顶层aw，将Starts/Ends计数器清零
+        if is_exception and not ignore_fail and _is_in_top_aw():
+            log.debug('----------finally clear Starts/Ends--------')
+            DeccVariable.cur_case().test_method.func_ret.clear()
+
     if is_exception:
         if _is_in_top_aw():
             DeccVariable.cur_case().test_method.func_ret.clear()
@@ -1036,68 +1067,62 @@ def run_checkepr(func, *args, **kwargs):
         log.debug("step {} execute result: {}".format(func_name, _ret))
         TS.stop()
         is_exception = False
-
     except (DeviceNotFound, DeviceTestError) as e:
+        # 设备异常或DeviceTestError，直接将异常抛出，可解决错误码重复添加的问题
         raise e
     except TestAssertionError as exception:
         _screenshot_and_flash_error_msg(
             ignore_fail, is_raise_exception, str(exception), func_name, args, '')
-
-    except TypeError:
-        log.error(ErrorMessage.Error_01209.Message.en,
-                  error_no=ErrorMessage.Error_01209.Code,
-                  is_traceback=True)
+    except TypeError as exception:
+        error_msg = ErrorMessage.TestCase.Code_0203008.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01209.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except HdcCommandRejectedException as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01211.Message.en,
-                  error_no=ErrorMessage.Error_01211.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202302.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01211.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except ShellCommandUnresponsiveException as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01212.Message.en,
-                  error_no=ErrorMessage.Error_01212.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202304.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01212.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except AppInstallError as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01213.Message.en,
-                  error_no=ErrorMessage.Error_01213.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202307.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01213.Topic)
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     except RpcNotRunningError as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01440.Message.en,
-                  error_no=ErrorMessage.Error_01440.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.Device.Code_0202305.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args, ErrorMessage.Error_01440.Topic)
-
-    except ConnectionRefusedError as error:
-        # 设备掉线connector_clinet连接拒绝
-        log.error(ErrorMessage.Error_01217.Message.en,
-                  error_no=ErrorMessage.Error_01217.Code)
-        raise DeviceNotFound(ErrorMessage.Error_01217.Topic) from error
-
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
+    except ConnectionRefusedError as exception:
+        # 设备掉线connector client连接拒绝
+        error_msg = ErrorMessage.Device.Code_0202306.format(exception)
+        log.error(error_msg, is_traceback=True)
+        raise DeviceNotFound(error_msg) from exception
     except Exception as exception:
         _check_exception(exception)
-        log.error(ErrorMessage.Error_01210.Message.en,
-                  error_no=ErrorMessage.Error_01210.Code,
-                  is_traceback=True)
+        error_msg = ErrorMessage.TestCase.Code_0203002.format(exception)
+        log.error(error_msg, is_traceback=True)
         _screenshot_and_flash_error_msg(
-            ignore_fail, is_raise_exception, msg_args, func_name, args,
-            "{}: {}".format(ErrorMessage.Error_01210.Topic, exception))
+            ignore_fail, is_raise_exception, msg_args, func_name, args, error_msg)
     finally:
         DeccVariable.cur_case().test_method.func_ret.append("Ends")
+        # 1.若执行接口出现异常，会进入_screenshot_and_flash_error_msg方法
+        # 2.当被执行的接口不在teardown阶段里运行，且没有接口参数没有设置EXCEPTION=False，
+        # _screenshot_and_flash_error_msg方法会重新抛出DeviceTestError异常
+        # 3.若执行非teardown的接口出现异常，且回到了顶层aw，将Starts/Ends计数器清零
+        if is_exception and not ignore_fail and _is_in_top_aw():
+            log.debug('----------finally clear Starts/Ends--------')
+            DeccVariable.cur_case().test_method.func_ret.clear()
+
     if is_exception:
         if _is_in_top_aw():
             DeccVariable.cur_case().test_method.func_ret.clear()
@@ -1138,9 +1163,11 @@ def _gen_aw_invoke_info_no_div(func, args, kwargs):
         try:
             _ad = args[0]
             id_strings = []
-            dev_id = getattr(_ad, "device_id", "")
-            if dev_id:
-                id_strings.append(dev_id)
+            _device = getattr(_ad, "_device", None)
+            if _device:
+                dev_alias = getattr(_device, "device_id", "")
+                if dev_alias:
+                    id_strings.append(dev_alias)
             dev_sn = getattr(_ad, "device_sn", "")
             if dev_sn:
                 id_strings.append(convert_serial(dev_sn))
@@ -1163,17 +1190,6 @@ def _gen_aw_invoke_info_no_div(func, args, kwargs):
     return "".join(info_items)
 
 
-def _get_fail_line_from_exception(trace_info, line_keyword):
-    match, lines = -1, trace_info.split("\n")
-    for index, line in enumerate(lines):
-        if line_keyword not in line:
-            continue
-        match = index
-    if match == -1:
-        return trace_info
-    return lines[match].strip() + "\n" + lines[match + 1].strip()
-
-
 def GET_TRACEBACK(_trac=""):
     if _trac == "AW":
         return "".join(traceback.format_exception(*sys.exc_info())), \
@@ -1183,8 +1199,7 @@ def GET_TRACEBACK(_trac=""):
 
 def ASSERT(expect, actual):
     if expect != actual:
-        raise TestFailure("{}: ASSERT TestError, Expect: {}, Actual: {}".format(ErrorMessage.Error_01200.Topic,
-                                                                                expect, actual))
+        raise TestFailure(ErrorMessage.Assertion.Code_0204026.format(expect, actual))
 
 
 def CHECK(message, expect, actual):
@@ -1273,6 +1288,21 @@ def get_report_dir(self=None):
     if isinstance(self, TestCase):
         return self.project.task_report_dir
     return DeccVariable.project.task_report_dir
+
+
+def RecordStep(name, **kwargs):
+    """记录用例操作步骤，并展示在用例报告里
+    name: str, step name, 作为唯一标识，用于更新记录
+    Example:
+        RecordStep("11", result=True)
+        RecordStep("11", result=True, video="a video address")
+    """
+    warnings.warn("RecordStep is deprecated, use Step instead", DeprecationWarning)
+    cur_case = DeccVariable.cur_case()
+    if cur_case is None:
+        log.warning("current case object is none, recording step failed")
+        return
+    cur_case.set_step_info(name, **kwargs)
 
 
 class Property:

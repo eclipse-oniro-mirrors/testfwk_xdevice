@@ -16,35 +16,16 @@
 # limitations under the License.
 #
 import types
-
 from queue import Queue
-from _core.interface import IParser
-from _core.report.encrypt import check_pub_key_exist
-from _core.logger import platform_logger
 
-__all__ = ["ShellHandler", "driver_output_method"]
+from _core.error import ErrorMessage
+from _core.interface import IParser
+from _core.logger import platform_logger
+from _core.report.encrypt import check_pub_key_exist
+
+__all__ = ["ShellHandler"]
 
 LOG = platform_logger("ParserLite")
-
-
-def driver_output_method(handler, output, end_mark="\n"):
-    """
-    Some driver output should remove last line when last line is not finish
-    Such as ltp driver, cpp driver, new js driver
-    """
-    content = output
-    if handler.unfinished_line:
-        content = "".join((handler.unfinished_line, content))
-        handler.unfinished_line = ""
-    lines = content.split(end_mark)
-    if content.endswith(end_mark):
-        # get rid of the tail element of this list contains empty str
-        return lines[:-1]
-    else:
-        handler.unfinished_line = lines[-1]
-        # not return the tail element of this list contains unfinished str,
-        # so we set position -1
-        return lines[:-1]
 
 
 class ShellHandler:
@@ -57,15 +38,13 @@ class ShellHandler:
             if isinstance(parser, IParser):
                 self.parsers.append(parser)
             else:
-                raise TypeError(
-                    "Parser {} must implement IOutputParser interface.".format(
-                        parser, ))
+                raise TypeError(ErrorMessage.InterfaceImplement.Code_0102007.format(parser))
 
     def _process_output(self, output, end_mark="\n"):
-        if self.process_output_methods:
+        if self.process_output_methods and \
+                callable(self.process_output_methods[0]):
             method = self.process_output_methods[0]
-            if callable(method):
-                return method(self, output, end_mark)
+            return method(self, output, end_mark)
         else:
             content = output
             if self.unfinished_line:
@@ -77,8 +56,8 @@ class ShellHandler:
                 return lines[:-1]
             else:
                 self.unfinished_line = lines[-1]
-                # not return the tail element of this list contains unfinished str,
-                # so we set position -1
+                # not return the tail element of this list contains unfinished
+                # str, so we set position -1
                 return lines
 
     def add_process_method(self, func):

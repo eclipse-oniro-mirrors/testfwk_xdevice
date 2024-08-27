@@ -17,19 +17,20 @@
 #
 
 import os
-import xml.dom.minidom
-from xdevice import get_cst_time
+from ast import literal_eval
+from xml.dom import minidom
+from xml.etree import ElementTree
+
+from xdevice import get_cst_time, FilePermission
 from devicetest.core.constants import RunResult
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import DeviceTestError
-from devicetest.log.logger import DeviceTestLog as log
+from devicetest.error import ErrorMessage
+from devicetest.log.logger import DeviceTestLog as Log
 
 
 class ReportConstants:
-    _STRIP_FORMAT_TIME = "%Y-%m-%d-%H-%M-%S-%f"
-    _STRF_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-    _XML_NAME = "report.xml"
-    _FILE_FARMAT = ".xml"
+    time_format = "%Y-%m-%d %H:%M:%S"
+    report_xml = "report.xml"
 
 
 class ReportHandler:
@@ -40,64 +41,59 @@ class ReportHandler:
 
     def generate_test_report(self, test_runner, _test_results=None, report_type="normal"):
         if os.path.exists(self.report_path):
-            dom = xml.dom.minidom.parse(self.report_path)
-            result_node = dom.documentElement
-            return self.report_path, result_node.toxml()
+            root = ElementTree.parse(self.report_path).getroot()
+            return self.report_path, ElementTree.tostring(root).decode()
         try:
-            log.info("start generate test report.")
+            Log.info("start generate test report.")
             test_results = _test_results or test_runner.test_results
 
             start_time = test_runner.start_time
 
-            impl = xml.dom.minidom.getDOMImplementation()
-            dom = impl.createDocument(None, 'testsuites', None)
-            result_node = dom.documentElement
+            testsuites = ElementTree.Element('testsuites')
 
             test_name = test_runner.configs.get("test_name")
             if test_name is not None:
-                result_node.setAttribute("name", test_name)
+                testsuites.set("name", test_name)
             else:
-                result_node.setAttribute("name", ReportConstants._XML_NAME)
-
-            result_node.setAttribute("report_version", "1.0")
+                testsuites.set("name", ReportConstants.report_xml)
 
             if report_type == "xts":
-                tests_total, tests_error = self.report_xts_type(test_results, dom, result_node)
+                tests_total, tests_error = self.report_xts_type(testsuites, test_results)
             else:
-                tests_total, tests_error = self.report_normal_type(test_results, dom, test_name, result_node)
+                tests_total, tests_error = self.report_normal_type(testsuites, test_results, test_name)
 
-            result_node.setAttribute("tests", str(tests_total))
-            result_node.setAttribute("failures", str(tests_error))
-            result_node.setAttribute("disabled", '')
-            result_node.setAttribute("errors", "")
-            result_node.setAttribute("starttime",
-                                     self.get_strftime(start_time))
-            result_node.setAttribute("endtime", self.get_now_strftime())
+            testsuites.set("tests", str(tests_total))
+            testsuites.set("failures", str(tests_error))
+            testsuites.set("disabled", '')
+            testsuites.set("errors", "")
+            testsuites.set("starttime", self.get_strftime(start_time))
+            testsuites.set("endtime", self.get_now_strftime())
+            testsuites.set("report_version", "1.0")
 
-            if not os.path.exists(os.path.dirname(self.report_path)):
-                os.makedirs(os.path.dirname(self.report_path))
-            with open(self.report_path, mode='w',
-                      encoding='utf-8') as fre:
-                dom.writexml(fre, addindent='\t', newl='\n',
-                             encoding="utf-8")
-            return self.report_path, result_node.toxml()
+            os.makedirs(os.path.dirname(self.report_path), exist_ok=True)
+            xml_content = ElementTree.tostring(testsuites).decode()
+            xml_pretty = minidom.parseString(xml_content).toprettyxml(indent="  ")
+
+            result_fd = os.open(self.report_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
+            with os.fdopen(result_fd, mode="w", encoding="utf-8") as result_file:
+                result_file.write(xml_pretty)
+            return self.report_path, xml_content
 
         except Exception as error:
-            log.error(ErrorMessage.Error_01207.Message.en,
-                      error_no=ErrorMessage.Error_01207.Code,
-                      is_traceback=True)
-            raise DeviceTestError(ErrorMessage.Error_01207.Topic) from error
+            err_msg = ErrorMessage.Common.Code_0201003
+            Log.error(err_msg, is_traceback=True)
+            raise DeviceTestError(err_msg) from error
 
         finally:
-            log.info("exit generate test report.")
+            Log.info("exit generate test report.")
 
     def get_strftime(self, stamp_time):
-        return stamp_time.strftime(ReportConstants._STRF_TIME_FORMAT)
+        return stamp_time.strftime(ReportConstants.time_format)
 
     def get_now_strftime(self):
-        return get_cst_time().strftime(ReportConstants._STRF_TIME_FORMAT)
+        return get_cst_time().strftime(ReportConstants.time_format)
 
-    def report_normal_type(self, test_results, dom, test_name, result_node):
+    def report_normal_type(self, testsuites, test_results, test_name):
         tests_total = 0
         tests_error = 0
         for result_info in test_results:
@@ -117,31 +113,36 @@ class ReportHandler:
             report = result_info.get("report", "")
             case_time = case_end_time - case_start_time
 
-            test_case = dom.createElement("testcase")
-            test_case.setAttribute("name", case_name)
-            test_case.setAttribute("status", 'run')
-            test_case.setAttribute("classname", case_name)
-            test_case.setAttribute("level", None)
-            test_case.setAttribute("result", case_result)
-            test_case.setAttribute("result_kind", result)
-            test_case.setAttribute("message", error)
-            test_case.setAttribute("report", report)
+            testcase = ElementTree.Element('testcase')
+            testcase.set("name", case_name)
+            testcase.set("status", 'run')
+            testcase.set("classname", case_name)
+            testcase.set("level", "")
+            testcase.set("result", case_result)
+            testcase.set("result_kind", result)
+            testcase.set("message", error)
+            testcase.set("report", report)
+            # 用例测试结果的拓展内容
+            result_content = result_info.get('result_content')
+            if result_content:
+                testcase.set("result_content", literal_eval(str(result_content)))
 
-            test_suite = dom.createElement("testsuite")
-            test_suite.setAttribute("modulename", test_name)
-            test_suite.setAttribute("name", case_name)
-            test_suite.setAttribute("tests", str(1))
-            test_suite.setAttribute("failures", str(case_error))
-            test_suite.setAttribute("disabled", '0')
-            test_suite.setAttribute("time", "{:.2f}".format(case_time))
-            test_suite.setAttribute("result", case_result)
-            test_suite.setAttribute("result_kind", result)
-            test_suite.setAttribute("report", report)
-            test_suite.appendChild(test_case)
-            result_node.appendChild(test_suite)
+            testsuite = ElementTree.Element('testsuite')
+            testsuite.set("modulename", test_name)
+            testsuite.set("name", case_name)
+            testsuite.set("tests", str(1))
+            testsuite.set("failures", str(case_error))
+            testsuite.set("disabled", '0')
+            testsuite.set("time", "{:.2f}".format(case_time))
+            testsuite.set("result", case_result)
+            testsuite.set("result_kind", result)
+            testsuite.set("report", report)
+
+            testsuite.append(testcase)
+            testsuites.append(testsuite)
         return tests_total, tests_error
 
-    def report_xts_type(self, test_results, dom, result_node):
+    def report_xts_type(self, testsuites, test_results):
         tests_total = 0
         tests_error = 0
         test_suites = {}
@@ -164,32 +165,32 @@ class ReportHandler:
             report = result_info.get("report", "")
             case_time = case_end_time - case_start_time
 
-            test_case = dom.createElement("testcase")
-            test_case.setAttribute("name", case_name)
-            test_case.setAttribute("status", 'run')
-            test_case.setAttribute("classname", module_name)
-            test_case.setAttribute("level", None)
-            test_case.setAttribute("result", case_result)
-            test_case.setAttribute("result_kind", result)
-            test_case.setAttribute("message", error)
-            test_case.setAttribute("report", report)
+            testcase = ElementTree.Element('testcase')
+            testcase.set("name", case_name)
+            testcase.set("status", 'run')
+            testcase.set("classname", module_name)
+            testcase.set("level", "")
+            testcase.set("result", case_result)
+            testcase.set("result_kind", result)
+            testcase.set("message", error)
+            testcase.set("report", report)
 
-            test_suite = dom.createElement("testsuite")
-            test_suite.setAttribute("modulename", module_name)
-            test_suite.setAttribute("name", module_name)
-            test_suite.setAttribute("tests", str(1))
-            test_suite.setAttribute("disabled", '0')
-            test_suite.setAttribute("time", "{:.2f}".format(case_time))
-            test_suite.setAttribute("report", report)
+            testsuite = ElementTree.Element('testsuite')
+            testsuite.set("modulename", module_name)
+            testsuite.set("name", module_name)
+            testsuite.set("tests", str(1))
+            testsuite.set("disabled", '0')
+            testsuite.set("time", "{:.2f}".format(case_time))
+            testsuite.set("report", report)
             if module_name not in test_suites:
-                test_suites[module_name] = {"test_suite": test_suite, "tests": 0, "failures": 0}
-                result_node.appendChild(test_suite)
-            test_suites[module_name]["test_suite"].appendChild(test_case)
+                test_suites[module_name] = {"test_suite": testsuite, "tests": 0, "failures": 0}
+                testsuites.append(testsuite)
+            test_suites[module_name]["test_suite"].append(testcase)
             test_suites[module_name]["tests"] += 1
             tests = test_suites[module_name]["tests"]
             if case_result == "false":
                 test_suites[module_name]["failures"] += 1
             failures = test_suites[module_name]["failures"]
-            test_suites[module_name]["test_suite"].setAttribute("tests", str(tests))
-            test_suites[module_name]["test_suite"].setAttribute("failures", str(failures))
+            test_suites[module_name]["test_suite"].set("tests", str(tests))
+            test_suites[module_name]["test_suite"].set("failures", str(failures))
         return tests_total, tests_error

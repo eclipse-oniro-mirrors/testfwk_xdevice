@@ -16,9 +16,14 @@
 # limitations under the License.
 #
 
+import copy
 import os
 import sys
 
+from xdevice import get_plugin
+from xdevice import ModeType
+from xdevice import ConfigConst
+from xdevice import DeviceLabelType
 from xdevice import TestExecType
 from xdevice import DeviceError
 from xdevice import ParamError
@@ -35,11 +40,15 @@ from xdevice import get_filename_extension
 from xdevice import get_file_absolute_path
 from xdevice import get_kit_instances
 from xdevice import check_result_report
-from xdevice import Scheduler
-from xdevice import LifeStage
+from xdevice import check_mode
+from xdevice import SuiteReporter
+from xdevice import CaseEnd
+from xdevice import Binder
 from xdevice import HostDrivenTestType
-
+from xdevice import Variables
+from devicetest.constants import CKit
 from devicetest.core.constants import DeviceTestMode
+from devicetest.error import ErrorMessage
 
 __all__ = ["DeviceTestDriver", "DeviceTestSuiteDriver"]
 LOG = platform_logger("DeviceTest")
@@ -58,6 +67,81 @@ def _get_dict_test_list(module_path, file_name):
     return test_list
 
 
+def start_smart_perf(config, kits):
+    if not hasattr(config, ConfigConst.kits_in_module):
+        return
+    if CKit.smartperf not in config.get(ConfigConst.kits_in_module):
+        return
+    sp_kits = get_plugin(Plugin.TEST_KIT, CKit.smartperf)[0]
+    sp_kits.target_name = config.get("bundle_name", "")
+    param_config = config.get(ConfigConst.kits_params).get(CKit.smartperf, "")
+    sp_kits.__check_config__(param_config)
+    kits.insert(0, sp_kits)
+
+
+def handle_test_args(config, request):
+    pass
+
+
+def do_driver_execute(driver_obj: IDriver, request):
+    try:
+        # delete sys devicetest mode
+        if hasattr(sys, DeviceTestMode.MODE):
+            delattr(sys, DeviceTestMode.MODE)
+
+        # set self.config
+        driver_obj.config = request.config
+        driver_obj.config.devices = request.get_devices()
+        if request.get("exectype") == TestExecType.device_test and \
+                not driver_obj.config.devices:
+            err_msg = ErrorMessage.TestCase.Code_0203009
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
+
+        # get source, json config and kits
+        if request.get_config_file():
+            source = request.get_config_file()
+            LOG.debug("Test config file path: %s" % source)
+        else:
+            source = request.get_source_string()
+            LOG.debug("Test String: %s" % source)
+
+        if not source:
+            err_msg = ErrorMessage.TestCase.Code_0203010.format(request.get_source_file())
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
+
+        json_config = JsonParser(source)
+        kits = get_kit_instances(json_config, request.config.resource_path,
+                                 request.config.testcases_path)
+        start_smart_perf(driver_obj.config, kits)
+        test_name = request.get_module_name()
+        driver_obj.result = os.path.join(request.config.report_path, "result", "%s.xml" % test_name)
+
+        # set configs keys
+        configs = driver_obj._set_configs(json_config, kits, request)
+
+        # handle test args
+        handle_test_args(config=driver_obj.config, request=request)
+
+        # get test list
+        test_list = driver_obj._get_test_list(json_config, request, source)
+        if not test_list:
+            raise ParamError(ErrorMessage.TestCase.Code_0203011)
+        driver_obj._run(configs, test_list)
+    except (ReportException, ModuleNotFoundError, ExecuteTerminate,
+            SyntaxError, ValueError, AttributeError, TypeError,
+            KeyboardInterrupt, ParamError, DeviceError) \
+            as exception:
+        error_no = getattr(exception, "error_no", "00000")
+        LOG.exception(exception, exc_info=False, error_no=error_no)
+        driver_obj.error_message = exception
+        Binder.notify_stage(
+            CaseEnd(request.get_module_name(), "Failed", str(driver_obj.error_message)))
+    finally:
+        driver_obj._handle_finally(request)
+
+
 @Plugin(type=Plugin.DRIVER, id=HostDrivenTestType.device_test)
 class DeviceTestDriver(IDriver):
     """
@@ -70,7 +154,8 @@ class DeviceTestDriver(IDriver):
     py_file = ""
 
     def __init__(self):
-        pass
+        self.linux_host = ""
+        self.linux_directory = ""
 
     def __check_environment__(self, device_options):
         pass
@@ -78,65 +163,11 @@ class DeviceTestDriver(IDriver):
     def __check_config__(self, config=None):
         pass
 
+    def __init_nfs_server__(self, request=None):
+        pass
+
     def __execute__(self, request):
-        try:
-            # delete sys devicetest mode
-            if hasattr(sys, DeviceTestMode.MODE):
-                delattr(sys, DeviceTestMode.MODE)
-
-            # set self.config
-            self.config = request.config
-            self.config.devices = request.get_devices()
-            if request.get("exectype") == TestExecType.device_test \
-                    and not self.config.devices:
-                LOG.error("No device", error_no="00104")
-                raise ParamError("Load Error[00104]", error_no="00104")
-
-            # get source, json config and kits
-            if request.get_config_file():
-                source = request.get_config_file()
-                LOG.debug("Test config file path: %s" % source)
-            else:
-                source = request.get_source_string()
-                LOG.debug("Test String: %s" % source)
-
-            if not source:
-                LOG.error("No config file found for '%s'" %
-                          request.get_source_file(), error_no="00102")
-                raise ParamError("Load Error(00102)", error_no="00102")
-
-            json_config = JsonParser(source)
-            kits = get_kit_instances(json_config, request.config.resource_path,
-                                     request.config.testcases_path)
-            do_module_kit_setup(request, kits)
-
-            test_name = request.get_module_name()
-            self.result = os.path.join(request.config.report_path, "result", "%s.xml" % test_name)
-
-            # set configs keys
-            configs = self._set_configs(json_config, kits, request)
-
-            # handle test args
-            self._handle_test_args(request=request)
-
-            # get test list
-            test_list = self._get_test_list(json_config, request, source)
-            if not test_list:
-                raise ParamError("no test list to run")
-            self._run_devicetest(configs, test_list)
-        except (ReportException, ModuleNotFoundError, ExecuteTerminate,
-                SyntaxError, ValueError, AttributeError, TypeError,
-                KeyboardInterrupt, ParamError, DeviceError) as exception:
-            error_no = getattr(exception, "error_no", "00000")
-            LOG.exception(exception, exc_info=False, error_no=error_no)
-            self.error_message = exception
-            Scheduler.call_life_stage_action(
-                stage=LifeStage.case_end,
-                case_name=request.get_module_name(),
-                case_result="Failed",
-                error_msg=str(self.error_message))
-        finally:
-            self._handle_finally(request)
+        do_driver_execute(self, request)
 
     def _get_test_list(self, json_config, request, source):
         test_list = get_config_value('py_file', json_config.get_driver(),
@@ -176,12 +207,13 @@ class DeviceTestDriver(IDriver):
         if checked_test_list:
             LOG.info("Test list: {}".format(checked_test_list))
         else:
-            LOG.error("No test list found", error_no="00109")
-            raise ParamError("Load Error(00109), No test list found", error_no="00109")
+            err_msg = ErrorMessage.TestCase.Code_0203012
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         if len(checked_test_list) > 1:
-            LOG.error("{}.json field [py_file] only support one py file, now is {}"
-                      .format(request.get_module_name(), test_list), error_no="00110")
-            raise ParamError("Load Error(00110), too many testcase in field [py_file].", error_no="00110")
+            err_msg = ErrorMessage.TestCase.Code_0203013.format(request.get_module_name(), test_list)
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         return checked_test_list
 
     def _set_configs(self, json_config, kits, request):
@@ -193,24 +225,49 @@ class DeviceTestDriver(IDriver):
         configs["report_path"] = request.config.report_path
         configs["execute"] = get_config_value(
             'execute', json_config.get_driver(), False)
+
+        for device in self.config.devices:
+            do_module_kit_setup(request, kits)
+            if device.label == DeviceLabelType.ipcamera:
+                # add extra keys to configs for ipcamera device
+                self.__init_nfs_server__(request=request)
+                configs["linux_host"] = self.linux_host
+                configs["linux_directory"] = self.linux_directory
+                configs["kits"] = kits
+
         return configs
 
     def _handle_finally(self, request):
         # do kit teardown
         do_module_kit_teardown(request)
 
+        # close device connect
+        for device in self.config.devices:
+            if device.label == DeviceLabelType.ipcamera or device.label == \
+                    DeviceLabelType.watch_gt:
+                device.close()
+            if device.label == DeviceLabelType.phone:
+                device.close()
+
         # check result report
         report_name = request.root.source.test_name if \
             not request.root.source.test_name.startswith("{") \
             else "report"
         module_name = request.get_module_name()
-        self.result = check_result_report(
-            request.config.report_path, self.result, self.error_message,
-            report_name, module_name)
+        if Binder.session().mode != ModeType.decc:
+            self.result = check_result_report(
+                request.config.report_path, self.result, self.error_message,
+                report_name, module_name)
+        else:
+            tmp_list = copy.copy(SuiteReporter.get_report_result())
+            if self.result not in [report_path for report_path, _ in tmp_list]:
+                if not self.error_message:
+                    self.error_message = "Case not execute[01205]"
+                self.result = check_result_report(
+                    request.config.report_path, self.result,
+                    self.error_message, report_name, module_name)
 
-    def _run_devicetest(self, configs, test_list):
-        from xdevice import Variables
-
+    def _run(self, configs, test_list):
         # insert paths for loading _devicetest module and testcases
         devicetest_module = os.path.join(Variables.modules_dir, "_devicetest")
         if os.path.exists(devicetest_module):
@@ -226,18 +283,13 @@ class DeviceTestDriver(IDriver):
 
         # run devicetest
         from devicetest.main import DeviceTest
-        device_test = DeviceTest(test_list, configs, self.config.devices, LOG, self.result)
+        device_test = DeviceTest(test_list, configs, self.config.devices, self.result)
         device_test.run()
 
     def __result__(self):
+        if check_mode(ModeType.decc):
+            return self.result
         return self.result if os.path.exists(self.result) else ""
-
-    def _handle_test_args(self, request):
-        for device in self.config.devices:
-            # 恢复步骤截图的默认设置
-            setattr(device, "screenshot", False)
-            setattr(device, "screenshot_fail", True)
-            setattr(device, "screenrecorder", False)
 
 
 def _get_dict_testsuite(testsuite, config):
@@ -277,64 +329,11 @@ class DeviceTestSuiteDriver(IDriver):
     def __check_config__(self, config=None):
         pass
 
+    def __init_nfs_server__(self, request=None):
+        pass
+
     def __execute__(self, request):
-        try:
-            # delete sys devicetest mode
-            if hasattr(sys, DeviceTestMode.MODE):
-                delattr(sys, DeviceTestMode.MODE)
-
-            # set self.config
-            self.config = request.config
-            self.config.devices = request.get_devices()
-            if request.get("exectype") == TestExecType.device_test \
-                    and not self.config.devices:
-                raise ParamError("Load Error[00104]", error_no="00104")
-
-            # get source, json config and kits
-            if request.get_config_file():
-                source = request.get_config_file()
-                LOG.debug("Test config file path: %s" % source)
-            else:
-                source = request.get_source_string()
-                LOG.debug("Test String: %s" % source)
-
-            if not source:
-                LOG.error("No config file found for '%s'" %
-                          request.get_source_file(), error_no="00102")
-                raise ParamError("Load Error(00102)", error_no="00102")
-
-            json_config = JsonParser(source)
-            kits = get_kit_instances(json_config, request.config.resource_path,
-                                     request.config.testcases_path)
-            do_module_kit_setup(request, kits)
-
-            test_name = request.get_module_name()
-            self.result = os.path.join(request.config.report_path, "result", "%s.xml" % test_name)
-
-            # set configs keys
-            configs = self._set_configs(json_config, kits, request)
-
-            # handle test args
-            self._handle_test_args(request=request)
-
-            # get test list
-            test_list = self._get_test_list(json_config, request, source)
-            if not test_list:
-                raise ParamError("no test list to run")
-            self._run_testsuites(configs, test_list)
-        except (ReportException, ModuleNotFoundError, ExecuteTerminate,
-                SyntaxError, ValueError, AttributeError, TypeError,
-                KeyboardInterrupt, ParamError, DeviceError) as exception:
-            error_no = getattr(exception, "error_no", "00000")
-            LOG.exception(exception, exc_info=False, error_no=error_no)
-            self.error_message = exception
-            Scheduler.call_life_stage_action(
-                stage=LifeStage.case_end,
-                case_name=request.get_module_name(),
-                case_result="Failed",
-                error_msg=str(self.error_message))
-        finally:
-            self._handle_finally(request)
+        do_driver_execute(self, request)
 
     def _get_test_list(self, json_config, request, source):
         testsuite = get_config_value('testsuite', json_config.get_driver(),
@@ -348,8 +347,9 @@ class DeviceTestSuiteDriver(IDriver):
                 testsuite = temp_testsuite[0]
 
         if not testsuite:
-            LOG.error("Json not set testsuite or can't found py file.")
-            raise ParamError("Load Error(00109), Json not set testsuite or can't found py file.", error_no="00109")
+            err_msg = ErrorMessage.TestCase.Code_0203014
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
 
         checked_testsuite = None
         if testsuite.endswith(PY_SUFFIX) or \
@@ -369,8 +369,9 @@ class DeviceTestSuiteDriver(IDriver):
         if checked_testsuite:
             LOG.info("Test suite list: {}".format(checked_testsuite))
         else:
-            LOG.error("No test suite list found", error_no="00109")
-            raise ParamError("Load Error(00109), No test list found", error_no="00109")
+            err_msg = ErrorMessage.TestCase.Code_0203012
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         return checked_testsuite
 
     def _set_configs(self, json_config, kits, request):
@@ -385,11 +386,19 @@ class DeviceTestSuiteDriver(IDriver):
         configs["suitecases"] = get_config_value(
             'suitecases', json_config.get_driver(), True)
         configs["listeners"] = request.listeners.copy()
+
+        do_module_kit_setup(request, kits)
+
         return configs
 
     def _handle_finally(self, request):
         # do kit teardown
         do_module_kit_teardown(request)
+
+        # close device connect
+        for device in self.config.devices:
+            if device.label == DeviceLabelType.phone:
+                device.close()
 
         # check result report
         report_name = request.root.source.test_name if \
@@ -400,7 +409,7 @@ class DeviceTestSuiteDriver(IDriver):
             request.config.report_path, self.result, self.error_message,
             report_name, module_name)
 
-    def _run_testsuites(self, configs, test_list):
+    def _run(self, configs, test_list):
         if configs["testcases_path"]:
             sys.path.insert(1, configs["testcases_path"])
             sys.path.insert(1, os.path.dirname(configs["testcases_path"]))
@@ -410,16 +419,8 @@ class DeviceTestSuiteDriver(IDriver):
 
         # run AppTest
         from devicetest.main import DeviceTestSuite
-        app_test = DeviceTestSuite(test_list=test_list, configs=configs,
-                                   devices=self.config.devices, log=LOG)
+        app_test = DeviceTestSuite(test_list, configs, self.config.devices)
         app_test.run()
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
-
-    def _handle_test_args(self, request):
-        for device in self.config.devices:
-            # 恢复步骤截图的默认设置
-            setattr(device, "screenshot", False)
-            setattr(device, "screenshot_fail", True)
-            setattr(device, "screenrecorder", False)

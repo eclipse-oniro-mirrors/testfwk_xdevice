@@ -16,15 +16,15 @@
 # limitations under the License.
 #
 
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import TestTerminated
+from devicetest.error import ErrorMessage
 
 
-class DeviceTestRecord():
+class DeviceTestRecord:
     is_aborted = False  # 初始值为False,DeviceTest过程执行异常置为True
 
 
-class ProjectRecord():
+class ProjectRecord:
     def __init__(self, log):
         # 记录工程执行状态的全局变量
         self.log = log
@@ -33,10 +33,10 @@ class ProjectRecord():
 
     def is_shutdown(self, raise_exception=True):
         if self.is_aborted:
-            self.log.error(ErrorMessage.Error_01400.Message.en,
-                           error_no=ErrorMessage.Error_01400.Code)
+            err_msg = ErrorMessage.Common.Code_0201004
+            self.log.error(err_msg)
             if raise_exception:
-                raise TestTerminated(ErrorMessage.Error_01400.Topic)
+                raise TestTerminated(err_msg)
             return True
 
         return False

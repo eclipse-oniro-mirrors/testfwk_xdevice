@@ -24,27 +24,8 @@ __all__ = ["Constant", "ComType", "HostDrivenTestType",
 
 
 class Constant:
-    PRODUCT_PARAM_START = r"To Obtain Product Params Start"
-    PRODUCT_PARAM_END = r"To Obtain Product Params End"
-    TRUSTED_ROOT_CA = "trusted_root_ca.json"
-    TRUSTED_ROOT_CA_PATH = "/system/etc/security/trusted_root_ca.json"
-    TRUSTED_ROOT_CA_KEY = "C=CN, O=OpenHarmony, OU=OpenHarmony Team, CN=OpenHarmony Application Root CA"
-    TRUSTED_ROOT_CA_VAL = """-----BEGIN CERTIFICATE-----
-MIICRDCCAcmgAwIBAgIED+E4izAMBggqhkjOPQQDAwUAMGgxCzAJBgNVBAYTAkNO
-MRQwEgYDVQQKEwtPcGVuSGFybW9ueTEZMBcGA1UECxMQT3Blbkhhcm1vbnkgVGVh
-bTEoMCYGA1UEAxMfT3Blbkhhcm1vbnkgQXBwbGljYXRpb24gUm9vdCBDQTAeFw0y
-MTAyMDIxMjE0MThaFw00OTEyMzExMjE0MThaMGgxCzAJBgNVBAYTAkNOMRQwEgYD
-VQQKEwtPcGVuSGFybW9ueTEZMBcGA1UECxMQT3Blbkhhcm1vbnkgVGVhbTEoMCYG
-A1UEAxMfT3Blbkhhcm1vbnkgQXBwbGljYXRpb24gUm9vdCBDQTB2MBAGByqGSM49
-AgEGBSuBBAAiA2IABE023XmRaw2DnO8NSsb+KG/uY0FtS3u5LQucdr3qWVnRW5ui
-QIL6ttNZBEeLTUeYcJZCpayg9Llf+1SmDA7dY4iP2EcRo4UN3rilovtfFfsmH4ty
-3SApHVFzWUl+NwdH8KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
-AQYwHQYDVR0OBBYEFBc6EKGrGXzlAE+s0Zgnsphadw7NMAwGCCqGSM49BAMDBQAD
-ZwAwZAIwd1p3JzHN93eoPped1li0j64npgqNzwy4OrkehYAqNXpcpaEcLZ7UxW8E
-I2lZJ3SbAjAkqySHb12sIwdSFKSN9KCMMEo/eUT5dUXlcKR2nZz0MJdxT5F51qcX
-1CumzkcYhgU=
------END CERTIFICATE-----
-"""
+    PRODUCT_PARAMS_START = "To Obtain Product Params Start"
+    PRODUCT_PARAMS_END = "To Obtain Product Params End"
 
 
 @dataclass
@@ -87,6 +68,7 @@ class DeviceLiteKernel(object):
 @dataclass
 class CKit:
     push = "PushKit"
+    common_push = "CommonPushKit"
     liteinstall = "LiteAppInstallKit"
     command = "CommandKit"
     config = "ConfigKit"

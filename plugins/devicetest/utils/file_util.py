@@ -16,25 +16,28 @@
 # limitations under the License.
 #
 
-import codecs
 import os
+import platform
 import shutil
 import stat
 import sys
 import time
+import zipfile
+import hashlib
 
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import DeviceTestError
 from devicetest.core.variables import get_project_path
+from devicetest.error import ErrorMessage
+from devicetest.error import ErrorCategory
 from devicetest.log.logger import DeviceTestLog as log
 
 
 def get_template_path(template_file_path, isdir=None):
-    '''
-    @summary: Obtains the absolute path of the template screen cap path.
+    """
+    @param template_file_path: Obtains the absolute path of the template screen cap path.
     @param isdir: Obtain the directory: True; Obtain the file: False;
                   None: Ignore the file type
-    '''
+    """
     template_file_path = template_file_path.replace("\\", "/")
     if os.path.isabs(template_file_path) \
             and (not isdir and os.path.isfile(template_file_path)):
@@ -71,11 +74,11 @@ def get_template_path(template_file_path, isdir=None):
 
 
 def get_resource_path(resource_file_path, isdir=None):
-    '''
-    @summary: Obtains the absolute path of the resource file.
+    """
+    @param resource_file_path: Obtains the absolute path of the resource file.
     @param isdir: Obtain the directory: True; Obtain the file: False;
                   None: Ignore the file type
-    '''
+    """
     resource_file_path = resource_file_path.replace("\\", "/")
     if os.path.isabs(resource_file_path) \
             and ((isdir is None and os.path.exists(resource_file_path))
@@ -129,9 +132,9 @@ def get_resource_path(resource_file_path, isdir=None):
                           resource_file_path, folder))
 
     if _fol is None:
-        log.error(ErrorMessage.Error_01102.Message.en,
-                  error_no=ErrorMessage.Error_01102.Code)
-        raise DeviceTestError(ErrorMessage.Error_01102.Topic)
+        err_msg = ErrorMessage.Common.Code_0201008.format(resource_file_path)
+        log.error(err_msg)
+        raise DeviceTestError(err_msg)
     log.debug("get resource path:{}".format(_fol))
     return _fol
 
@@ -177,12 +180,10 @@ def os_open_file_write(file_path, content, mode="w"):
             os.makedirs(dir_path)
         with os.fdopen(os.open(file_path, flags, modes), mode) as fout:
             fout.write(content)
-
     except Exception as error:
-        log.error(ErrorMessage.Error_01214.Message.en,
-                  error_no=ErrorMessage.Error_01214.Code,
-                  is_traceback=True)
-        raise DeviceTestError(ErrorMessage.Error_01214.Topic) from error
+        err_msg = ErrorMessage.Common.Code_0201009
+        log.error(err_msg, is_traceback=True)
+        raise DeviceTestError(err_msg) from error
 
 
 def os_open_file_read(file_path, mode="r"):
@@ -191,18 +192,14 @@ def os_open_file_read(file_path, mode="r"):
         modes = stat.S_IWUSR | stat.S_IRUSR
         with os.fdopen(os.open(file_path, flags, modes), mode) as fout:
             return fout.read()
-
     except FileNotFoundError as error:
-        log.error(ErrorMessage.Error_01216.Message.en,
-                  error_no=ErrorMessage.Error_01216.Code,
-                  is_traceback=True)
-        raise DeviceTestError(ErrorMessage.Error_01216.Topic) from error
-
+        err_msg = ErrorMessage.Common.Code_0201001.format(ErrorCategory.Environment, file_path)
+        log.error(err_msg, is_traceback=True)
+        raise DeviceTestError(err_msg) from error
     except Exception as error:
-        log.error(ErrorMessage.Error_01215.Message.en,
-                  error_no=ErrorMessage.Error_01215.Code,
-                  is_traceback=True)
-        raise DeviceTestError(ErrorMessage.Error_01215.Topic) from error
+        err_msg = ErrorMessage.Common.Code_0201010
+        log.error(err_msg, is_traceback=True)
+        raise DeviceTestError(err_msg) from error
 
 
 def save_file(file_path, content):
@@ -220,34 +217,10 @@ def create_dir(create_path):
         os.makedirs(full_path, exist_ok=True)  # exist_ok=True 
 
 
-def to_file_plus(file_path, content, console=False, level="INFO"):
-    """
-    @summary: Create file, append "content" to file and add timestamp.
-    """
-    dirname = os.path.dirname(file_path)
-    if not os.path.exists(dirname):
-        # When the to_file_plus method is invoked in a thread, there is a
-        # possibility that the method does not exist when os.path.exists is
-        # executed. However, the directory has been created by the main thread
-        # during directory creation. Therefore, an exception is captured.
-        try:
-            os.makedirs(dirname)
-        except Exception as exception:
-            log.error(exception)
-    from devicetest.log.logger import get_log_line_timestamp
-    timestamp = get_log_line_timestamp()
-    data = "%s %s %s\n" % (timestamp, level, content)
-    if console:
-        print(data[:-2])
-    srw = codecs.open(file_path, "a", "utf-8")
-    srw.write(data)
-    srw.close()
-
-
 def to_file(filename, content):
-    '''
-    genenrate files
-    '''
+    """
+    generate files
+    """
     dirname = os.path.dirname(filename)
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
@@ -323,11 +296,65 @@ def copy_to_folder(src, des):
 
 
 def delete_file_folder(src):
-    '''
+    """
     @summary: Delete files or directories.
-    '''
+    """
 
     if os.path.isfile(src):
         delfile(src)
     elif os.path.isdir(src):
         delfolder(src)
+
+
+def get_file_md5(file_name: str):
+    """
+    @summary: Get MD5 hash of a file.
+    :param file_name:
+    :return:
+    """
+    if platform.system() == "Windows":
+        flags = os.O_RDONLY | os.O_BINARY
+    else:
+        flags = os.O_RDONLY
+    fd = os.open(file_name, flags, 0o644)
+    m = hashlib.md5()  # 创建md5对象
+    with os.fdopen(fd, mode="rb") as f:
+        while True:
+            data = f.read(4096)
+            if not data:
+                break
+            m.update(data)  # 更新md5对象
+    return m.hexdigest()
+
+
+def compress_and_remove(folder_path: str, archive_name: str) -> bool:
+    """
+    @summary: Compress and remove a file.
+    :param folder_path:
+    :param archive_name:
+    :return:
+    """
+    try:
+        shutil.make_archive(archive_name, 'zip', folder_path)
+        shutil.rmtree(folder_path)
+        return True
+    except Exception as e:
+        log.error(e)
+        return False
+
+
+def unzip_file(zip_path, extract_to):
+    """
+    解压指定的 ZIP 文件到目标目录
+
+    :param zip_path: ZIP 文件路径
+    :param extract_to: 解压到的目标目录
+    """
+    # 确保目标目录存在
+    if not os.path.exists(extract_to):
+        os.makedirs(extract_to)
+
+    # 打开 ZIP 文件
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        # 解压所有文件到目标目录
+        zip_ref.extractall(extract_to)

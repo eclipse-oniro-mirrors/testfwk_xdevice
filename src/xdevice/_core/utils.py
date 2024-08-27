@@ -35,7 +35,9 @@ from datetime import timedelta
 from datetime import datetime
 from tempfile import NamedTemporaryFile
 
-from _core.executor.listener import SuiteResult
+from _core.error import ErrorCategory
+from _core.error import ErrorMessage
+from _core.executor.bean import SuiteResult
 from _core.driver.parser_lite import ShellHandler
 from _core.exception import ParamError
 from _core.exception import ExecuteTerminate
@@ -44,6 +46,7 @@ from _core.report.suite_reporter import SuiteReporter
 from _core.plugin import get_plugin
 from _core.plugin import Plugin
 from _core.constants import ModeType
+from _core.constants import CaseResult
 from _core.constants import ConfigConst
 
 LOG = platform_logger("Utils")
@@ -149,7 +152,7 @@ def is_proc_running(pid, name=None):
                                 stdin=proc_v_sub.stdout,
                                 stdout=subprocess.PIPE, shell=False)
     else:
-        raise Exception("Unknown system environment")
+        raise Exception(ErrorMessage.Common.Code_0101001)
 
     (out, _) = proc.communicate(timeout=60)
     out = get_decode(out).strip()
@@ -210,13 +213,13 @@ def exec_cmd(cmd, timeout=5 * 60, error_print=True, join_result=False, redirect=
             return err if err else out
 
     except (TimeoutError, KeyboardInterrupt, AttributeError, ValueError,  # pylint:disable=undefined-variable
-            EOFError, IOError) as _:
+            EOFError, IOError, subprocess.TimeoutExpired) as e:
         sys_type = platform.system()
         if sys_type == "Linux" or sys_type == "Darwin":
             os.killpg(proc.pid, signal.SIGTERM)
         else:
             os.kill(proc.pid, signal.SIGINT)
-        raise
+        raise e
 
 
 def create_dir(path):
@@ -297,17 +300,14 @@ def get_file_absolute_path(input_name, paths=None, alt_dir=None):
             if os.path.exists(file_path):
                 return os.path.abspath(file_path)
 
-    err_msg = "The file {} does not exist".format(input_name)
-    if check_mode(ModeType.decc):
-        LOG.error(err_msg, error_no="00109")
-        err_msg = "Load Error[00109]"
-
+    err_msg = ErrorMessage.Common.Code_0101002.format(ErrorCategory.Environment, input_name)
+    LOG.error(err_msg)
     if alt_dir:
         LOG.debug("Alt dir is %s" % alt_dir)
     LOG.debug("Paths is:")
     for path in abs_paths:
         LOG.debug(path)
-    raise ParamError(err_msg, error_no="00109")
+    raise ParamError(err_msg)
 
 
 def _update_paths(paths):
@@ -338,7 +338,7 @@ def _update_paths(paths):
 
 
 def modify_props(device, local_prop_file, target_prop_file, new_props):
-    """To change the props if need
+    """To change the props if it is need
     Args:
         device: the device to modify props
         local_prop_file : the local file to save the old props
@@ -352,7 +352,6 @@ def modify_props(device, local_prop_file, target_prop_file, new_props):
     device.pull_file(target_prop_file, local_prop_file)
     old_props = {}
     changed_prop_key = []
-    lines = []
     flags = os.O_RDONLY
     modes = stat.S_IWUSR | stat.S_IRUSR
     with os.fdopen(os.open(local_prop_file, flags, modes), "r") as old_file:
@@ -418,33 +417,40 @@ def check_result_report(report_root_dir, report_file, error_message="",
     Check whether report_file exits or not. If report_file is not exist,
     create empty report with error_message under report_root_dir
     """
-
     if os.path.exists(report_file):
         return report_file
+    suite_name = report_name
+    if not suite_name:
+        suite_name, _ = get_filename_extension(report_file)
+
+    # 测试套运行异常，将已运行的部分用例结果记录到结果文件
+    request = kwargs.get("request")
+    if request is not None:
+        for listener in request.listeners:
+            if not hasattr(listener, "handle_half_break"):
+                continue
+            listener.handle_half_break(suite_name, error_message=error_message)
+    if os.path.exists(report_file):
+        return report_file
+
+    LOG.info(f"{report_file} does not exist, create an empty report")
     report_dir = os.path.dirname(report_file)
     if os.path.isabs(report_dir):
         result_dir = report_dir
     else:
         result_dir = os.path.join(report_root_dir, "result", report_dir)
     os.makedirs(result_dir, exist_ok=True)
-    if check_mode(ModeType.decc):
-        LOG.error("Report not exist, create empty report")
-    else:
-        LOG.error("Report %s not exist, create empty report under %s" % (
-            report_file, result_dir))
 
-    suite_name = report_name
-    if not suite_name:
-        suite_name, _ = get_filename_extension(report_file)
     suite_result = SuiteResult()
     suite_result.suite_name = suite_name
     suite_result.stacktrace = error_message
     if module_name:
         suite_name = module_name
+    # 设置测试结果，默认结果是Failed
+    result_kind = kwargs.get("result_kind", CaseResult.failed)
     suite_reporter = SuiteReporter(
         [(suite_result, [])], suite_name, result_dir,
-        modulename=module_name, message=error_message,
-        is_monkey=kwargs.get("is_monkey", False), device_up_info=kwargs.get("device_up_info", None))
+        modulename=module_name, message=error_message, result_kind=result_kind)
     suite_reporter.create_empty_report()
     return "%s.xml" % os.path.join(result_dir, suite_name)
 
@@ -475,10 +481,6 @@ def is_python_satisfied():
     return False
 
 
-def get_instance_name(instance):
-    return instance.__class__.__name__
-
-
 def convert_ip(origin_ip):
     addr = origin_ip.strip().split(".")
     if len(addr) == 4:
@@ -497,15 +499,10 @@ def convert_port(port):
 
 
 def convert_serial(serial):
-    if serial.startswith("local_"):
-        return serial
-    elif serial.startswith("remote_"):
+    if serial.startswith("remote_"):
         return "remote_{}_{}".format(convert_ip(serial.split("_")[1]),
                                      convert_port(serial.split("_")[-1]))
-    else:
-        length = len(serial) // 3
-        return "{}{}{}".format(
-            serial[0:length], "*" * (len(serial) - length * 2), serial[-length:])
+    return serial
 
 
 def convert_mac(message):
@@ -563,7 +560,7 @@ def get_kit_instances(json_config, resource_path="", testcases_path=""):
             setattr(test_kit_instance, "device_name", device_name)
             kit_instances.append(test_kit_instance)
         else:
-            raise ParamError("kit %s not exists" % kit_type, error_no="00107")
+            raise ParamError(ErrorMessage.Common.Code_0101003.format(kit_type))
     return kit_instances
 
 
@@ -661,19 +658,19 @@ def get_test_component_version(config):
 
 
 def check_mode(mode):
-    from xdevice import Scheduler
-    return Scheduler.mode == mode
+    from _core.context.center import Context
+    return Context.session().mode == mode
 
 
 def do_module_kit_setup(request, kits):
     for device in request.get_devices():
         setattr(device, ConfigConst.module_kits, [])
 
-    from xdevice import Scheduler
+    from _core.context.center import Context
     for kit in kits:
         run_flag = False
         for device in request.get_devices():
-            if not Scheduler.is_execute:
+            if not Context.is_executing():
                 raise ExecuteTerminate()
             if not check_device_env_index(device, kit):
                 continue
@@ -684,11 +681,9 @@ def do_module_kit_setup(request, kits):
                 module_kits.append(kit_copy)
                 kit_copy.__setup__(device, request=request)
         if not run_flag:
-            kit_device_name = getattr(kit, "device_name", None)
-            error_msg = "device name '%s' of '%s' not exist" % (
-                kit_device_name, kit.__class__.__name__)
-            LOG.error(error_msg, error_no="00108")
-            raise ParamError(error_msg, error_no="00108")
+            err_msg = ErrorMessage.Common.Code_0101004.format(kit.__class__.__name__)
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
 
 
 def do_module_kit_teardown(request):
@@ -703,7 +698,7 @@ def get_current_time():
     current_time = time.time()
     local_time = time.localtime(current_time)
     data_head = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
-    return "%s" % (data_head)
+    return data_head
 
 
 def check_mode_in_sys(mode):
@@ -733,7 +728,7 @@ def get_netstat_proc_pid(device, port):
         return ""
     if not device.get_recover_state():
         return ""
-    cmd = 'netstat -anp | grep {}'.format(port)
+    cmd = 'netstat -atn | grep :{}'.format(port)
     proc_running = device.execute_shell_command(cmd).strip()
     proc_running = proc_running.split("\n")
     for data in proc_running:
@@ -744,6 +739,17 @@ def get_netstat_proc_pid(device, port):
             data = data.split("/")
             return data[0]
     return ""
+
+
+def get_repeat_round(d_unique_id):
+    """获取当前重复执行的轮次
+    Args:
+        d_unique_id: str, driver descriptor unique id
+    Returns:
+        repeat round
+    """
+    match_result = re.match("^TestSource_.+_.+_(\\d+)$", d_unique_id)
+    return int(match_result.group(1)) if match_result else 1
 
 
 def calculate_elapsed_time(begin, end):
@@ -786,6 +792,30 @@ def calculate_elapsed_time(begin, end):
     return "".join(elapsed)
 
 
+def calculate_percent(num1, num2):
+    """计算百分比
+    Args:
+        num1: number, 被除数
+        num2: number, 除数
+    Returns:
+        percentage representation
+    """
+    if not isinstance(num1, (int, float)) or not isinstance(num2, (int, float)):
+        LOG.error("num1 or num2 is not a numeric type")
+        return "0%"
+    if num1 > num2:
+        LOG.error("the dividend(num1) is greater than the divisor(num2)")
+        return "0%"
+    if num1 == 0 or num2 == 0:
+        return "0%"
+    # 百分比表示最多有两位小数，最小表示为0.01%，99.999%取为99.99%
+    ret = str(num1 / num2 * 100)
+    ret = ret[:ret.find(".") + 3]
+    if float(ret) < 0.01:
+        ret = "0.01"
+    return ret + "%"
+
+
 def copy_folder(src, dst):
     if not os.path.exists(src):
         LOG.error(f"copy folder error, source path '{src}' does not exist")
@@ -798,5 +828,28 @@ def copy_folder(src, dst):
         if os.path.isfile(fr_path):
             shutil.copy(fr_path, to_path)
         if os.path.isdir(fr_path):
-            os.makedirs(to_path)
+            if not os.path.exists(to_path):
+                os.makedirs(to_path)
             copy_folder(fr_path, to_path)
+
+
+def show_current_environment():
+    try:
+        LOG.debug("Show the current environment. Please wait.")
+        from pip._internal.operations.freeze import freeze
+        installed_packages = list(freeze())
+        for package in installed_packages:
+            if "xdevice" in package or "hypium" in package:
+                LOG.debug(package)
+    except ImportError:
+        pass
+
+
+def check_uitest_version(uitest_version_info: str, base_version: tuple) -> bool:
+    if uitest_version_info:
+        version_list = uitest_version_info.strip().split("\n")
+        for i in range(len(version_list) - 1, -1, -1):
+            if re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}', version_list[i]):
+                version = tuple(version_list[i].split("."))
+                return version > base_version
+    return True

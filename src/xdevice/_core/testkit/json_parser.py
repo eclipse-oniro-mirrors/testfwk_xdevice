@@ -19,6 +19,7 @@
 import json
 import os
 import stat
+from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.logger import platform_logger
 from _core.plugin import Config
@@ -67,8 +68,7 @@ class JsonParser:
                     path_or_content, encoding="utf-8")
             else:
                 if not os.path.exists(path_or_content):
-                    raise ParamError("The json file {} does not exist".format(
-                        path_or_content), error_no="00110")
+                    raise ParamError(ErrorMessage.Common.Code_0101027.format(path_or_content))
 
                 flags = os.O_RDONLY
                 modes = stat.S_IWUSR | stat.S_IRUSR
@@ -76,8 +76,8 @@ class JsonParser:
                                "r", encoding="utf-8") as file_content:
                     json_content = json.load(file_content)
         except (TypeError, ValueError, AttributeError) as error:
-            raise ParamError("json file error: %s %s" % (
-                path_or_content, error), error_no="00111")
+            raise ParamError(ErrorMessage.Common.Code_0101028.format(
+                path_or_content, error), error_no="00111") from error
         self._check_config(json_content)
         # set self.config
         self.config = Config()
@@ -85,6 +85,10 @@ class JsonParser:
         self.config.kits = json_content.get("kits", [])
         self.config.environment = json_content.get("environment", [])
         self.config.driver = json_content.get("driver", {})
+        self.config.module_subsystem = json_content.get("subsystem", "")
+        self.config.module_part = json_content.get("part", "")
+        self.config.test_suite_name = json_content.get("testSuiteName", "")
+        self.config.test_case_list = json_content.get("testCaseList", [])
 
     def _check_config(self, json_content):
         for kit in json_content.get("kits", []):
@@ -97,10 +101,9 @@ class JsonParser:
     @classmethod
     def _check_type_key_exist(cls, key, value):
         if not isinstance(value, dict):
-            raise ParamError("%s under %s should be dict" % (value, key))
+            raise ParamError(ErrorMessage.Common.Code_0101029.format(value, key))
         if "type" not in value.keys():
-            raise ParamError("'type' key not exists in %s under %s" % (
-                value, key))
+            raise ParamError(ErrorMessage.Common.Code_0101030.format(value, key))
 
     def get_config(self):
         return self.config
@@ -117,6 +120,18 @@ class JsonParser:
     def get_driver(self):
         return getattr(self.config, "driver", {})
 
+    def get_module_subsystem(self):
+        return getattr(self.config, "module_subsystem", "zzzzzzzz")
+
+    def get_module_part(self):
+        return getattr(self.config, "module_part", "")
+
     def get_driver_type(self):
         driver = getattr(self.config, "driver", {})
         return driver.get("type", "") if driver else ""
+
+    def get_test_suite_name(self):
+        return getattr(self.config, "testSuiteName", "AppTest")
+
+    def get_test_case_list(self):
+        return getattr(self.config, "test_case_list", [])

@@ -39,6 +39,7 @@ from xdevice import get_kit_instances
 from xdevice import check_result_report
 from xdevice import check_mode
 from xdevice import SuiteReporter
+from devicetest.error import ErrorMessage
 
 LOG = platform_logger("WindowsTest")
 PY_SUFFIX = ".py"
@@ -67,6 +68,9 @@ class WindowsTestDriver(IDriver):
     def __check_config__(self, config=None):
         pass
 
+    def __init_nfs_server__(self, request=None):
+        pass
+
     def __execute__(self, request):
         try:
             # set self.config
@@ -80,15 +84,14 @@ class WindowsTestDriver(IDriver):
                 LOG.debug("Test String: %s" % source)
 
             if not source:
-                LOG.error("No config file found for '%s'" %
-                          request.get_source_file(), error_no="00102")
-                raise ParamError("Load Error(00102)", error_no="00102")
+                err_msg = ErrorMessage.TestCase.Code_0203010.format(request.get_source_file())
+                LOG.error(err_msg)
+                raise ParamError(err_msg)
 
             json_config = JsonParser(source)
             kits = get_kit_instances(json_config, request.config.resource_path,
                                      request.config.testcases_path)
 
-            # create tmp folder
             test_name = request.get_module_name()
             self.result = os.path.join(request.config.report_path, "result", "%s.xml" % test_name)
 
@@ -98,7 +101,7 @@ class WindowsTestDriver(IDriver):
             # get test list
             test_list = self._get_test_list(json_config, request, source)
             if not test_list:
-                raise ParamError("no test list to run")
+                raise ParamError(ErrorMessage.TestCase.Code_0203011)
             self._run_devicetest(configs, test_list)
         except (ReportException, ModuleNotFoundError, ExecuteTerminate,
                 SyntaxError, ValueError, AttributeError, TypeError,
@@ -147,8 +150,9 @@ class WindowsTestDriver(IDriver):
         if checked_test_list:
             LOG.info("Test list: {}".format(checked_test_list))
         else:
-            LOG.error("No test list found", error_no="00109")
-            raise ParamError("Load Error(00109)", error_no="00109")
+            err_msg = ErrorMessage.TestCase.Code_0203012
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         return checked_test_list
 
     def _set_configs(self, json_config, kits, request):
@@ -163,7 +167,7 @@ class WindowsTestDriver(IDriver):
         return configs
 
     def _handle_finally(self, request):
-        from xdevice import Scheduler
+        from xdevice import Binder
 
         # do kit teardown
         do_module_kit_teardown(request)
@@ -173,7 +177,7 @@ class WindowsTestDriver(IDriver):
             not request.root.source.test_name.startswith("{") \
             else "report"
         module_name = request.get_module_name()
-        if Scheduler.mode != ModeType.decc:
+        if Binder.session().mode != ModeType.decc:
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message,
                 report_name, module_name)
@@ -185,6 +189,17 @@ class WindowsTestDriver(IDriver):
                 self.result = check_result_report(
                     request.config.report_path, self.result,
                     self.error_message, report_name, module_name)
+
+    def _create_tmp_folder(self, request):
+        if request.root.source.source_file.strip():
+            folder_name = "task_%s_%s" % (self.config.tmp_id,
+                                          request.root.source.test_name)
+        else:
+            folder_name = "task_%s_report" % self.config.tmp_id
+
+        tmp_sub_folder = os.path.join(self.config.tmp_folder, folder_name)
+        os.makedirs(tmp_sub_folder, exist_ok=True)
+        return tmp_sub_folder
 
     def _run_devicetest(self, configs, test_list):
         from xdevice import Variables
@@ -201,10 +216,10 @@ class WindowsTestDriver(IDriver):
         if request:
             sys.ecotest_resource_path = request.config.resource_path
 
+
         # run devicetest
         from devicetest.main import DeviceTest
-        device_test = DeviceTest(test_list=test_list, configs=configs,
-                                 devices=None, log=LOG)
+        device_test = DeviceTest(test_list, configs, None, self.result)
         device_test.run()
 
     def __result__(self):

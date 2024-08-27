@@ -26,12 +26,13 @@ import subprocess
 import signal
 from threading import Timer
 
-from _core.utils import get_file_absolute_path
-from _core.logger import platform_logger
-from _core.exception import ParamError
 from _core.constants import DeviceTestType
 from _core.constants import FilePermission
 from _core.constants import DeviceConnectorType
+from _core.error import ErrorMessage
+from _core.exception import ParamError
+from _core.logger import platform_logger
+from _core.utils import get_file_absolute_path
 
 LOG = platform_logger("Kit")
 
@@ -39,20 +40,27 @@ TARGET_SDK_VERSION = 22
 
 __all__ = ["get_app_name_by_tool", "junit_para_parse", "gtest_para_parse",
            "get_install_args", "reset_junit_para", "remount", "disable_keyguard",
-           "timeout_callback", "unlock_screen", "unlock_device", "get_class"]
+           "timeout_callback", "unlock_screen", "unlock_device", "get_class",
+           "check_device_ohca"]
 
 
 def remount(device):
-    device.enable_hdc_root()
     cmd = "target mount" \
         if device.usb_type == DeviceConnectorType.hdc else "remount"
     device.connector_command(cmd)
     device.execute_shell_command("remount")
+    device.execute_shell_command("mount -o rw,remount /")
+    device.execute_shell_command("mount -o rw,remount /sys_prod")
+    device.execute_shell_command("mount -o rw,remount /chip_prod")
+    device.execute_shell_command("mount -o rw,remount /preload")
+    device.execute_shell_command("mount -o rw,remount /patch_hw")
+    device.execute_shell_command("mount -o rw,remount /vendor")
     device.execute_shell_command("mount -o rw,remount /cust")
     device.execute_shell_command("mount -o rw,remount /product")
     device.execute_shell_command("mount -o rw,remount /hw_product")
     device.execute_shell_command("mount -o rw,remount /version")
-    device.execute_shell_command("mount -o rw,remount /%s" % "system")
+    device.execute_shell_command("mount -o rw,remount /system")
+    device.connector_command("target mount")
 
 
 def get_class(junit_paras, prefix_char, para_name):
@@ -61,25 +69,24 @@ def get_class(junit_paras, prefix_char, para_name):
 
     result = ""
     if prefix_char == "-e":
-        result = " %s class " % prefix_char
+        result = " {} class ".format(prefix_char)
     elif prefix_char == "--":
-        result = " %sclass " % prefix_char
+        result = " {} class ".format(prefix_char)
     elif prefix_char == "-s":
-        result = " %s class " % prefix_char
+        result = " {} class ".format(prefix_char)
     test_items = []
     for test in junit_paras.get(para_name):
         test_item = test.split("#")
         if len(test_item) == 1 or len(test_item) == 2:
-            test_item = "%s" % test
+            test_item = "{}".format(test)
             test_items.append(test_item)
         elif len(test_item) == 3:
-            test_item = "%s#%s" % (test_item[1], test_item[2])
+            test_item = "{}#{}".format(test_item[1], test_item[2])
             test_items.append(test_item)
         else:
-            raise ParamError("The parameter %s %s is error" % (
-                             prefix_char, para_name))
+            raise ParamError(ErrorMessage.Common.Code_0101031.format(prefix_char, para_name))
     if not result:
-        LOG.debug("There is unsolved prefix char: %s ." % prefix_char)
+        LOG.debug("There is unsolved prefix char: {} .".format(prefix_char))
     return result + ",".join(test_items)
 
 
@@ -94,9 +101,9 @@ def junit_para_parse(device, junit_paras, prefix_char="-e"):
         -e coverage true...
     """
     ret_str = []
-    path = "/%s/%s/%s" % ("data", "local", "ajur")
-    include_file = "%s/%s" % (path, "includes.txt")
-    exclude_file = "%s/%s" % (path, "excludes.txt")
+    path = "/{}/{}/{}".format("data", "local", "ajur")
+    include_file = "{}/{}".format(path, "includes.txt")
+    exclude_file = "{}/{}".format(path, "excludes.txt")
 
     if not isinstance(junit_paras, dict):
         LOG.warning("The para of junit is not the dict format as required")
@@ -106,33 +113,29 @@ def junit_para_parse(device, junit_paras, prefix_char="-e"):
     if not disable_key_guard or disable_key_guard[0].lower() != 'false':
         disable_keyguard(device)
 
-    for para_name in junit_paras.keys():
-        path = "/%s/%s/%s/" % ("data", "local", "ajur")
-        if para_name.strip() == 'test-file-include-filter':
-            for file_name in junit_paras[para_name]:
+    for key, value in junit_paras.items():
+        # value is a list object
+        para_name = key.strip()
+        path = "/{}/{}/{}/".format("data", "local", "ajur")
+        if para_name == "test-file-include-filter":
+            for file_name in value:
                 device.push_file(file_name, include_file)
                 device.execute_shell_command(
-                    'chown -R shell:shell %s' % path)
-            ret_str.append(" ".join([prefix_char, 'testFile', include_file]))
-        elif para_name.strip() == "test-file-exclude-filter":
-            for file_name in junit_paras[para_name]:
+                    'chown -R shell:shell {}'.format(path))
+            ret_str.append(" ".join([prefix_char, "testFile", include_file]))
+        elif para_name == "test-file-exclude-filter":
+            for file_name in value:
                 device.push_file(file_name, exclude_file)
                 device.execute_shell_command(
-                    'chown -R shell:shell %s' % path)
-            ret_str.append(" ".join([prefix_char, 'notTestFile',
-                                     exclude_file]))
-        elif para_name.strip() == "test" or para_name.strip() == "class":
-            result = get_class(junit_paras, prefix_char, para_name.strip())
+                    'chown -R shell:shell {}'.format(path))
+            ret_str.append(" ".join([prefix_char, "notTestFile", exclude_file]))
+        elif para_name == "test" or para_name == "class":
+            result = get_class(junit_paras, prefix_char, para_name)
             ret_str.append(result)
-        elif para_name.strip() == "include-annotation":
-            ret_str.append(" ".join([prefix_char, "annotation",
-                                     ",".join(junit_paras[para_name])]))
-        elif para_name.strip() == "exclude-annotation":
-            ret_str.append(" ".join([prefix_char, "notAnnotation",
-                                     ",".join(junit_paras[para_name])]))
-        else:
-            ret_str.append(" ".join([prefix_char, para_name,
-                                     ",".join(junit_paras[para_name])]))
+        elif para_name == "include-annotation":
+            ret_str.append(" ".join([prefix_char, "annotation", ",".join(value)]))
+        elif para_name == "exclude-annotation":
+            ret_str.append(" ".join([prefix_char, "notAnnotation", ",".join(value)]))
 
     return " ".join(ret_str)
 
@@ -178,7 +181,6 @@ def gtest_para_parse(gtest_paras, runner, request):
     if not isinstance(gtest_paras, dict):
         LOG.warning("The para of gtest is not the dict format as required")
         return ""
-
     for para in gtest_paras.keys():
         test_types = para.strip()
         para_datas = gtest_paras.get(para)
@@ -192,7 +194,7 @@ def gtest_para_parse(gtest_paras, runner, request):
 def reset_junit_para(junit_para_str, prefix_char="-e", ignore_keys=None):
     if not ignore_keys and not isinstance(ignore_keys, list):
         ignore_keys = ["class", "test"]
-    lines = junit_para_str.split("%s " % prefix_char)
+    lines = junit_para_str.split("{} ".format(prefix_char))
     normal_lines = []
     for line in lines:
         line = line.strip()
@@ -240,21 +242,25 @@ def get_app_name_by_tool(app_path, paths):
         The Pkg Name if found else None
     """
     rex = "^package:\\s+name='(.*?)'.*$"
-    aapt_tool_name = "aapt.exe" if os.name == "nt" else "aapt"
+    if platform.system() == "Windows":
+        aapt_tool_name = "aapt.exe"
+    elif platform.system() == "Linux":
+        aapt_tool_name = "aapt"
+    else:
+        aapt_tool_name = "aapt_mac"
     if app_path:
         proc_timer = None
         try:
-            tool_file = get_file_absolute_path(os.path.join(
-                "tools", aapt_tool_name), paths)
-            LOG.debug("Aapt file is %s" % tool_file)
+            tool_file = get_file_absolute_path(aapt_tool_name, paths)
+            LOG.debug("Aapt file is {}".format(tool_file))
 
-            if platform.system() == "Linux":
+            if platform.system() == "Linux" or platform.system() == "Darwin":
                 if not oct(os.stat(tool_file).st_mode)[-3:] == "755":
                     os.chmod(tool_file, FilePermission.mode_755)
 
             cmd = [tool_file, "dump", "badging", app_path]
             timeout = 300
-            LOG.info("Execute command %s with %s" % (" ".join(cmd), timeout))
+            LOG.info("Execute command {} with {}".format(" ".join(cmd), timeout))
 
             sub_process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                            stderr=subprocess.PIPE)
@@ -275,7 +281,7 @@ def get_app_name_by_tool(app_path, paths):
                     return pkg_match.group(1)
             return None
         except (FileNotFoundError, ParamError) as error:
-            LOG.debug("Aapt error: %s", error.args)
+            LOG.debug("Aapt error: {}".format(error.args))
             return None
         finally:
             if proc_timer:
@@ -296,7 +302,7 @@ def timeout_callback(proc):
                 ["C:\\Windows\\System32\\taskkill", "/F", "/T", "/PID",
                  str(proc.pid)], shell=False)
     except (FileNotFoundError, KeyboardInterrupt, AttributeError) as error:
-        LOG.exception("Timeout callback exception: %s" % error, exc_info=False)
+        LOG.exception("Timeout callback exception: {}".format(error, exc_info=False))
 
 
 def disable_keyguard(device):
@@ -314,3 +320,7 @@ def unlock_device(device):
     time.sleep(1)
     device.execute_shell_command("wm dismiss-keyguard")
     time.sleep(1)
+
+
+def check_device_ohca(device):
+    return False

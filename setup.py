@@ -15,45 +15,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 from setuptools import setup
 
 INSTALL_REQUIRES = []
 
-
-def main():
-    setup(name='xdevice',
-          description='xdevice test framework',
-          url='',
-          package_dir={'': 'src'},
-          packages=['xdevice',
-                    'xdevice._core',
-                    'xdevice._core.command',
-                    'xdevice._core.config',
-                    'xdevice._core.driver',
-                    'xdevice._core.environment',
-                    'xdevice._core.executor',
-                    'xdevice._core.report',
-                    'xdevice._core.testkit'
-                    ],
-          package_data={
-              'xdevice._core': [
-                  'resource/*.txt',
-                  'resource/config/*.xml',
-                  'resource/template/*.html',
-                  'resource/tools/*'
-              ]
-          },
-          entry_points={
-              'console_scripts': [
-                  'xdevice=xdevice.__main__:main_process',
-                  'xdevice_report=xdevice._core.report.__main__:main_report'
-              ]
-          },
-          zip_safe=False,
-          install_requires=INSTALL_REQUIRES,
-          )
-
-
-if __name__ == "__main__":
-    main()
+setup(
+    name='xdevice',
+    description='xdevice test framework',
+    url='',
+    package_dir={'': 'src'},
+    packages=['xdevice',
+              'xdevice._core',
+              'xdevice._core.command',
+              'xdevice._core.config',
+              'xdevice._core.driver',
+              'xdevice._core.environment',
+              'xdevice._core.executor',
+              'xdevice._core.report',
+              'xdevice._core.testkit',
+              'xdevice._core.context',
+              ],
+    package_data={
+        'xdevice._core': [
+            'resource/*.txt',
+            'resource/config/*.xml',
+            'resource/template/*',
+            'resource/template/static/*',
+            'resource/template/static/components/*',
+            'resource/template/static/css/*',
+            'resource/tools/*',
+            'resource/upsec/*',
+        ]
+    },
+    entry_points={
+        'console_scripts': [
+            'xdevice=xdevice.__main__:main_process',
+            'xdevice_report=xdevice._core.report.__main__:main_report'
+        ]
+    },
+    zip_safe=False,
+    install_requires=INSTALL_REQUIRES,
+    extras_require={
+        "full": ["cryptography"]
+    },
+)

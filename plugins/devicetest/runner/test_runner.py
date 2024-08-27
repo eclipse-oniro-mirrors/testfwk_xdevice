@@ -20,18 +20,20 @@ import copy
 import os
 import sys
 import traceback
+from typing import Union
 
+from xdevice import calculate_elapsed_time
 from xdevice import StateRecorder
 from xdevice import LifeCycle
 from xdevice import ResultCode
 from xdevice import get_cst_time
-from xdevice import Scheduler
-from xdevice import LifeStage
+from xdevice import platform_logger
+from xdevice import EnvPool
+from xdevice import CaseEnd
+from xdevice import Binder
 
 from devicetest.runner.prepare import PrepareHandler
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.constants import RunResult
-from devicetest.utils.util import calculate_execution_time
 from devicetest.utils.util import clean_sys_resource
 from devicetest.utils.util import get_base_name
 from devicetest.utils.util import get_dir_path
@@ -41,10 +43,18 @@ from devicetest.core.variables import ProjectVariables
 from devicetest.core.variables import CurCase
 from devicetest.core.exception import DeviceTestError
 from devicetest.core.test_case import DeviceRoot
+from devicetest.core.test_case import BaseCase
+from devicetest.error import ErrorMessage
+from devicetest.log.logger import DeviceTestLog as Log
 from devicetest.report.generation import add_log_caching_handler
 from devicetest.report.generation import del_log_caching_handler
 from devicetest.report.generation import get_caching_logs
 from devicetest.report.generation import generate_report
+
+
+class RunnerMode:
+    PIPELINE = "pipeline"
+    DEBUG = "debug"
 
 
 class TestRunner:
@@ -52,32 +62,43 @@ class TestRunner:
     """
 
     def __init__(self):
+        self.run_mode = RunnerMode.PIPELINE
         self.run_list = None
         self.no_run_list = None
         self.running = None
         self.configs = None
         self.devices = None
-        self.log = None
+        self.log = Log
         self.start_time = None
         self.test_results = None
         self.upload_result_handler = None
         self.project = None
         self.prepare = None
         self.cur_case = None
+        self._repeat = 1
+        self._repeat_round = 1
 
-    def init_pipeline_runner(self, run_list, configs, devices, log, upload_result_handler):
+    def init_pipeline_runner(self, run_list, configs, devices, upload_result_handler):
         self.run_list = run_list
         self.no_run_list = copy.copy(self.run_list)
         self.running = False
         self.configs = configs
         self.devices = devices
-        self.log = log
         self.start_time = get_cst_time()
         self.test_results = []
         self.upload_result_handler = upload_result_handler
         self.project = ProjectVariables(self.log)
         self.prepare = None
         self.__init_project_variables()
+        self.run_mode = RunnerMode.PIPELINE
+        self._repeat = self.configs.get("request").config.repeat
+        self._repeat_round = self.configs.get("request").get_repeat_round()
+
+    def init_case_runner(self, run_list: Union[BaseCase, list]):
+        # simple case runner
+        self.run_list = run_list
+        self.run_mode = RunnerMode.DEBUG
+        self.log = platform_logger("TestRunner")
 
     def __init_project_variables(self):
         """
@@ -92,26 +113,13 @@ class TestRunner:
         self.cur_case = CurCase(self.log)
         self.project.set_project_path()
         self.project.set_testcase_path(testcases_path)
-        self.project.set_task_report_dir(
-            self.get_report_dir_path(self.configs))
+        self.project.set_task_report_dir(self.configs.get("report_path"))
         self.project.set_resource_path(self.get_local_resource_path())
 
     def get_local_resource_path(self):
         local_resource_path = os.path.join(
             self.project.project_path, "testcases", "DeviceTest", "resource")
         return local_resource_path
-
-    def get_report_dir_path(self, configs):
-        report_path = configs.get("report_path")
-        if report_path and isinstance(report_path, str):
-            report_dir_path = report_path.split(os.sep.join(["", "temp", "task"]))[0]
-            if os.path.exists(report_dir_path):
-                return report_dir_path
-            self.log.debug("report dir path:{}".format(report_dir_path))
-        self.log.debug("report path:{}".format(report_path))
-        self.log.error(ErrorMessage.Error_01433.Message.en,
-                       Error_no=ErrorMessage.Error_01433.Code)
-        raise DeviceTestError(ErrorMessage.Error_01433.Topic)
 
     def get_local_aw_path(self):
         local_aw_path = os.path.join(
@@ -136,9 +144,9 @@ class TestRunner:
         if retry_test_list is None:
             return None
         elif not isinstance(retry_test_list, list):
-            self.log.error(ErrorMessage.Error_01430.Message.en,
-                           error_no=ErrorMessage.Error_01430.Code)
-            raise DeviceTestError(ErrorMessage.Error_01430.Topic)
+            err_msg = ErrorMessage.TestCase.Code_0203005
+            self.log.error(err_msg)
+            raise DeviceTestError(err_msg)
 
         elif len(retry_test_list) == 1 and "#" not in str(retry_test_list[0]):
             return None
@@ -184,13 +192,13 @@ class TestRunner:
         # **********混合root和非root**************
         try:
             for device in self.devices:
-                if hasattr(device, "is_hw_root"):
-                    DeviceRoot.is_root_device = device.is_hw_root
+                if hasattr(device, "is_root"):
+                    DeviceRoot.is_root_device = device.is_root
                     self.log.debug(DeviceRoot.is_root_device)
                     setattr(device, "is_device_root", DeviceRoot.is_root_device)
 
-        except Exception as e:
-            self.log.error(f'set branch api error. {e}')
+        except Exception as _:
+            self.log.error('set branch api error.')
         # **************混合root和非root end**********************
         self.prepare.run_prepare()
 
@@ -214,12 +222,13 @@ class TestRunner:
             return sys_aw_path
         return None
 
-    def run_test_class(self, test_cls_name, case_name, time_out=0):
+    def run_test_class(self, case_path, case_name):
         """Instantiates and executes a test class.
         If the test cases list is not None, all the test cases in the test
         class should be executed.
         Args:
-            test_cls_name: Name of the test class to execute.
+            case_path: case path
+            case_name: case name
         Returns:
             A tuple, with the number of cases passed at index 0, and the total
             number of test cases at index 1.
@@ -230,10 +239,13 @@ class TestRunner:
         tests = "__init__"
         case_result = RunResult.FAILED
         start_time = get_cst_time()
-        case_dir_path = get_dir_path(test_cls_name)
+        case_dir_path = get_dir_path(case_path)
         test_cls_instance = None
+
+        # 用例测试结果的拓展内容
+        result_content = None
         try:
-            self.project.cur_case_full_path = test_cls_name
+            self.project.cur_case_full_path = case_path
             DeccVariable.set_cur_case_obj(self.cur_case)
             test_cls = import_from_file(case_dir_path, case_name)
             self.log.info("Success to import {}.".format(case_name))
@@ -246,10 +258,13 @@ class TestRunner:
 
             case_result = test_cls_instance.result
             error_msg = test_cls_instance.error_msg
-
+            result_content = getattr(test_cls_instance, "result_content", None)
+        except ImportError as exception:
+            error_msg = str(exception)
+            self.log.error(error_msg)
+            self.log.error(traceback.format_exc())
         except Exception as exception:
-            error_msg = "{}: {}".format(ErrorMessage.Error_01100.Topic, exception)
-            self.log.error(ErrorMessage.Error_01100.Message.en, error_no=ErrorMessage.Error_01100.Code)
+            error_msg = ErrorMessage.TestCase.Code_0203002.format(exception)
             self.log.error(error_msg)
             self.log.error(traceback.format_exc())
         if test_cls_instance:
@@ -259,42 +274,44 @@ class TestRunner:
             except Exception as exception:
                 self.log.warning("del test_cls_instance exception. {}".format(exception))
 
-        Scheduler.call_life_stage_action(stage=LifeStage.case_end,
-                                         case_name=case_name,
-                                         case_result=case_result, error_msg=error_msg)
+        Binder.notify_stage(CaseEnd(case_name, case_result, error_msg))
 
         end_time = get_cst_time()
-        extra_head = self.cur_case.get_steps_extra_head()
+        environment = self.configs.get("request").config.environment
         steps = self.cur_case.get_steps_info()
         # 停止收集日志
         del_log_caching_handler(case_log_buffer_hdl)
         # 生成报告
-        logs = get_caching_logs(case_log_buffer_hdl)
         case_info = {
             "name": case_name,
             "result": case_result,
             "begin": start_time.strftime("%Y-%m-%d %H:%M:%S"),
             "end": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            'elapsed': calculate_execution_time(start_time, end_time),
+            'elapsed': calculate_elapsed_time(start_time, end_time),
             "error": error_msg,
-            "logs": logs,
-            "extra_head": extra_head,
+            "logs": "",
+            "devices": [] if environment is None else environment.get_description(),
             "steps": steps
         }
-        report_path = os.path.join("details", case_name + ".html")
-        to_path = os.path.join(self.project.task_report_dir, report_path)
-        generate_report(to_path, case=case_info)
+        log_content = {
+            "content": get_caching_logs(case_log_buffer_hdl)
+        }
+        round_folder = f"round{self._repeat_round}" if self._repeat > 1 else ""
+        report_path = os.path.join("details", round_folder, case_name + ".html")
+        to_file = os.path.join(self.project.task_report_dir, report_path)
+        generate_report(to_file, case=case_info, logs=log_content)
         steps.clear()
         del case_log_buffer_hdl
         self.cur_case.set_case_instance(None)
         self.record_current_case_result(
-            case_name, tests, case_result, start_time, error_msg, report_path)
+            case_name, tests, case_result, start_time, error_msg, report_path,
+            result_content=result_content)
         return case_result, error_msg
 
     def record_current_case_result(self, case_name, tests, case_result,
-                                   start_time, error_msg, report):
+                                   start_time, error_msg, report, **kwargs):
         test_result = self.record_cls_result(
-            case_name, tests, case_result, start_time, error_msg, report)
+            case_name, tests, case_result, start_time, error_msg, report, **kwargs)
         self.log.debug("test result: {}".format(test_result))
         self.test_results.append(test_result)
         self.upload_result_handler.report_handler.test_results.append(test_result)
@@ -308,8 +325,7 @@ class TestRunner:
             self.running = False
 
     @staticmethod
-    def record_cls_result(case_name=None, tests_step=None, result=None,
-                          start_time=None, error="", report=""):
+    def record_cls_result(case_name, tests_step, result, start_time, error, report, **kwargs):
         dict_result = {
             "case_name": case_name,
             "tests_step": tests_step or "__init__",
@@ -319,6 +335,7 @@ class TestRunner:
             "end_time": get_cst_time(),
             "report": report
         }
+        dict_result.update(kwargs)
         return dict_result
 
 
@@ -327,12 +344,12 @@ class TestSuiteRunner:
     executes test suite cases
     """
 
-    def __init__(self, suite, configs, devices, log):
+    def __init__(self, suite, configs, devices):
         self.suite = suite
         self.running = False
         self.configs = configs
         self.devices = devices
-        self.log = log
+        self.log = Log
         self.start_time = get_cst_time()
         self.listeners = self.configs["listeners"]
         self.state_machine = StateRecorder()
@@ -361,7 +378,6 @@ class TestSuiteRunner:
             A tuple, with the number of cases passed at index 0, and the total
             number of test cases at index 1.
         """
-        error_msg = "Test resource loading error"
         suite_dir_path = get_dir_path(test_cls_name)
         test_cls_instance = None
         try:
@@ -377,10 +393,14 @@ class TestSuiteRunner:
 
             self.handle_suite_ended(test_cls_instance)
             self.handle_suites_ended()
-
+        except ImportError as e:
+            error_msg = str(e)
+            self.log.error(error_msg)
+            self.log.error(traceback.format_exc())
         except Exception as e:
-            self.log.debug(traceback.format_exc())
+            error_msg = str(e)
             self.log.error("run suite error! Exception: {}".format(e))
+            self.log.error(traceback.format_exc())
         if test_cls_instance:
             try:
                 del test_cls_instance
@@ -439,13 +459,13 @@ class TestSuiteRunner:
         status_dict = {RunResult.PASSED: ResultCode.PASSED,
                        RunResult.FAILED: ResultCode.FAILED,
                        RunResult.BLOCKED: ResultCode.BLOCKED,
-                       "ignore": ResultCode.SKIPPED,
-                       RunResult.FAILED: ResultCode.FAILED}
+                       "ignore": ResultCode.SKIPPED}
         for case_name, case_result in testsuite_cls.case_result.items():
             result = case_result.get("result")
             error = case_result.get("error")
             run_time = case_result.get("run_time")
             report = case_result.get("report")
+            result_content = case_result.get("result_content")
 
             test_result = self.state_machine.test(reset=True)
             test_suite = self.state_machine.suite()
@@ -455,6 +475,8 @@ class TestSuiteRunner:
             test_result.stacktrace = error
             test_result.run_time = run_time
             test_result.report = report
+            if result_content:
+                test_result.result_content = result_content
             test_result.current = self.state_machine.running_test_index + 1
 
             self.state_machine.suite().run_time += run_time

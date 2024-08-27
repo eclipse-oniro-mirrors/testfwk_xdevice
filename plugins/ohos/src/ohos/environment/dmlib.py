@@ -34,7 +34,6 @@ from xdevice import Plugin
 from xdevice import get_plugin
 from xdevice import IShellReceiver
 from xdevice import exec_cmd
-from xdevice import get_file_absolute_path
 from xdevice import FilePermission
 from xdevice import DeviceError
 from xdevice import HdcError
@@ -42,9 +41,11 @@ from xdevice import HdcCommandRejectedException
 from xdevice import ShellCommandUnresponsiveException
 from xdevice import DeviceState
 from xdevice import convert_serial
+from xdevice import convert_mac
 from xdevice import is_proc_running
 from xdevice import convert_ip
 from xdevice import create_dir
+from ohos.error import ErrorMessage
 
 ID_OKAY = b'OKAY'
 ID_FAIL = b'FAIL'
@@ -116,7 +117,7 @@ class HdcMonitor:
         try:
             server_thread = threading.Thread(target=self.loop_monitor,
                                              name="HdcMonitor", args=())
-            server_thread.setDaemon(True)
+            server_thread.daemon = True
             server_thread.start()
         except FileNotFoundError as _:
             LOG.error("HdcMonitor can't find connector, init device "
@@ -127,8 +128,9 @@ class HdcMonitor:
         # if not, add xdevice's own hdc path to environ path.
         # tell if hdc has already been in the environ path.
         if env_hdc is None:
-            LOG.error("Can not find {} or {} environment variable, "
-                      "please set it first!".format(HDC_NAME, HDC_STD_NAME))
+            self.is_stop = True
+            LOG.error("Can not find {} or {} environment variable, please set first!".format(HDC_NAME, HDC_STD_NAME))
+            LOG.error("Stop {} monitor!".format(HdcHelper.CONNECTOR_NAME))
         if not is_proc_running(connector_name):
             port = DEFAULT_STD_PORT
             self.start_hdc(
@@ -156,16 +158,12 @@ class HdcMonitor:
             if self.main_hdc_connection is None:
                 self.connection_attempt += 1
                 if self.connection_attempt > MAX_CONNECT_ATTEMPT_COUNT:
-                    self.is_stop = True
                     LOG.error(
                         "HdcMonitor attempt %s, can't connect to hdc "
                         "for Device List Monitoring" %
                         str(self.connection_attempt))
-                    raise HdcError(
-                        "HdcMonitor cannot connect hdc server(%s %s),"
-                        " please check!" %
-                        (self.channel.get("host"),
-                         str(self.channel.get("post"))))
+                    raise HdcError(ErrorMessage.Hdc.Code_0304001.format(
+                        self.channel.get("host"), str(self.channel.get("post"))))
 
                 LOG.debug(
                     "HdcMonitor Connection attempts: %s" %
@@ -207,7 +205,7 @@ class HdcMonitor:
                             self.main_hdc_connection)
 
                 self.list_targets()
-                time.sleep(1)
+                time.sleep(2)
             except (HdcError, Exception) as _:
                 self.handle_exception_monitor_loop()
                 time.sleep(2)
@@ -267,7 +265,6 @@ class HdcMonitor:
         Attempts to connect to the debug bridge server. Return a connect socket
         if success, null otherwise.
         """
-        sock = None
         try:
             LOG.debug(
                 "HdcMonitor connecting to hdc for Device List Monitoring")
@@ -330,11 +327,19 @@ class HdcMonitor:
                 self.server.monitor_lock.release()
 
     def monitoring_list_targets(self):
-        if not self.monitoring:
-            HdcHelper.handle_shake(self.main_hdc_connection)
-            request = HdcHelper.form_hdc_request("alive")
-            HdcHelper.write(self.main_hdc_connection, request)
-            self.monitoring = True
+        try:
+            if not self.monitoring:
+                self.main_hdc_connection.settimeout(3)
+                HdcHelper.handle_shake(self.main_hdc_connection)
+                self.main_hdc_connection.settimeout(None)
+                request = HdcHelper.form_hdc_request("alive")
+                HdcHelper.write(self.main_hdc_connection, request)
+                self.monitoring = True
+        except socket.timeout as e:
+            LOG.error("HdcMonitor Connection handshake: error {}".format(e))
+            time.sleep(3)
+            raise HdcError(ErrorMessage.Hdc.Code_0304001.format(
+                self.channel.get("host"), self.channel.get("post"))) from e
         request = HdcHelper.form_hdc_request('list targets -v')
         HdcHelper.write(self.main_hdc_connection, request)
 
@@ -360,13 +365,13 @@ class HdcMonitor:
     @staticmethod
     def peek_hdc():
         LOG.debug("Peek running process to check expect connector.")
-        # if not find hdc_std, try find hdc
-        connector_name = HDC_STD_NAME
+        # if not find hdc_std, find hdc
+        connector_name = HDC_NAME
         env_hdc = shutil.which(connector_name)
         # if not, add xdevice's own hdc path to environ path.
         # tell if hdc has already been in the environ path.
         if env_hdc is None:
-            connector_name = HDC_NAME
+            connector_name = HDC_STD_NAME
         LOG.debug("Peak end")
         return connector_name
 
@@ -407,10 +412,9 @@ class SyncService:
 
         resp = HdcHelper.read_hdc_response(self.sock)
         if not resp.okay:
-            self.device.log.error(
-                "Got unhappy response from HDC sync req: %s" % resp.message)
-            raise HdcError(
-                "Got unhappy response from HDC sync req: %s" % resp.message)
+            err_msg = ErrorMessage.Hdc.Code_0304002.format(resp.message)
+            self.device.log.error(err_msg)
+            raise HdcError(err_msg)
 
     def close(self):
         """
@@ -433,7 +437,7 @@ class SyncService:
         mode = self.read_mode(remote)
         self.device.log.debug("Remote file %s mode is %d" % (remote, mode))
         if mode == 0:
-            raise HdcError("Remote object doesn't exist!")
+            raise HdcError(ErrorMessage.Device.Code_0303003.format(remote))
 
         if str(mode).startswith("168"):
             if is_create:
@@ -469,7 +473,7 @@ class SyncService:
                                   remote, local))
         remote_path_content = remote.encode(DEFAULT_ENCODING)
         if len(remote_path_content) > REMOTE_PATH_MAX_LENGTH:
-            raise HdcError("Remote path is too long.")
+            raise HdcError(ErrorMessage.Hdc.Code_0304003)
 
         msg = self.create_file_req(ID_RECV, remote_path_content)
         HdcHelper.write(self.sock, msg)
@@ -506,7 +510,7 @@ class SyncService:
                         raise IndexError(str(index_error)) from index_error
 
                 if length > SYNC_DATA_MAX:
-                    raise HdcError("Receiving too much data.")
+                    raise HdcError(ErrorMessage.Hdc.Code_0304004)
 
                 pulled_file.write(HdcHelper.read(self.sock, length))
                 pulled_file.flush()
@@ -519,7 +523,7 @@ class SyncService:
         and vice versa
         """
         if not os.path.exists(local):
-            raise HdcError("Local path doesn't exist.")
+            raise HdcError(ErrorMessage.Device.Code_0303002.format(local))
 
         if os.path.isdir(local):
             if is_create:
@@ -535,7 +539,7 @@ class SyncService:
                 file_path = os.path.join(local, child)
                 if os.path.isdir(file_path):
                     self.push_file(
-                        file_path,  "%s/%s" % (remote, child),
+                        file_path, "%s/%s" % (remote, child),
                         is_create=False)
                 else:
                     self.do_push_file(file_path, "%s/%s" % (remote, child))
@@ -566,7 +570,7 @@ class SyncService:
             except UnicodeEncodeError as _:
                 remote_path_content = remote.encode("UTF-8")
             if len(remote_path_content) > REMOTE_PATH_MAX_LENGTH:
-                raise HdcError("Remote path is too long.")
+                raise HdcError(ErrorMessage.Hdc.Code_0304003)
 
             # create the header for the action
             # and send it. We use a custom try/catch block to make the
@@ -782,9 +786,7 @@ class HdcHelper:
                                            package_file_path))
         remote_file_path = "/data/local/tmp/%s" % os.path.basename(
             package_file_path)
-
         HdcHelper.push_file(device, package_file_path, remote_file_path)
-
         result = HdcHelper._install_remote_package(device, remote_file_path,
                                                    command)
         HdcHelper.execute_shell_command(device, "rm %s " % remote_file_path)
@@ -807,6 +809,8 @@ class HdcHelper:
             HdcHelper.handle_shake(sock, device.device_sn)
             request = HdcHelper.form_hdc_request("target boot")
             HdcHelper.write(sock, request)
+        # 2024/7/4日出现新系统执行hdc target boot后不会马上重启情况,需要等待2s
+        time.sleep(2)
 
     @staticmethod
     def execute_shell_command(device, command, timeout=DEFAULT_TIMEOUT,
@@ -835,12 +839,12 @@ class HdcHelper:
                 timeout_msg = " with timeout %ss" % str(timeout / 1000)
                 message = "{} execute command: {} shell {}{}".format(convert_serial(device.device_sn),
                                                                      HdcHelper.CONNECTOR_NAME,
-                                                                     command, timeout_msg)
+                                                                     convert_mac(command), timeout_msg)
                 if output_flag:
                     LOG.info(message)
                 else:
                     LOG.debug(message)
-                from xdevice import Scheduler
+                from xdevice import Binder
                 HdcHelper.handle_shake(sock, device.device_sn)
                 request = HdcHelper.form_hdc_request("shell {}".format(command))
                 HdcHelper.write(sock, request)
@@ -859,12 +863,13 @@ class HdcHelper:
                             receiver.__read__(ret)
                         else:
                             LOG.debug(ret)
-                    if not Scheduler.is_execute:
+                    if not Binder.is_executing():
                         raise ExecuteTerminate()
                 return resp
         except socket.timeout as error:
-            device.log.error("ShellCommandUnresponsiveException: {} shell {} timeout[{}S]".format(
-                convert_serial(device.device_sn), command, str(timeout / 1000)))
+            err_msg = ErrorMessage.Device.Code_0303013.format(
+                convert_serial(device.device_sn), convert_mac(command), str(timeout / 1000))
+            device.log.error(err_msg)
             raise ShellCommandUnresponsiveException() from error
         finally:
             if receiver:
@@ -882,7 +887,7 @@ class HdcHelper:
         HdcHelper.write(sock, device_query)
         resp = HdcHelper.read_hdc_response(sock)
         if not resp.okay:
-            raise HdcCommandRejectedException(resp.message)
+            raise HdcCommandRejectedException(ErrorMessage.Hdc.Code_0304005.format(resp.message))
 
     @staticmethod
     def form_hdc_request(req):
@@ -944,7 +949,7 @@ class HdcHelper:
 
             size = sock.send(req)
             if size < 0:
-                raise DeviceError("channel EOF")
+                raise DeviceError(ErrorMessage.Device.Code_0303017)
 
             req = req[size:]
             time.sleep(5 / 1000)
@@ -1008,7 +1013,7 @@ class HdcHelper:
                 LOG.debug("Monitor main hdc connection is %s" %
                           hdc_connection.main_hdc_connection)
             if time.time() > end:
-                raise HdcError("Cannot detect HDC monitor!")
+                raise HdcError(ErrorMessage.Hdc.Code_0304006)
             time.sleep(2)
 
         try:
@@ -1020,7 +1025,7 @@ class HdcHelper:
             raise exception
 
         if sock is None:
-            raise HdcError("Cannot connect hdc server!")
+            raise HdcError(ErrorMessage.Hdc.Code_0304007)
 
         if timeout is not None:
             sock.setblocking(False)
@@ -1052,7 +1057,7 @@ class HdcHelper:
         length = struct.unpack("!I", reply)[0]
         data_buf = HdcHelper.read(sock, length)
         HdcHelper.reply_to_string(data_buf)
-        LOG.debug("result %s" % data_buf)
+        LOG.debug(data_buf.decode().strip())
 
     @staticmethod
     def is_hdc_std():
@@ -1175,7 +1180,7 @@ def process_command_ret(ret, receiver):
             receiver.__read__(ret)
             receiver.__done__()
     except Exception as error:
-        LOG.exception("Error generating log report.", exc_info=False)
+        LOG.exception(ErrorMessage.Common.Code_0301014, exc_info=False)
         raise ReportException() from error
 
     if ret != "" and not receiver:

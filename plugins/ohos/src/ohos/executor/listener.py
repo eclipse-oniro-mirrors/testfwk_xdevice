@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import uuid
 
 from xdevice import Plugin
 from xdevice import IListener
@@ -23,6 +24,10 @@ from xdevice import platform_logger
 from xdevice import ListenerType
 from xdevice import TestDescription
 from xdevice import ResultCode
+from xdevice import UniversalReportListener
+
+from ohos.executor.bean import StackCaseResult
+
 
 __all__ = ["CollectingLiteGTestListener", "CollectingPassListener"]
 
@@ -100,3 +105,70 @@ class CollectingPassListener(IListener):
 
     def get_current_run_results(self):
         return self.tests
+
+
+@Plugin(type=Plugin.LISTENER, id=ListenerType.stack_report)
+class StackReportListener(UniversalReportListener):
+    """
+    Listener suite event
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._suites_index_stack = list()
+
+    def _get_test_result(self, test_result, create=False):
+        if test_result.index in self.tests:
+            return self.tests.get(test_result.index)
+        elif create:
+            test = StackCaseResult()
+            rid = uuid.uuid4().hex if test_result.index == "" else \
+                test_result.index
+            test.index = rid
+            return self.tests.setdefault(rid, test)
+        else:
+            return self.tests.get(self.current_test_id)
+
+    def _handle_case_start(self, test_result):
+        test = self._get_test_result(test_result=test_result, create=True)
+        test.test_name = test_result.test_name
+        test.test_class = test_result.test_class
+        if len(self._suites_index_stack) > 0:
+            test.parent_index = self._suites_index_stack[-1]
+        self.current_test_id = test.index
+
+    def _handle_testsuite_start(self, test_result):
+        suite = self._get_suite_result(test_result=test_result,
+                                       create=True)
+        suite.suite_name = test_result.suite_name
+        suite.test_num = test_result.test_num
+        self.current_suite_id = suite.index
+        self._suites_index_stack.append(suite.index)
+
+    def _handle_testsuite_end(self, test_result, kwargs):
+        suite = self._get_suite_result(test_result=test_result,
+                                       create=False)
+        if not suite:
+            return
+        suite.run_time = test_result.run_time
+        suite.code = test_result.code
+        suite.report = test_result.report
+        suite.test_num = max(test_result.test_num, len(self.tests))
+        self._handle_suite_end_data(suite, kwargs)
+        if len(self._suites_index_stack) > 0:
+            self._suites_index_stack.pop(-1)
+
+    def _handle_suite_end_data(self, suite, kwargs):
+        if not kwargs.get("suite_report", False):
+            results_of_same_suite = list()
+            test_values = list(self.tests.values())
+            have_marked_list = list()
+            for index in range(len(test_values)-1, -1, -1):
+                cur_test = test_values[index]
+                if cur_test.parent_index == suite.index:
+                    results_of_same_suite.insert(0, cur_test)
+                    have_marked_list.append(cur_test.index)
+            for have_marked in have_marked_list:
+                self.tests.pop(have_marked)
+            self.suite_distributions.update({suite.index:  len(self.result)})
+            self.result.append((self.suites.get(suite.index), results_of_same_suite))

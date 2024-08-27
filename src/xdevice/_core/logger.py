@@ -22,9 +22,9 @@ import sys
 import time
 import threading
 import queue
-from logging import LogRecord
 from logging.handlers import RotatingFileHandler
 
+from _core.constants import LogMode
 from _core.constants import LogType
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
@@ -35,8 +35,7 @@ __all__ = ["Log", "platform_logger", "device_logger", "shutdown",
            "add_task_file_handler", "remove_task_file_handler",
            "change_logger_level",
            "add_encrypt_file_handler", "remove_encrypt_file_handler",
-           "redirect_driver_log_begin", "redirect_driver_log_end",
-           "LogQueue"]
+           "redirect_driver_log_begin", "redirect_driver_log_end"]
 
 _HANDLERS = []
 _LOGGERS = []
@@ -67,17 +66,17 @@ class DriverLogFilter(logging.Filter):
         super().__init__()
         self.thread_id = thread_id
 
-    def filter(self, record: LogRecord) -> bool:
+    def filter(self, record):
         return record.thread == self.thread_id
 
 
 class SchedulerLogFilter(logging.Filter):
-    
+
     def __init__(self):
         super().__init__()
         self.driver_thread_ids = []
 
-    def filter(self, record: LogRecord) -> bool:
+    def filter(self, record):
         return record.thread not in self.driver_thread_ids
 
     def add_driver_thread_id(self, thread_id):
@@ -112,7 +111,8 @@ class Log:
                 encoding="UTF-8")
             file_handler.setFormatter(logging.Formatter(log_format))
             self.handlers.append(file_handler)
-        if "console" in log_handler_flag:
+        if "console" in log_handler_flag \
+                and getattr(sys, LogMode.name, LogMode.default) != LogMode.no_console:
             stream_handler = logging.StreamHandler(sys.stdout)
             stream_handler.setFormatter(logging.Formatter(log_format))
             self.handlers.append(stream_handler)
@@ -134,9 +134,9 @@ class Log:
         else:
             log = self.loggers.setdefault(name, FrameworkLog(name))
             _LOGGERS.append(log)
-            log.platform_log.setLevel(self.level)
+            log.add_platform_level(self.level)
             for handler in self.handlers:
-                log.platform_log.addHandler(handler)
+                log.add_platform_handler(handler)
             if self.task_file_handler:
                 log.add_task_log(self.task_file_handler)
             return log
@@ -155,7 +155,7 @@ class Log:
             self.handlers.append(handler)
             # 3.为已有的日志对象添加驱动执行线程日志处理器
             for _, log in self.loggers.items():
-                log.add_driver_handler(handler)
+                log.add_task_log(handler)
             # 4.为调度日志对象记录器，添加当前执行线程的日志过滤标识
             if self.task_file_filter is not None \
                     and isinstance(self.task_file_filter, SchedulerLogFilter):
@@ -179,7 +179,7 @@ class Log:
                 self.handlers.remove(handler)
                 # 为已有的日志对象，移除驱动执行线程日志处理器
                 for _, log in self.loggers.items():
-                    log.remove_driver_handler(handler)
+                    log.remove_task_log(handler, False)
         finally:
             self._lock.release()
 
@@ -195,7 +195,7 @@ class Log:
         if self.task_file_handler is None:
             return
         for _, log in self.loggers.items():
-            log.remove_task_log(self.task_file_handler)
+            log.remove_task_log(self.task_file_handler, True)
         self.task_file_handler.close()
         self.task_file_handler = None
 
@@ -244,26 +244,28 @@ class FrameworkLog:
     def del_platform_handler(self, handler):
         self.platform_log.removeHandler(handler)
 
+    def add_platform_level(self, level):
+        self.platform_log.setLevel(level)
+
     def add_task_log(self, handler):
-        if self.task_log:
-            return
-        self.task_log = logging.Logger(self.name)
-        log_level = _query_log_level()
-        self.task_log.setLevel(log_level)
+        if not self.task_log:
+            self.task_log = logging.Logger(self.name)
+            log_level = _query_log_level()
+            self.task_log.setLevel(log_level)
         self.task_log.addHandler(handler)
 
-    def remove_task_log(self, handler):
+    def remove_task_log(self, handler, is_destroy=False):
         if not self.task_log:
             return
         self.task_log.removeHandler(handler)
-        self.task_log = None
+        if is_destroy:
+            self.task_log = None
 
     def add_encrypt_log(self, handler):
         if self.encrypt_log:
             return
         self.encrypt_log = logging.Logger(self.name)
-        log_level = getattr(sys, "log_level", logging.INFO) if hasattr(
-            sys, "log_level") else logging.DEBUG
+        log_level = _query_log_level()
         self.encrypt_log.setLevel(log_level)
         self.encrypt_log.addHandler(handler)
 
@@ -273,17 +275,6 @@ class FrameworkLog:
         self.encrypt_log.removeHandler(handler)
         self.encrypt_log = None
 
-    def add_driver_handler(self, handler):
-        if not self.driver_log:
-            self.driver_log = logging.Logger(self.name)
-            log_level = _query_log_level()
-            self.driver_log.setLevel(log_level)
-        self.driver_log.addHandler(handler)
-
-    def remove_driver_handler(self, handler):
-        if self.driver_log:
-            self.driver_log.removeHandler(handler)
-
     def info(self, msg, *args, **kwargs):
         additional_output = self._get_additional_output(**kwargs)
         updated_msg = self._update_msg(additional_output, msg)
@@ -292,8 +283,6 @@ class FrameworkLog:
             self.task_log.info(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.info(updated_msg, *args)
-        if self.driver_log:
-            self.driver_log.info(updated_msg, *args)
 
     def debug(self, msg, *args, **kwargs):
         additional_output = self._get_additional_output(**kwargs)
@@ -303,8 +292,6 @@ class FrameworkLog:
             self.platform_log.debug(updated_msg, *args)
             if self.task_log:
                 self.task_log.debug(updated_msg, *args)
-            if self.driver_log:
-                self.driver_log.debug(updated_msg, *args)
         else:
             if self.encrypt_log:
                 self.encrypt_log.debug(updated_msg, *args)
@@ -317,8 +304,6 @@ class FrameworkLog:
         self.platform_log.error(updated_msg, *args)
         if self.task_log:
             self.task_log.error(updated_msg, *args)
-        if self.driver_log:
-            self.driver_log.error(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.error(updated_msg, *args)
 
@@ -329,8 +314,6 @@ class FrameworkLog:
         self.platform_log.warning(updated_msg, *args)
         if self.task_log:
             self.task_log.warning(updated_msg, *args)
-        if self.driver_log:
-            self.driver_log.warning(updated_msg, *args)
         if self.encrypt_log:
             self.encrypt_log.warning(updated_msg, *args)
 
@@ -345,8 +328,6 @@ class FrameworkLog:
         self.platform_log.exception(updated_msg, exc_info=exc_info, *args)
         if self.task_log:
             self.task_log.exception(updated_msg, exc_info=exc_info, *args)
-        if self.driver_log:
-            self.driver_log.exception(updated_msg, exc_info=exc_info, *args)
         if self.encrypt_log:
             self.encrypt_log.exception(updated_msg, exc_info=exc_info, *args)
 
@@ -500,8 +481,7 @@ class EncryptFileHandler(RotatingFileHandler):
 
     def __init__(self, filename, mode='ab', max_bytes=0, backup_count=0,
                  encoding=None, delay=False):
-        RotatingFileHandler.__init__(self, filename, mode, max_bytes,
-                                     backup_count, encoding, delay)
+        super().__init__(filename, mode, max_bytes, backup_count, encoding, delay)
         self.mode = mode
         self.encrypt_error = None
 
@@ -511,8 +491,7 @@ class EncryptFileHandler(RotatingFileHandler):
 
         # baseFilename is the attribute in FileHandler
         base_file_name = getattr(self, "baseFilename", None)
-        with open(base_file_name, self.mode) as handler:
-            return handler
+        return open(base_file_name, self.mode, encoding=self.encoding)
 
     def emit(self, record):
         try:
@@ -538,6 +517,7 @@ class EncryptFileHandler(RotatingFileHandler):
         from _core.report.encrypt import check_pub_key_exist
         if check_pub_key_exist() and not self.encrypt_error:
             return True
+        return False
 
     def format(self, record):
         """
@@ -557,7 +537,7 @@ class EncryptFileHandler(RotatingFileHandler):
         if msg and "%s" in msg:
             msg = msg % record.args
         info = "[%s] [%s] [%s] [%s] %s%s" \
-               % (create_time, threading.currentThread().ident, name,
+               % (create_time, threading.current_thread().ident, name,
                   level_name, msg, "\n")
 
         try:
@@ -566,7 +546,7 @@ class EncryptFileHandler(RotatingFileHandler):
             error_no_str = \
                 "ErrorNo={}".format(getattr(error, "error_no", "00113"))
             info = "[%s] [%s] [%s] [%s] [%s] [%s]\n" % (
-                create_time, threading.currentThread().ident,
+                create_time, threading.current_thread().ident,
                 name, "ERROR", error, error_no_str)
             self.encrypt_error = bytes(info, "utf-8")
             return self.encrypt_error
@@ -575,9 +555,8 @@ class EncryptFileHandler(RotatingFileHandler):
 class LogQueue:
     log = None
     max_size = 0
-    queue_info = None
     queue_debug = None
-    queue_error = None
+    queue_info = None
 
     def __init__(self, log, max_size=MAX_LOG_CACHE_SIZE):
         self.log = log
@@ -600,7 +579,7 @@ class LogQueue:
                 log_queue.put(log_data)
             while not log_queue.empty():
                 is_print = True
-                result_data = "{} [{}] {}\n".format(result_data, threading.currentThread().ident, log_queue.get())
+                result_data = "{} [{}] {}\n".format(result_data, threading.current_thread().ident, log_queue.get())
         else:
             if log_data != "":
                 log_queue.put(log_data)

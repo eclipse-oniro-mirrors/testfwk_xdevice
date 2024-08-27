@@ -121,6 +121,10 @@ class IDevice(ABC):
         else:
             return self.extend_value.get(key, default)
 
+    @classmethod
+    def check_advance_option(cls, extend_value, **kwargs):
+        return True
+
 
 class IDriver(ABC):
     """

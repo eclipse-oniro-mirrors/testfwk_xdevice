@@ -19,7 +19,6 @@
 import time
 import threading
 
-from xdevice import UserConfigManager
 from xdevice import DeviceOsType
 from xdevice import ManagerType
 from xdevice import DeviceAllocationState
@@ -30,8 +29,12 @@ from xdevice import platform_logger
 from xdevice import convert_ip
 from xdevice import convert_port
 from xdevice import convert_serial
+from xdevice import ConfigConst
+from xdevice import check_mode_in_sys
+from xdevice import XMLNode
 
 from ohos.exception import LiteDeviceError
+from ohos.config.config_manager import OHOSUserConfigManager
 
 __all__ = ["ManagerLite"]
 
@@ -45,20 +48,31 @@ class ManagerLite(IDeviceManager):
     managing the set of available devices for testing
     """
 
+    instance = None
+
+    def __new__(cls):
+        """
+        Singleton instance
+        """
+        if cls.instance is None:
+            cls.instance = object.__new__(cls)
+        return cls.instance
+
     def __init__(self):
         self.devices_list = []
         self.list_con = threading.Condition()
         self.support_labels = ["ipcamera", "wifiiot", "watchGT"]
         self.support_types = ["device"]
 
-    def init_environment(self, environment="", user_config_file=""):
+    def init_environment(self, environment: str = "", user_config_file: str = "") -> bool:
         device_lite = get_plugin(plugin_type=Plugin.DEVICE,
                                  plugin_id=DeviceOsType.lite)[0]
 
-        devices = UserConfigManager(
+        devices = OHOSUserConfigManager(
             config_file=user_config_file, env=environment).get_com_device(
             "environment/device")
-
+        if not devices:
+            return False
         for device in devices:
             try:
                 device_lite_instance = device_lite.__class__()
@@ -70,6 +84,7 @@ class ManagerLite(IDeviceManager):
                 continue
 
             self.devices_list.append(device_lite_instance)
+        return True
 
     def env_stop(self):
         pass
@@ -115,29 +130,96 @@ class ManagerLite(IDeviceManager):
         pass
 
     def list_devices(self):
-        print("Lite devices:")
-        print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".
-              format("SerialPort/IP", "Baudrate/Port", "OsType", "Allocation",
-                     "Product", "ConnectType", "ComType"))
-        for device in self.devices_list:
-            if device.device_connect_type == "remote" or \
-                    device.device_connect_type == "agent":
-                print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}".format(
-                    convert_ip(device.device.host),
-                    convert_port(device.device.port),
-                    device.device_os_type,
-                    device.device_allocation_state,
-                    device.label,
-                    device.device_connect_type))
-            else:
-                for com_controller in device.device.com_dict:
-                    print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".
-                          format(convert_port(device.device.com_dict[
-                                     com_controller].serial_port),
-                                 device.device.com_dict[
-                                     com_controller].baud_rate,
-                                 device.device_os_type,
-                                 device.device_allocation_state,
-                                 device.label,
-                                 device.device_connect_type,
-                                 com_controller))
+        if check_mode_in_sys(ConfigConst.app_test):
+            return self.get_device_info()
+        else:
+            print("Lite devices:")
+            print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".
+                  format("SerialPort/IP", "Baudrate/Port", "OsType",
+                         "Allocation",
+                         "Product", "ConnectType", "ComType"))
+            for device in self.devices_list:
+                if device.device_connect_type == "remote" or \
+                        device.device_connect_type == "agent":
+                    print("{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}".format(
+                        convert_ip(device.device.host),
+                        convert_port(device.device.port),
+                        device.device_os_type,
+                        device.device_allocation_state,
+                        device.label,
+                        device.device_connect_type))
+                else:
+                    for com_controller in device.device.com_dict:
+                        print(
+                            "{0:<20}{1:<16}{2:<16}{3:<16}{4:<16}{5:<16}{6:<16}".
+                            format(convert_port(device.device.com_dict[
+                                                    com_controller].serial_port),
+                                   device.device.com_dict[
+                                       com_controller].baud_rate,
+                                   device.device_os_type,
+                                   device.device_allocation_state,
+                                   device.label,
+                                   device.device_connect_type,
+                                   com_controller))
+            return ""
+
+    def get_device_info(self):
+        devices_info = {}
+        return devices_info
+
+
+class LiteNode(XMLNode):
+
+    def __init__(self, usb_type, label):
+        super().__init__()
+        self.usb_type = usb_type
+        self.label = label
+
+    def __on_root_attrib__(self, attrib_dict):
+        attrib_dict.update({"type": self.usb_type})
+        attrib_dict.update({"label": self.label})
+
+    def add_address(self, host, port):
+        host_ele = self.create_node("ip")
+        port_ele = self.create_node("port")
+        host_ele.text = host
+        port_ele.text = port
+        self.get_root_node().append(host_ele)
+        self.get_root_node().append(port_ele)
+        return self
+
+    def add_serial(self):
+        self.get_root_node().append(self.create_node("serial"))
+        return self
+
+    def add_serial_connect(self, serial_index, com, _type):
+        child_dict = {"com": com, "type": _type}
+        return self.add_serial_child(serial_index, child_dict=child_dict)
+
+    def add_serial_baund_rate(self, serial_index, baund_rate):
+        child_dict = {"baund_rate": baund_rate}
+        return self.add_serial_child(serial_index, child_dict=child_dict)
+
+    def add_serial_data_bits(self, serial_index, data_bits):
+        child_dict = {"data_bits": data_bits}
+        return self.add_serial_child(serial_index, child_dict=child_dict)
+
+    def add_serial_stop_bits(self, serial_index, stop_bits):
+        child_dict = {"stop_bits": stop_bits}
+        return self.add_serial_child(serial_index, child_dict=child_dict)
+
+    def add_serial_timeout(self, serial_index, timeout):
+        child_dict = {"timeout": timeout}
+        return self.add_serial_child(serial_index, child_dict=child_dict)
+
+    def add_serial_child(self, serial_index, child_dict):
+        count = 0
+        for serial in self.get_root_node().iter("serial"):
+            if serial_index != count:
+                continue
+            count += 1
+            for tag, text in dict(child_dict).items():
+                ele = self.create_node(tag)
+                ele.text = text
+                serial.append(ele)
+        return self

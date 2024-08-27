@@ -18,6 +18,7 @@
 
 from inspect import signature
 
+from _core.error import ErrorMessage
 from _core.interface import IDriver
 from _core.interface import IParser
 from _core.interface import IListener
@@ -100,31 +101,22 @@ class Plugin(object):
             del _param_dict["type"]
             del _param_dict["id"]
         else:
-            raise ValueError(
-                '@Plugin must be specify type and id attributes. such as '
-                '@Plugin("plugin_type") or '
-                '@Plugin(type="plugin_type", id="plugin_id")')
+            raise ValueError(ErrorMessage.InterfaceImplement.Code_0102001)
         self.params = _param_dict
 
     def __call__(self, cls):
         if hasattr(cls, _DEFAULT_CONFIG_NAME):
-            raise TypeError(
-                "'{}' attribute is not allowed for plugin {} .".format(
-                    _DEFAULT_CONFIG_NAME, cls.__name__))
+            raise TypeError(ErrorMessage.InterfaceImplement.Code_0102002.format(_DEFAULT_CONFIG_NAME, cls.__name__))
         setattr(cls, _DEFAULT_CONFIG_NAME, Config(self.params))
 
         init_func = getattr(cls, "__init__", None)
         if init_func and type(
                 init_func).__name__ != "wrapper_descriptor" and len(
                 signature(init_func).parameters) != 1:
-            raise TypeError(
-                "__init__ method must be no arguments for plugin {} .".format(
-                    cls.__name__))
+            raise TypeError(ErrorMessage.InterfaceImplement.Code_0102003.format(cls.__name__))
 
         if hasattr(cls, "get_plugin_config"):
-            raise TypeError(
-                "'{}' method is not allowed for plugin {} .".format(
-                    "get_plugin_config", cls.__name__))
+            raise TypeError(ErrorMessage.InterfaceImplement.Code_0102004.format("get_plugin_config", cls.__name__))
 
         def get_plugin_config(obj):
             del obj
@@ -136,9 +128,7 @@ class Plugin(object):
         interfaces = self._builtin_plugin.get(self.plugin_type, [])
         for interface in interfaces:
             if not isinstance(instance, interface):
-                raise TypeError(
-                    "{} plugin must implement {} interface.".format(
-                        cls.__name__, interface))
+                raise TypeError(ErrorMessage.InterfaceImplement.Code_0102005.format(cls.__name__, interface))
 
         if "xdevice" in str(instance.__class__).lower():
             _PLUGINS.setdefault((self.plugin_type, self.plugin_id), []).append(
@@ -192,7 +182,7 @@ def set_plugin_params(plugin_type, plugin_id=None, **kwargs):
         plugin_id = plugin_type
     plugins = get_plugin(plugin_type, plugin_id)
     if len(plugins) == 0:
-        raise ValueError("Can not find the plugin %s" % plugin_id)
+        raise ValueError(ErrorMessage.InterfaceImplement.Code_0102006.format(plugin_id))
     for plugin in plugins:
         params = getattr(plugin, _DEFAULT_CONFIG_NAME)
         params.update(kwargs)

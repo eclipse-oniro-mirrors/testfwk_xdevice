@@ -22,10 +22,9 @@ import time
 
 from devicetest.core.constants import RunResult
 from devicetest.core.constants import RunSection
-from devicetest.core.error_message import ErrorMessage
-from devicetest.core.exception import DeviceTestError
 from devicetest.core.record import ProjectRecord
 from devicetest.log.logger import DeviceTestLog as log
+from devicetest.utils.time_util import TimeHandler
 from devicetest.utils.util import get_base_name
 from xdevice import is_env_pool_run_mode
 from xdevice import Variables
@@ -63,11 +62,7 @@ def get_project_path():
         return project_path
 
     except Exception as error:
-        log.error(ErrorMessage.Error_01428.Message.en,
-                  error_no=ErrorMessage.Error_01428.Code,
-                  is_traceback=True)
-
-        raise DeviceTestError(ErrorMessage.Error_01428.Topic) from error
+        raise error
 
 
 class CurCase:
@@ -79,7 +74,7 @@ class CurCase:
         self.run_section = ""  # RunSection.SETUP
         self.case_result = RunResult.PASSED  # 当前用例执行结果
         self.name = ''  # 类方法名，即：用例名case_id
-        self.suite_name = ""    # 用例对应哪个测试套
+        self.suite_name = ""  # 用例对应哪个测试套
         self.error_msg = ''  # 用例失败信息
         self.case_screenshot_dir = None  # 当前用例失败截图的图片保存路径
         self.case_flash_error_msg = False  # 记录当前y用例是否更新了errorMsg
@@ -90,8 +85,8 @@ class CurCase:
         self.step_error_msg = ''  # 当前步骤的失败信息
         self.step_fail_msg = ''  # 用户指定的失败信息
         self.step_result = RunResult.PASSED  # 当前步骤执行结果
-        self.steps_info = []    # 记录测试用例（含测试套子用例）的步骤信息，如步骤名称、执行结果、耗时、截图等
-        self.suite_steps_info = []      # 记录测试套的的步骤信息，如步骤名称、执行结果、耗时、截图等
+        self.steps_info = []  # 记录测试用例（含测试套子用例）的步骤信息，如步骤名称、执行结果、耗时、截图等
+        self.suite_steps_info = []  # 记录测试套的的步骤信息，如步骤名称、执行结果、耗时、截图等
         self.auto_record_steps_info = False  # 默认记录记录用例操作步骤的信息，设为False，需人工调用record_step添加
 
         self.test_method = TestMethod(self.log)
@@ -123,7 +118,16 @@ class CurCase:
         self.suite_instance = None
 
         self.devices = list()
+
         self.is_capture_step_screen = False
+        self.is_record_step_screen = False
+        self.set_step_screen()
+
+    def set_step_screen(self):
+        if Variables.config.taskargs.get("screenrecorder", "").lower() == "true":
+            self.is_record_step_screen = True
+        else:
+            self.is_capture_step_screen = True
 
     @property
     def testcase(self):
@@ -133,21 +137,15 @@ class CurCase:
     def testsuite(self):
         return self.suite_instance
 
-    def set_case_instance(self, case_obj):
-        self.case_instance = case_obj
-        self.set_capture_step_screen_flag(case_obj)
+    def set_case_instance(self, instance):
+        self.case_instance = instance
+        if instance:
+            self.devices = instance.devices
 
-    def set_suite_instance(self, suite_obj):
-        self.suite_instance = suite_obj
-        self.set_capture_step_screen_flag(suite_obj)
-
-    def set_capture_step_screen_flag(self, instance):
-        if instance is None:
-            return
-        configs = instance.configs
-        if configs.get("testargs", None) and configs["testargs"].get("screenshot", [""])[0].lower() == "true":
-            self.is_capture_step_screen = True
-        self.devices = instance.devices
+    def set_suite_instance(self, instance):
+        self.suite_instance = instance
+        if instance:
+            self.devices = instance.devices
 
     def set_error_msg(self, error_msg):
         self.log.debug("set CurCase error msg as: {}".format(error_msg))
@@ -176,8 +174,12 @@ class CurCase:
         self.log.debug(
             "set CurCase step section as: {}".format(self.step_section))
 
-    def set_case_screenshot_dir(self, test_suite_path, task_report_dir, cur_case_full_path):
-        case_screenshot_dir = task_report_dir if is_env_pool_run_mode() else os.path.join(task_report_dir, "script")
+    def set_case_screenshot_dir(self, test_suite_path, task_report_dir, cur_case_full_path,
+                                repeat=1, repeat_round=1):
+        round_folder = f"round{repeat_round}" if repeat > 1 else ""
+        case_screenshot_dir = os.path.join(task_report_dir, "details", round_folder)
+        if is_env_pool_run_mode():
+            case_screenshot_dir = task_report_dir
         case_abs_path_base_name = get_base_name(cur_case_full_path, is_abs_name=True)
         if case_abs_path_base_name and test_suite_path:
             self.log.debug("case_abs_path_base_name:{}, test_suite_path:{}"
@@ -215,20 +217,19 @@ class CurCase:
         self.step_index = index
 
     def set_step_info(self, name, **kwargs):
-        # 不允许外部的同名参数修改内部的记录
-        for builtin_key in ["cost", "result", "screenshot", "_timestamp"]:
-            if builtin_key in kwargs:
-                kwargs.pop(builtin_key)
-        # 耗时为前后Step的记录时间差
+        # 计算耗时，即前后Step记录的时间差
         steps_info = self._get_steps_info_obj()
         index = len(steps_info)
-        log.info(f'<div class="aw" id="{index}">{name}</div>')
         if index > 0:
             last_step = steps_info[-1]
             last_step["cost"] = round(time.time() - last_step.get("_timestamp"), 3)
+        log.info(f'<div class="step" id="{index}">{name}</div>')
         shots = self._capture_step_screen(name)
-        step = {"name": name, "result": "pass", "cost": 0, "screenshot": shots, "_timestamp": time.time()}
-        step.update(kwargs)
+        step = {
+            "name": name, "error": "", "cost": 0, "screenshot": shots,
+            "_timestamp": time.time(), "extras": {}
+        }
+        self.__update_step_info(step, **kwargs)
         steps_info.append(step)
         self.set_step_index(index)
         return index
@@ -240,35 +241,30 @@ class CurCase:
             log.warning(f"update step info failed, index must be in [0, {max_index}]")
             return
         step = steps_info[index]
-        step.update(kwargs)
+        self.__update_step_info(step, **kwargs)
 
-    def update_step_shots(self, path, link):
-        if path is None or not os.path.exists(path):
+    def update_step_shots(self, link, name):
+        if not link or not name:
             return
         steps_info = self._get_steps_info_obj()
         if len(steps_info) == 0:
             return
-        save_name = os.path.basename(path)
-        steps_info[-1].get("screenshot", []).append(f'<a href="{link}" target="_blank">{save_name}</a>')
+        step = steps_info[-1]
+        self.__update_step_info(step, screenshot={"link": link.replace("\\", "/"), "name": name})
 
-    def get_steps_extra_head(self):
-        """获取步骤记录的额外表头字段（AZ order）"""
-        steps_info = self._get_steps_info_obj()
-        if len(steps_info) == 0:
-            return []
-        # 默认表头，与self.set_step_info添加的记录对应
-        heads = ["name", "result", "cost", "screenshot"]
-        # 人工记录模式下，可拓展记录更多数据，获取最长的数据项的key做为表头
-        size, target = len(heads), None
-        for step in steps_info:
-            current_size = len(step)
-            if current_size >= size:
-                target = step
-                size = current_size
-        for name in target.keys():
-            if name not in heads and not name.startswith("_"):
-                heads.append(name)
-        return sorted(heads[4:])
+    @staticmethod
+    def __update_step_info(step, **kwargs):
+        """更新步骤的信息"""
+        # builtin_keys内部规定展示信息
+        builtin_keys = ["name", "error", "cost", "screenshot", "_timestamp"]
+        for k, v in kwargs.items():
+            if k not in builtin_keys:
+                step.get("extras").update({k: str(v)})
+                continue
+            if k == "error":
+                step.update({k: v})
+            elif k == "screenshot":
+                step.get("screenshot").append(v)
 
     def get_steps_info(self):
         steps_info = self._get_steps_info_obj()
@@ -289,11 +285,10 @@ class CurCase:
         if self.is_capture_step_screen:
             from devicetest.controllers.tools.screen_agent import ScreenAgent
             for device in self.devices:
-                path, link = ScreenAgent.capture_step_picture(device, step_name)
-                if path is None or not os.path.exists(path):
+                path, link = ScreenAgent.capture_step_picture(TimeHandler.get_now_datetime(), step_name, device)
+                if not path or not os.path.exists(path):
                     continue
-                save_name = os.path.basename(path)
-                shots.append(f'<a href="{link}" target="_blank">{save_name}</a>')
+                shots.append({"link": link.replace("\\", "/"), "name": step_name})
         return shots
 
 

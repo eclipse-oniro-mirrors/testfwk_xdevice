@@ -16,21 +16,22 @@
 # limitations under the License.
 #
 
+import json
 import os
 import re
-import subprocess
-import zipfile
+import requests
 import stat
+import subprocess
 import time
-import json
+import zipfile
 from dataclasses import dataclass
-from tempfile import TemporaryDirectory
-from tempfile import NamedTemporaryFile
 from multiprocessing import Process
 from multiprocessing import Queue
-from xdevice import FilePermission
+from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile
 
 from xdevice import DeviceLabelType
+from xdevice import FilePermission
 from xdevice import ITestKit
 from xdevice import platform_logger
 from xdevice import Plugin
@@ -45,18 +46,18 @@ from xdevice import check_path_legal
 from xdevice import modify_props
 from xdevice import get_app_name_by_tool
 from xdevice import remount
-from xdevice import disable_keyguard
-from xdevice import get_class
 from xdevice import get_cst_time
-from xdevice import UserConfigManager
+from xdevice import check_device_ohca
+from xdevice import Variables
 
 from ohos.constants import CKit
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
+from ohos.error import ErrorMessage
 
-__all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit", "WifiKit",
-           "ConfigKit", "AppInstallKit", "ComponentKit", "PermissionKit",
-           "junit_dex_para_parse", "SmartPerfKit"]
+__all__ = ["STSKit", "CommandKit", "PushKit", "PropertyCheckKit", "ShellKit",
+           "ConfigKit", "AppInstallKit", "ComponentKit",
+           "PermissionKit", "SmartPerfKit", "CommonPushKit"]
 
 MAX_WAIT_COUNT = 4
 TARGET_SDK_VERSION = 22
@@ -113,9 +114,8 @@ class CommandKit(ITestKit):
 
             result = device.install_package(package)
             if not result.startswith("Success") and "successfully" not in result:
-                raise AppInstallError(
-                    "Failed to install %s on %s. Reason:%s" %
-                    (package, device.__get_serial__(), result))
+                raise AppInstallError(ErrorMessage.Device.Code_0303007.format(
+                    package, device.__get_serial__(), result))
             LOG.debug("Installed package finished {}".format(package))
         elif command_type == "uninstall":
             LOG.debug("Trying to uninstall package {}".format(command_value))
@@ -140,9 +140,7 @@ class CommandKit(ITestKit):
             src, dst = files[0].strip(), files[1].strip()
             if not dst.startswith("/"):
                 dst = Props.dest_root + dst
-            LOG.debug(
-                "Trying to push the file local {} to remote{}".format(
-                    src, dst))
+            LOG.debug("Trying to push the file local {} to remote{}".format(src, dst))
             real_src_path = get_file_absolute_path(src, self.paths)
             if not real_src_path or not os.path.exists(real_src_path):
                 LOG.error(
@@ -163,8 +161,7 @@ class STSKit(ITestKit):
         self.sts_version = get_config_value('sts-version', config)
         self.throw_error = get_config_value('throw-error', config)
         if len(self.sts_version) < 1:
-            raise TypeError(
-                "The sts_version: {} is invalid".format(self.sts_version))
+            raise TypeError(ErrorMessage.Config.Code_0302013.format(self.sts_version))
 
     def __setup__(self, device, **kwargs):
         del kwargs
@@ -172,17 +169,15 @@ class STSKit(ITestKit):
                   format(device, self.get_plugin_config().__dict__))
         device_spl = device.get_property(Props.security_patch)
         if device_spl is None or device_spl == "":
-            LOG.error("The device security {} is invalid".format(device_spl))
-            raise ParamError(
-                "The device security patch version {} is invalid".format(
-                    device_spl))
+            err_msg = ErrorMessage.Config.Code_0302015.format(device_spl)
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         rex = '^[a-zA-Z\\d\\.]+_([\\d]+-[\\d]+)$'
         match = re.match(rex, self.sts_version)
         if match is None:
-            LOG.error("The sts version {} does match the rule".format(
-                self.sts_version))
-            raise ParamError("The sts version {} does match the rule".format(
-                self.sts_version))
+            err_msg = ErrorMessage.Config.Code_0302014.format(self.sts_version)
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
         sts_version_date_user = match.group(1).join("-01")
         sts_version_date_kernel = match.group(1).join("-05")
         if device_spl in [sts_version_date_user, sts_version_date_kernel]:
@@ -190,8 +185,7 @@ class STSKit(ITestKit):
                 "The device SPL version {} match the sts version {}".format(
                     device_spl, self.sts_version))
         else:
-            err_msg = "The device SPL version {} does not match the sts " \
-                      "version {}".format(device_spl, self.sts_version)
+            err_msg = ErrorMessage.Config.Code_0302016.format(device_spl, self.sts_version)
             LOG.error(err_msg)
             raise ParamError(err_msg)
 
@@ -200,11 +194,10 @@ class STSKit(ITestKit):
                   (device, self.get_plugin_config().__dict__))
 
 
-@Plugin(type=Plugin.TEST_KIT, id=CKit.push)
-class PushKit(ITestKit):
+class PushBase(ITestKit):
     def __init__(self):
         self.pre_push = ""
-        self.push_list = ""
+        self.push_list = []
         self.post_push = ""
         self.is_uninstall = ""
         self.paths = ""
@@ -230,13 +223,25 @@ class PushKit(ITestKit):
         self.pushed_file = []
 
     def __setup__(self, device, **kwargs):
-        self.request = kwargs.get("request")
-        LOG.debug("PushKit setup, device: {}".format(device.device_sn))
-        for command in self.pre_push:
-            run_command(device, command)
-        dst = None
-        remount(device)
-        for push_info in self.push_list:
+        pass
+
+    def _get_push_list(self, device):
+        new_push_list = []
+        if getattr(device, 'common_kits', None):
+            LOG.info(list(filter(lambda x: isinstance(x, CommonPushKit), device.common_kits)))
+            common_push_list = list(filter(lambda x: isinstance(x, CommonPushKit), device.common_kits))[0].push_list
+            for push_info in self.push_list:
+                if push_info in common_push_list:
+                    continue
+                else:
+                    new_push_list.append(push_info)
+        else:
+            new_push_list = self.push_list
+        return new_push_list
+
+    def _push_file(self, device, push_list: list) -> list:
+        dsts = []
+        for push_info in push_list:
             files = re.split('->|=>', push_info)
             if len(files) != 2:
                 LOG.error("The push spec is invalid: {}".format(push_info))
@@ -255,9 +260,13 @@ class PushKit(ITestKit):
                         raise error
                     LOG.warning(error, error_no=error.error_no)
                     continue
+            if check_device_ohca(device) and dst.startswith("/data/"):
+                regex = re.compile('^/data/*')
+                dst = regex.sub("/data/ohos_data/", dst)
             # hdc don't support push directory now
             if os.path.isdir(real_src_path):
-                device.connector_command("shell mkdir {}".format(dst))
+                command = "shell mkdir {}".format(dst)
+                device.connector_command(command)
                 for root, _, files in os.walk(real_src_path):
                     for file in files:
                         device.push_file("{}".format(os.path.join(root, file)),
@@ -276,21 +285,17 @@ class PushKit(ITestKit):
                                  "{}".format(dst))
                 LOG.debug("Push file finished from {} to {}".format(src, dst))
                 self.pushed_file.append(dst)
-        for command in self.post_push:
-            run_command(device, command)
-        return self.pushed_file, dst
+            dsts.append(dst)
+        return dsts
 
     def __download_web_resource(self, device, file_path):
         """下载OpenHarmony兼容性测试资源文件"""
         # 在命令行配置
+        config = Variables.config
         request_config = self.request.config
-        enable_web_resource1 = request_config.get(ConfigConst.testargs).get(
-            ConfigConst.enable_web_resource, ["false"])[0].lower()
+        enable_web_resource1 = config.taskargs.get(ConfigConst.enable_web_resource, "false").lower()
         # 在xml配置
-        config_manager = UserConfigManager(
-            config_file=self.request.get(ConfigConst.configfile, ""),
-            env=self.request.get(ConfigConst.test_environment, ""))
-        web_resource = config_manager.get_resource_conf().get(ConfigConst.web_resource, {})
+        web_resource = config.resource.get(ConfigConst.web_resource, {})
         web_resource_url = web_resource.get(ConfigConst.tag_url, "").strip()
         enable_web_resource2 = web_resource.get(ConfigConst.tag_enable, "false").lower()
         if enable_web_resource1 == "false" and enable_web_resource2 == "false":
@@ -313,7 +318,6 @@ class PushKit(ITestKit):
             os.makedirs(save_path)
         cli = None
         try:
-            import requests
             cli = requests.get(url, timeout=5, verify=False)
             if cli.status_code == 200:
                 file_fd = os.open(save_file, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
@@ -326,7 +330,7 @@ class PushKit(ITestKit):
         finally:
             if cli is not None:
                 cli.close()
-        return save_file if os.path.exists(save_path) else None
+        return save_file if os.path.exists(save_file) else None
 
     def __query_resource_url(self, device, query_url, file_path):
         """获取资源下载链接"""
@@ -345,18 +349,17 @@ class PushKit(ITestKit):
         cli = None
         params = {
             "filePath": file_path,
+            "testType": test_type,
             "osType": os_type,
-            "osVersion": os_version,
-            "testType": test_type
+            "osVersion": os_version
         }
-        LOG.debug(f"query resource's response params: {params}")
+        LOG.debug(f"query resource's params {params}")
         try:
-            import requests
             cli = requests.post(query_url, json=params, timeout=5, verify=False)
             rsp_code = cli.status_code
             rsp_body = cli.content.decode()
-            LOG.debug(f"query resource's response code: {rsp_code}")
-            LOG.debug(f"query resource's response body: {rsp_body}")
+            LOG.debug(f"query resource's response code {rsp_code}")
+            LOG.debug(f"query resource's response body {rsp_body}")
             if rsp_code == 200:
                 try:
                     data = json.loads(rsp_body)
@@ -453,16 +456,14 @@ class PropertyCheckKit(ITestKit):
         if not prop_value:
             LOG.warning(
                 "The property {} not found on device, cannot check the value".
-                    format(self.prop_name))
+                format(self.prop_name))
             return
 
         if prop_value != self.expected_value:
-            msg = "The value found for property {} is {}, not same with the " \
-                  "expected {}".format(self.prop_name, prop_value,
-                                       self.expected_value)
-            LOG.warning(msg)
+            err_msg = ErrorMessage.Config.Code_0302024.format(self.prop_name, prop_value, self.expected_value)
+            LOG.warning(err_msg)
             if self.throw_error and self.throw_error.lower() == 'true':
-                raise Exception(msg)
+                raise Exception(err_msg)
 
     @classmethod
     def __teardown__(cls, device):
@@ -503,113 +504,28 @@ class ShellKit(ITestKit):
             LOG.info("No teardown-localcommand to run, skipping!")
         else:
             for command in self.tear_down_local_command:
+                subprocess.run(command)
                 ret = subprocess.run(command, capture_output=True, text=True)
                 LOG.info("Teardown-localcommand run: {}".format(ret))
-
-
-@Plugin(type=Plugin.TEST_KIT, id=CKit.wifi)
-class WifiKit(ITestKit):
-    def __init__(self):
-        self.certfilename = ""
-        self.certpassword = ""
-        self.wifiname = ""
-        self.paths = ""
-
-    def __check_config__(self, config):
-        self.certfilename = get_config_value(
-            'certfilename', config, False,
-            default=None)
-        self.certpassword = get_config_value(
-            'certpassword', config, False,
-            default=None)
-        self.wifiname = get_config_value(
-            'wifiname', config, False,
-            default=None)
-        self.paths = get_config_value('paths', config)
-
-    def __setup__(self, device, **kwargs):
-        request = kwargs.get("request", None)
-        if not request:
-            LOG.error("WifiKit need input request")
-            return
-        testargs = request.get("testargs", {})
-        self.certfilename = \
-            testargs.pop("certfilename", [self.certfilename])[0]
-        self.wifiname = \
-            testargs.pop("wifiname", [self.wifiname])[0]
-        self.certpassword = \
-            testargs.pop("certpassword", [self.certpassword])[0]
-        del kwargs
-        LOG.debug("WifiKit setup, device:{}".format(device.device_sn))
-
-        try:
-            wifi_app_path = get_file_absolute_path(
-                Props.Paths.service_wifi_app_path, self.paths)
-        except ParamError as _:
-            wifi_app_path = None
-
-        if wifi_app_path is None:
-            LOG.error("The resource wifi app file does not exist!")
-            return
-
-        try:
-            pfx_path = get_file_absolute_path(
-                "tools/wifi/%s" % self.certfilename
-            ) if self.certfilename else None
-        except ParamError as _:
-            pfx_path = None
-
-        if pfx_path is None:
-            LOG.error("The resource wifi pfx file does not exist!")
-            return
-        pfx_dest_path = \
-            "/storage/emulated/0/%s" % self.certfilename
-        if self.wifiname is None:
-            LOG.error("The wifi name is not given!")
-            return
-        if self.certpassword is None:
-            LOG.error("The wifi password is not given!")
-            return
-
-        device.install_package(wifi_app_path, command="-r")
-        device.push_file(pfx_path, pfx_dest_path)
-        device.execute_shell_command("svc wifi enable")
-        for _ in range(Props.maximum_connect_wifi_times):
-            connect_wifi_cmd = Props.connect_wifi_cmd % (
-                pfx_dest_path,
-                self.certpassword,
-                self.wifiname
-            )
-            if device.execute_shell_command(connect_wifi_cmd):
-                LOG.info("Connect wifi successfully")
-                break
-        else:
-            LOG.error("Connect wifi failed")
-
-    @classmethod
-    def __teardown__(cls, device):
-        LOG.debug("WifiKit teardown: device:{}".format(device.device_sn))
-        LOG.info("Disconnect wifi")
-        device.execute_shell_command("svc wifi disable")
 
 
 @dataclass
 class Props:
     @dataclass
     class Paths:
-        system_build_prop_path = "/%s/%s" % ("system", "build.prop")
-        service_wifi_app_path = "tools/wifi/%s" % "Service-wifi.app"
+        system_build_prop_path = "/system/build.prop"
+        service_wifi_app_path = "tools/wifi/xDeviceService-wifi.apk"
 
-    dest_root = "/%s/%s/" % ("data", "data")
+    dest_root = "/data/data/"
     mnt_external_storage = "EXTERNAL_STORAGE"
     trying_remove_maximum_times = 3
     maximum_connect_wifi_times = 3
-    connect_wifi_cmd = "am instrument -e request \"{module:Wifi, " \
-                       "method:connectWifiByCertificate, params:{'certPath':" \
-                       "'%s'," \
-                       "'certPassword':'%s'," \
-                       "'wifiName':'%s'}}\"  " \
-                       "-w com.xdeviceservice.service/.MainInstrumentation"
+    connect_wifi_cmd = "am instrument -e request \"{{module:Wifi, " \
+                       "method:connectWifiByCertificate, params:{{'certPath':" \
+                       "'{}}}'," \
+                       "'certPassword':'{}'," \
+                       "'wifiName':'{}'}}}}\"  " \
+                       "-w com.xdeviceservice.service.plrdtest/com.xdeviceservice.service.MainInstrumentation"
     security_patch = "ro.build.version.security_patch"
 
 
@@ -618,7 +534,6 @@ class ConfigKit(ITestKit):
     def __init__(self):
         self.is_connect_wifi = ""
         self.is_disconnect_wifi = ""
-        self.wifi_kit = WifiKit()
         self.min_external_store_space = ""
         self.is_disable_dialing = ""
         self.is_test_harness = ""
@@ -639,7 +554,6 @@ class ConfigKit(ITestKit):
                                                 is_list=False, default=False)
         self.is_disconnect_wifi = get_config_value(
             'disconnect-wifi-after-test', config, is_list=False, default=True)
-        self.wifi_kit = WifiKit()
         self.min_external_store_space = get_config_value(
             'min-external-store-space', config)
         self.is_disable_dialing = get_config_value('disable-dialing', config)
@@ -676,8 +590,6 @@ class ConfigKit(ITestKit):
         LOG.debug("ConfigKit teardown: device:{}".format(device.device_sn))
         if self.is_remount:
             remount(device)
-        if self.is_connect_wifi and self.is_disconnect_wifi:
-            self.wifi_kit.__teardown__(device)
         if self.is_prop_changed:
             device.push_file(self.local_system_prop_file,
                              Props.Paths.system_build_prop_path)
@@ -794,6 +706,7 @@ class AppInstallKit(ITestKit):
         if len(self.app_list) == 0:
             LOG.info("No app to install, skipping!")
             return
+        # to disable app install alert
         for app in self.app_list:
             if self.alt_dir:
                 app_file = get_file_absolute_path(app, self.paths,
@@ -803,7 +716,7 @@ class AppInstallKit(ITestKit):
             if app_file is None:
                 LOG.error("The app file {} does not exist".format(app))
                 continue
-            device.connector_command("install \"{}\"".format(app_file))
+            self.install_hap(device, app_file)
             self.installed_app.add(app_file)
 
     def __teardown__(self, device):
@@ -855,38 +768,34 @@ class AppInstallKit(ITestKit):
                     self.pushed_hap_file.add(os.path.join(
                         push_dest_dir + os.path.basename(hap_file)))
                     device.reboot()
-            except RuntimeError as exception:
-                msg = "Install hap app failed withe error {}".format(exception)
-                LOG.error(msg)
-                raise Exception(msg)
             except Exception as exception:
-                msg = "Install hap app failed withe exception {}".format(
-                    exception)
-                LOG.error(msg)
-                raise Exception(msg)
+                err_msg = ErrorMessage.Device.Code_0303006.format(exception)
+                LOG.error(err_msg)
+                raise Exception(err_msg) from exception
             finally:
                 zif_file.close()
         else:
-            push_dest = "/%s" % "sdcard"
-            push_dest = "%s/%s" % (push_dest, os.path.basename(hap_file))
+            if hasattr(device, "is_oh"):
+                push_dest = "/data/local/tmp"
+            else:
+                push_dest = "/sdcard"
+            push_dest = "{}/{}".format(push_dest, os.path.basename(hap_file))
             device.push_file(hap_file, push_dest)
             self.pushed_hap_file.add(push_dest)
-            output = device.execute_shell_command("bm install -p " + push_dest)
-            if not output.startswith("Success") and not "successfully" in output:
+            output = device.execute_shell_command("bm install -p {} {}".format(push_dest, self.ex_args))
+            if not output.startswith("Success") and "successfully" not in output:
                 output = output.strip()
                 if "[ERROR_GET_BUNDLE_INSTALLER_FAILED]" not in output.upper():
-                    raise AppInstallError(
-                        "Failed to install %s on %s. Reason:%s" %
-                        (push_dest, device.__get_serial__(), output))
+                    raise AppInstallError(ErrorMessage.Device.Code_0303007.format(
+                        push_dest, device.__get_serial__(), output))
                 else:
                     LOG.info("'[ERROR_GET_BUNDLE_INSTALLER_FAILED]' occurs, "
                              "retry install hap")
                     exec_out = self.retry_install_hap(
-                        device, "bm install -p " + push_dest)
-                    if not exec_out.startswith("Success") and not "successfully" in output:
-                        raise AppInstallError(
-                            "Retry failed,Can't install %s on %s. Reason:%s" %
-                            (push_dest, device.__get_serial__(), exec_out))
+                        device, "bm install -p {} {}".format(push_dest, self.ex_args))
+                    if not exec_out.startswith("Success") and "successfully" not in output:
+                        raise AppInstallError(ErrorMessage.Device.Code_0303007.format(
+                            push_dest, device.__get_serial__(), exec_out))
             else:
                 LOG.debug("Install %s success" % push_dest)
 
@@ -924,7 +833,7 @@ class ComponentKit(ITestKit):
         self.cache_part = set()
 
     def __check_config__(self, config):
-        self._white_list_file =\
+        self._white_list_file = \
             get_config_value('white-list', config, is_list=False)
         self._cap_file = get_config_value('cap-file', config, is_list=False)
         self.paths = get_config_value('paths', config)
@@ -995,7 +904,7 @@ class ComponentKit(ITestKit):
         self.cache_device.clear()
 
 
-@Plugin(type=Plugin.TEST_KIT , id=CKit.permission)
+@Plugin(type=Plugin.TEST_KIT, id=CKit.permission)
 class PermissionKit(ITestKit):
     def __init__(self):
         self.package_name_list = None
@@ -1028,8 +937,8 @@ class PermissionKit(ITestKit):
 
     def _get_token_id(self, device, pkg_name):
         # shell bm dump -n
-        dump_command = "bm dump -n {}".format(pkg_name)
-        content = device.execute_shell_command(dump_command)
+        dum_command = "bm dump -n {}".format(pkg_name)
+        content = device.execute_shell_command(dum_command)
         if not content or not str(content).startswith(pkg_name):
             return ""
         content = content[len(pkg_name) + len(":\n"):]
@@ -1052,79 +961,39 @@ def run_command(device, command):
     stdout = None
     if command.strip() == "remount":
         remount(device)
-    if command.strip() == "target mount":
+    elif command.strip() == "target mount":
         device.connector_command(command.split(" "))
     elif command.strip() == "reboot":
         device.reboot()
     elif command.strip() == "reboot-delay":
         pass
-    elif command.strip().startswith("wait"):
-        command_list = command.split(" ")
-        if command_list and len(command_list) > 1:
-            secs = int(command_list[1])
-            LOG.debug("Start wait {} secs".format(secs))
-            time.sleep(secs)
-            stdout = "Finish wait 10 secs"
     elif command.strip().endswith("&"):
         device.execute_shell_in_daemon(command.strip())
+    elif command.strip().startswith("push"):
+        if check_device_ohca(device):
+            command_list = command.split(" ")
+            if command_list and \
+                    len(command_list) > 0 and \
+                    command_list[len(command_list) - 1].startswith("/data/"):
+                regex = re.compile('^/data/*')
+                command_list[len(command_list) - 1] = regex.sub("/data/ohos_data/",
+                                                                command_list[len(command_list) - 1])
+                command = " ".join(command_list)
+        stdout = device.execute_shell_command(command)
+    elif command.strip().startswith("cp"):
+        if check_device_ohca(device):
+            regex = re.compile('^/data/*')
+            command_list = command.split(" ")
+            if command_list[1].startswith("/data/"):
+                command_list[1] = regex.sub("/data/ohos_data/", command_list[1])
+            if command_list[2].startswith("/data"):
+                command_list[2] = regex.sub("/data/ohos_data/", command_list[2])
+            command = " ".join(command_list)
+        stdout = device.execute_shell_command(command)
     else:
         stdout = device.execute_shell_command(command)
     LOG.debug("Run command result: %s" % (stdout if stdout else ""))
     return stdout
-
-
-def junit_dex_para_parse(device, junit_paras, prefix_char="--"):
-    """To parse the para of junit
-    Args:
-        device: the device running
-        junit_paras: the para dict of junit
-        prefix_char: the prefix char of parsed cmd
-    Returns:
-        the new para using in a command like -e testFile xxx
-        -e coverage true...
-    """
-    ret_str = []
-    path = "/%s/%s/%s" % ("data", "local", "ajur")
-    include_file = "%s/%s" % (path, "includes.txt")
-    exclude_file = "%s/%s" % (path, "excludes.txt")
-
-    if not isinstance(junit_paras, dict):
-        LOG.warning("The para of junit is not the dict format as required")
-        return ""
-    # Disable screen keyguard
-    disable_key_guard = junit_paras.get('disable-keyguard')
-    if not disable_key_guard or disable_key_guard[0].lower() != 'false':
-        disable_keyguard(device)
-
-    for para_name in junit_paras.keys():
-        path = "/%s/%s/%s/" % ("data", "local", "ajur")
-        if para_name.strip() == 'test-file-include-filter':
-            for file_name in junit_paras[para_name]:
-                device.push_file(file_name, include_file)
-                device.execute_shell_command(
-                    'chown -R shell:shell %s' % path)
-            ret_str.append(prefix_char + " ".join(['testFile', include_file]))
-        elif para_name.strip() == "test-file-exclude-filter":
-            for file_name in junit_paras[para_name]:
-                device.push_file(file_name, include_file)
-                device.execute_shell_command(
-                    'chown -R shell:shell %s' % path)
-            ret_str.append(prefix_char + " ".join(['notTestFile',
-                                                   exclude_file]))
-        elif para_name.strip() == "test" or para_name.strip() == "class":
-            result = get_class(junit_paras, prefix_char, para_name.strip())
-            ret_str.append(result)
-        elif para_name.strip() == "include-annotation":
-            ret_str.append(prefix_char + " ".join(
-                ['annotation', ",".join(junit_paras[para_name])]))
-        elif para_name.strip() == "exclude-annotation":
-            ret_str.append(prefix_char + " ".join(
-                ['notAnnotation', ",".join(junit_paras[para_name])]))
-        else:
-            ret_str.append(prefix_char + " ".join(
-                [para_name, ",".join(junit_paras[para_name])]))
-
-    return " ".join(ret_str)
 
 
 def get_app_name(hap_app):
@@ -1148,7 +1017,7 @@ def get_app_name(hap_app):
                      "successfully".format(app_name))
         else:
             LOG.debug("Tip: 'app' or 'bundleName' not "
-                      "in %s.hap/config.json" % hap_name)
+                      "in {}.hap/config.json".format(hap_name))
     except Exception as e:
         LOG.error("get app name from hap error: {}".format(e))
     finally:
@@ -1170,7 +1039,7 @@ class SmartPerfKit(ITestKit):
     def __check_config__(self, config):
         self._run_command.append(self.target_name)
         if isinstance(config, str):
-            key_value_pairs = str(config).strip(";")
+            key_value_pairs = str(config).split(";")
             for key_value_pair in key_value_pairs:
                 key, value = key_value_pair.split(":", 1)
                 if key == "num":
@@ -1178,6 +1047,28 @@ class SmartPerfKit(ITestKit):
                     self._run_command.append(value)
                 else:
                     if key in self._param_key and value == "true":
+                        self._run_command.append("-" + key[:1])
+        elif isinstance(config, dict):
+            self._run_command[-1] = config.get('bundle_name', '')
+            params = config.get('params', {})
+            if 'num' not in params:
+                self._run_command.append("-N")
+                self._run_command.append("1")
+                LOG.warning(f'Set num to default value (1) because it is not set. ')
+            for key, value in params.items():
+                if key == "num":
+                    self._run_command.append("-N")
+                    try:
+                        value = int(value)
+                    except ValueError as e:
+                        value = 1
+                        LOG.warning(f'Set num to default value ({value}) because: {e}')
+                    if value <= 0:
+                        value = 1
+                        LOG.warning(f'Set num to default value ({value}) because it cannot be less than 1! ')
+                    self._run_command.append(f"{value}")
+                else:
+                    if key in self._param_key and value:
                         self._run_command.append("-" + key[:1])
 
     def _execute(self, msg_queue, cmd_list, xls_file, proc_name):
@@ -1198,9 +1089,11 @@ class SmartPerfKit(ITestKit):
         sheet.row_dimensions[1].height = 30
         sheet.column_dimensions["A"].width = 30
         sheet.sheet_properties.tabColor = "1072BA"
-        alignment = styles.Alignment(horizontal='center', vertical='center')
-        font = styles.Font(size=15, color="000000", bold=True,
-                           italic=False, strike=None, underline=None)
+        alignment = styles.Alignment(horizontal='center',
+                                     vertical='center')
+        font = styles.Font(size=15, color="000000",
+                           bold=True, italic=False, strike=None,
+                           underline=None)
         names = ["time", "PKG"]
         start = True
         for _time, content in data:
@@ -1217,7 +1110,7 @@ class SmartPerfKit(ITestKit):
                 sheet.append(cur)
                 for pos in range(1, len(names) + 1):
                     cur_cell = sheet.cell(1, pos)
-                    sheet.column_dimensions[cur_cell.colum_letter].width = 20
+                    sheet.column_dimensions[cur_cell.column_letter].width = 20
                     cur_cell.alignment = alignment
                     cur_cell.font = font
             else:
@@ -1235,10 +1128,12 @@ class SmartPerfKit(ITestKit):
             os.mkdir(folder)
         file = os.path.join(folder, "{}.xlsx".format(request.get_module_name()))
         if device.host != "127.0.0.1":
-            cmd_list = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(
-                device.host, device.port), "-t", device.device_sn, "shell"]
+            cmd_list = [HdcHelper.CONNECTOR_NAME, "-s",
+                        "{}:{}".format(device.host, device.port), "-t",
+                        device.device_sn, "shell"]
         else:
-            cmd_list = [HdcHelper.CONNECTOR_NAME, "-t", device.device_sn, "shell"]
+            cmd_list = [HdcHelper.CONNECTOR_NAME, "-t", device.device_sn,
+                        "shell"]
 
         cmd_list.extend(self._run_command)
         LOG.debug("Smart perf command:{}".format(" ".join(cmd_list)))
@@ -1255,3 +1150,34 @@ class SmartPerfKit(ITestKit):
             else:
                 self._process.terminate()
             self._process = None
+
+
+@Plugin(type=Plugin.TEST_KIT, id=CKit.push)
+class PushKit(PushBase):
+
+    def __setup__(self, device, **kwargs):
+        self.request = kwargs.get("request")
+        LOG.debug("PushKit setup, device: {}".format(device.device_sn))
+        for command in self.pre_push:
+            run_command(device, command)
+        remount(device)
+        push_list = self._get_push_list(device)
+        dsts = self._push_file(device, push_list)
+        for command in self.post_push:
+            run_command(device, command)
+        return self.pushed_file, dsts
+
+
+@Plugin(type=Plugin.TEST_KIT, id=CKit.common_push)
+class CommonPushKit(PushBase):
+
+    def __setup__(self, device, **kwargs):
+        self.request = kwargs.get("request")
+        LOG.debug("Common PushKit setup, device: {}".format(device.device_sn))
+        for command in self.pre_push:
+            run_command(device, command)
+        remount(device)
+        dsts = self._push_file(device, self.push_list)
+        for command in self.post_push:
+            run_command(device, command)
+        return self.pushed_file, dsts

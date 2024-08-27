@@ -33,14 +33,17 @@ from xdevice import DeviceAllocationState
 from xdevice import Plugin
 from xdevice import exec_cmd
 from xdevice import convert_serial
+from xdevice import convert_mac
 from xdevice import convert_ip
 from xdevice import check_mode
+from xdevice import Platform
 
+from ohos.constants import ComType
+from ohos.environment.dmlib_lite import LiteHelper
+from ohos.error import ErrorMessage
 from ohos.exception import LiteDeviceConnectError
 from ohos.exception import LiteDeviceTimeout
 from ohos.exception import LiteParamError
-from ohos.environment.dmlib_lite import LiteHelper
-from ohos.constants import ComType
 
 LOG = platform_logger("DeviceLite")
 TIMEOUT = 90
@@ -67,7 +70,7 @@ def get_hdc_path():
     if os.path.exists(file_path):
         return file_path
     else:
-        raise LiteParamError("litehdc.exe not found", error_no="00108")
+        raise LiteParamError(ErrorMessage.Common.Code_0301006)
 
 
 def parse_available_com(com_str):
@@ -128,6 +131,7 @@ class DeviceLite(IDevice):
         self.device_id = None
         self.extend_value = {}
         self.device_lock = threading.RLock()
+        self.test_platform = Platform.ohos
         self.device_props = {}
         self.device_description = {}
 
@@ -138,7 +142,7 @@ class DeviceLite(IDevice):
             DeviceProperties.sn: convert_serial(self.device_sn),
             DeviceProperties.model: self.label,
             DeviceProperties.type_: self.label,
-            DeviceProperties.platform: "OpenHarmony",
+            DeviceProperties.platform: self.test_platform,
             DeviceProperties.version: "",
             DeviceProperties.others: self.device_props
         }
@@ -181,13 +185,10 @@ class DeviceLite(IDevice):
     def _check_watchgt(device):
         for item in device:
             if "label" not in item.keys():
-                error_message = "watchGT local label does not exist"
-                raise LiteParamError(error_message, error_no="00108")
+                raise LiteParamError(ErrorMessage.Config.Code_0302027)
             if "com" not in item.keys() or ("com" in item.keys() and
                                             not item.get("com")):
-                error_message = "watchGT local com cannot be " \
-                                "empty, please check"
-                raise LiteParamError(error_message, error_no="00108")
+                raise LiteParamError(ErrorMessage.Config.Code_0302028)
             else:
                 hdc = get_hdc_path()
                 result = exec_cmd([hdc])
@@ -195,8 +196,7 @@ class DeviceLite(IDevice):
                 if item.get("com").upper() in com_list:
                     return True
                 else:
-                    error_message = "watchGT local com does not exist"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302029)
 
     @staticmethod
     def _check_wifiiot_config(device):
@@ -205,21 +205,15 @@ class DeviceLite(IDevice):
             if "label" not in item.keys():
                 if "com" not in item.keys() or ("com" in item.keys() and
                                                 not item.get("com")):
-                    error_message = "wifiiot local com cannot be " \
-                                    "empty, please check"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302030)
 
                 if "type" not in item.keys() or ("type" not in item.keys() and
                                                  not item.get("type")):
-                    error_message = "wifiiot com type cannot be " \
-                                    "empty, please check"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302031)
                 else:
                     com_type_set.add(item.get("type"))
         if len(com_type_set) < 2:
-            error_message = "wifiiot need cmd com and deploy com" \
-                            " at the same time, please check"
-            raise LiteParamError(error_message, error_no="00108")
+            raise LiteParamError(ErrorMessage.Config.Code_0302032)
 
     @staticmethod
     def _check_ipcamera_local(device):
@@ -227,9 +221,7 @@ class DeviceLite(IDevice):
             if "label" not in item.keys():
                 if "com" not in item.keys() or ("com" in item.keys() and
                                                 not item.get("com")):
-                    error_message = "ipcamera local com cannot be " \
-                                    "empty, please check"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302033)
 
     @staticmethod
     def _check_ipcamera_remote(device=None):
@@ -237,13 +229,9 @@ class DeviceLite(IDevice):
             if "label" not in item.keys():
                 if "port" in item.keys() and item.get("port") and not item.get(
                         "port").isnumeric():
-                    error_message = "ipcamera remote port should be " \
-                                    "a number, please check"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302034)
                 elif "port" not in item.keys():
-                    error_message = "ipcamera remote port cannot be" \
-                                    " empty, please check"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302035)
 
     def __check_config__(self, device=None):
         self.set_connect_type(device)
@@ -270,24 +258,16 @@ class DeviceLite(IDevice):
                 if re.match(pattern, item.get("ip")):
                     self.device_connect_type = "remote"
                 else:
-                    error_message = "Remote device ip not in right" \
-                                         "format, please check user_config.xml"
-                    raise LiteParamError(error_message, error_no="00108")
+                    raise LiteParamError(ErrorMessage.Config.Code_0302025)
         if not self.label:
-            error_message = "device label cannot be empty, " \
-                            "please check"
-            raise LiteParamError(error_message, error_no="00108")
+            raise LiteParamError(ErrorMessage.Config.Code_0302026)
         else:
             if self.label != DeviceLabelType.wifiiot and \
                     self.label != DeviceLabelType.ipcamera and \
                     self.label != DeviceLabelType.watch_gt:
-                error_message = "device label should be ipcamera or" \
-                                     " wifiiot, please check"
-                raise LiteParamError(error_message, error_no="00108")
+                raise LiteParamError(ErrorMessage.Config.Code_0302020)
         if not self.device_connect_type:
-            error_message = "device com or ip cannot be empty, " \
-                                 "please check"
-            raise LiteParamError(error_message, error_no="00108")
+            raise LiteParamError(ErrorMessage.Config.Code_0302021)
 
     def __init_device__(self, device):
         self.__check_config__(device)
@@ -298,6 +278,10 @@ class DeviceLite(IDevice):
             self.device = CONTROLLER_DICT.get("local")(device)
 
         self.ifconfig = device[1].get("ifconfig")
+        if self.ifconfig:
+            self.connect()
+            self.execute_command_with_timeout(command='\r', timeout=5)
+            self.execute_command_with_timeout(command=self.ifconfig, timeout=5)
 
     def connect(self):
         """
@@ -357,13 +341,13 @@ class DeviceLite(IDevice):
                     timeout=timeout,
                     receiver=receiver)
         if not receiver:
-            LOG.debug("%s execute result:%s" % (
-                convert_serial(self.__get_serial__()), filter_result))
+            LOG.debug("{} execute result:{}".format(convert_serial(self.__get_serial__()),
+                                                    convert_mac(filter_result.replace("BS", ""))))
         if not status:
-            LOG.debug(
-                "%s error_message:%s" % (convert_serial(self.__get_serial__()),
-                                         error_message))
-        return filter_result, status, error_message
+            LOG.debug("{} error_message:{}".format(convert_serial(self.__get_serial__()),
+                                                   convert_mac(error_message.replace("BS", ""))))
+
+        return filter_result.replace("BS", ""), status, error_message
 
     def recover_device(self):
         self.reboot()
@@ -379,8 +363,9 @@ class DeviceLite(IDevice):
                 self.device_allocation_state = DeviceAllocationState.unusable
                 self.set_recover_state(False)
         if self.ifconfig:
-            enter_result, _, _ = self.execute_command_with_timeout(command='\r',
-                                                                   timeout=15)
+            enter_result, _, _ = self.execute_command_with_timeout(
+                command='\r',
+                timeout=15)
             if " #" in enter_result or "OHOS #" in enter_result:
                 LOG.info("Reset device %s success" % self.device_sn)
                 self.execute_command_with_timeout(command=self.ifconfig,
@@ -411,7 +396,7 @@ class DeviceLite(IDevice):
 
 class RemoteController:
     """
-    Class representing an device lite remote device.
+    Class representing a device lite remote device.
     Each object of this class represents one device lite remote device
     in xDevice.
     """
@@ -424,18 +409,15 @@ class RemoteController:
     def connect(self):
         """
         Connect the device server
-
         """
         try:
             if self.telnet:
                 return self.telnet
             self.telnet = telnetlib.Telnet(self.host, self.port,
                                            timeout=TIMEOUT)
-        except Exception as err_msgs:
-            error_message = "Connect remote lite device failed, host is %s, " \
-                            "port is %s, error is %s" % \
-                            (convert_ip(self.host), self.port, str(err_msgs))
-            raise LiteDeviceConnectError(error_message, error_no="00401")
+        except Exception as error:
+            raise LiteDeviceConnectError(ErrorMessage.Device.Code_0303008.format(
+                convert_ip(self.host), self.port, str(error))) from error
         time.sleep(2)
         self.telnet.set_debuglevel(0)
         return self.telnet
@@ -462,7 +444,7 @@ class RemoteController:
                 return
             self.telnet.close()
             self.telnet = None
-        except (ConnectionError, Exception) as _:
+        except ConnectionError as _:
             error_message = "Remote device is disconnected abnormally"
             LOG.error(error_message, error_no="00401")
 
@@ -537,11 +519,11 @@ class ComController:
                                          baudrate=self.baud_rate,
                                          timeout=self.timeout)
                 self.is_open = True
-        except Exception as error_msg:
-            error = "connect %s serial failed, please make sure this port is" \
-                    " not occupied, error is %s[00401]" % \
-                   (self.serial_port, str(error_msg))
-            raise LiteDeviceConnectError(error, error_no="00401")
+                return self.com
+        except Exception as error:
+            raise LiteDeviceConnectError(ErrorMessage.Device.Code_0303009.format(
+                self.serial_port, str(error))) from error
+        return None
 
     def close(self):
         """
@@ -553,7 +535,7 @@ class ComController:
             if self.is_open:
                 self.com.close()
             self.is_open = False
-        except (ConnectionError, Exception) as _:
+        except ConnectionError as _:
             error_message = "Local device is disconnected abnormally"
             LOG.error(error_message, error_no="00401")
 

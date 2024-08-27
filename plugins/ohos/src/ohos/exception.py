@@ -15,11 +15,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from xdevice import DeviceError
+from xdevice import HdcError
+from xdevice import RpcNotRunningError
 
 __all__ = ["LiteDeviceConnectError", "LiteDeviceTimeout", "LiteParamError",
            "LiteDeviceError", "LiteDeviceExecuteCommandError",
-           "LiteDeviceMountError", "LiteDeviceReadOutputError"]
+           "LiteDeviceMountError", "LiteDeviceReadOutputError", "OHOSRpcNotRunningError", "HDCFPortError",
+           "OHOSRpcStartFailedError", "OHOSRpcPortNotFindError", "OHOSRpcProcessNotFindError",
+           "OHOSDeveloperModeNotTrueError"]
 
 
 class LiteDeviceError(Exception):
@@ -93,3 +96,76 @@ class LiteDeviceReadOutputError(LiteDeviceError):
     def __str__(self):
         return str(self.error_msg)
 
+
+class HDCFPortError(HdcError):
+    def __init__(self, error_msg: str, error_no: str = ""):
+        super(HDCFPortError, self).__init__(error_msg, error_no)
+        self.error_msg = error_msg
+        self.error_no = error_no
+
+    def __str__(self):
+        return str(self.error_msg)
+
+
+class OHOSRpcNotRunningError(RpcNotRunningError):
+    def __init__(self, error_msg, error_no="", device=None):
+        super(RpcNotRunningError, self).__init__(error_msg, error_no)
+        if device:
+            self.print_info(device)
+
+    @staticmethod
+    def print_info(device):
+        device.log.info("#############################################"
+                        "RpcNotRunningError"
+                        "#############################################")
+        OHOSRpcNotRunningError.develop_mode(device)
+        OHOSRpcNotRunningError.memery_info(device)
+        device.log.info("#############################################"
+                        "RpcNotRunningError"
+                        "#############################################")
+
+    @staticmethod
+    def develop_mode(device):
+        if not device.is_root:
+            device.log.info(f"{device.device_sn} is not root!")
+            ret = device.execute_shell_command("uitest --version")
+            if "inaccessible or not found" in ret:
+                device.log.info(f"{device.device_sn} developer mode is False!")
+            else:
+                device.log.info(f"{device.device_sn} developer mode is True!")
+        else:
+            device.log.info(f"{device.device_sn} is root!")
+            status = device.execute_shell_command("param get const.security.developermode.state")
+            if status and status.strip() == "true":
+                result = True
+            else:
+                result = False
+            device.log.info(f"{device.device_sn} developer mode is {result}!")
+
+    @staticmethod
+    def memery_info(device):
+        ret = device.execute_shell_command("free -h")
+        device.log.info(f"{device.device_sn} memery info \n {ret}!")
+
+    def __str__(self):
+        return str(self.error_msg)
+
+
+class OHOSRpcStartFailedError(OHOSRpcNotRunningError):
+    def __init__(self, error_msg, error_no="", device=None):
+        super(OHOSRpcStartFailedError, self).__init__(error_msg, error_no, device)
+
+
+class OHOSRpcPortNotFindError(OHOSRpcNotRunningError):
+    def __init__(self, error_msg, error_no="", device=None):
+        super(OHOSRpcPortNotFindError, self).__init__(error_msg, error_no, device)
+
+
+class OHOSRpcProcessNotFindError(OHOSRpcNotRunningError):
+    def __init__(self, error_msg, error_no="", device=None):
+        super(OHOSRpcProcessNotFindError, self).__init__(error_msg, error_no, device)
+
+
+class OHOSDeveloperModeNotTrueError(OHOSRpcNotRunningError):
+    def __init__(self, error_msg, error_no="", device=None):
+        super(OHOSDeveloperModeNotTrueError, self).__init__(error_msg, error_no, device)

@@ -17,17 +17,17 @@
 #
 from _core.report.reporter_helper import ReportConstant
 from _core.report.reporter_helper import DataHelper
+from _core.context.center import Context
 
 
 class RepeatHelper:
-
     def __init__(self, report_path):
         self.data_helper = DataHelper()
         self.report_path = report_path
 
     def __generate_repeat_xml__(self, summary_data_path):
-        from xdevice import Scheduler
-        if Scheduler.repeat_index == 0:
+        if Context.get_scheduler() and\
+                Context.get_scheduler().get_repeat_index() <= 1:
             return
         root_tree = self.data_helper.parse_data_report(summary_data_path)
         modules = dict()

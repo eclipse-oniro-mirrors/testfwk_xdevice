@@ -21,7 +21,6 @@ from xdevice import Console
 from xdevice import platform_logger
 from xdevice import VERSION
 
-
 srcpath = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(srcpath)
 
@@ -39,7 +38,6 @@ def main_process(command=None):
         args = sys.argv
     console = Console()
     console.console(args)
-    return
 
 
 if __name__ == "__main__":

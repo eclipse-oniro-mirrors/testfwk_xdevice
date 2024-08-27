@@ -17,117 +17,21 @@
 #
 
 import os
-import uuid
-from dataclasses import dataclass
 
 from _core.plugin import Plugin
-from _core.plugin import get_plugin
 from _core.constants import ListenerType
-from _core.constants import TestType
+from _core.executor.abs import PlusReportListener
 from _core.interface import LifeCycle
 from _core.interface import IListener
 from _core.logger import platform_logger
-from _core.report.suite_reporter import SuiteReporter
 from _core.report.suite_reporter import ResultCode
 from _core.report.encrypt import check_pub_key_exist
 
 __all__ = ["LogListener", "ReportListener", "UploadListener",
            "CollectingTestListener", "CollectingLiteGTestListener",
-           "CaseResult", "SuiteResult", "SuitesResult", "StateRecorder",
            "TestDescription"]
 
 LOG = platform_logger("Listener")
-
-
-@dataclass
-class CaseResult:
-    index = ""
-    code = ResultCode.FAILED.value
-    test_name = None
-    test_class = None
-    stacktrace = ""
-    run_time = 0
-    is_completed = False
-    num_tests = 0
-    current = 0
-
-    def is_running(self):
-        return self.test_name is not None and not self.is_completed
-
-
-@dataclass
-class SuiteResult:
-    index = ""
-    code = ResultCode.UNKNOWN.value
-    suite_name = None
-    test_num = 0
-    stacktrace = ""
-    run_time = 0
-    is_completed = False
-    is_started = False
-    suite_num = 0
-
-
-@dataclass
-class SuitesResult:
-    index = ""
-    code = ResultCode.UNKNOWN.value
-    suites_name = None
-    test_num = 0
-    stacktrace = ""
-    run_time = 0
-    is_completed = False
-    product_info = {}
-
-
-@dataclass
-class StateRecorder:
-    current_suite = None
-    current_suites = None
-    current_test = None
-    trace_logs = []
-    running_test_index = 0
-
-    def is_started(self):
-        return self.current_suite is not None
-
-    def suites_is_started(self):
-        return self.current_suites is not None
-
-    def suite_is_running(self):
-        suite = self.current_suite
-        return suite is not None and suite.suite_name is not None and \
-            not suite.is_completed
-
-    def suites_is_running(self):
-        suites = self.current_suites
-        return suites is not None and suites.suites_name is not None and \
-            not suites.is_completed
-
-    def test_is_running(self):
-        test = self.current_test
-        return test is not None and test.is_running()
-
-    def suite(self, reset=False):
-        if reset or not self.current_suite:
-            self.current_suite = SuiteResult()
-            self.current_suite.index = uuid.uuid4().hex
-        return self.current_suite
-
-    def get_suites(self, reset=False):
-        if reset or not self.current_suites:
-            self.current_suites = SuitesResult()
-            self.current_suites.index = uuid.uuid4().hex
-        return self.current_suites
-
-    def test(self, reset=False, test_index=None):
-        if reset or not self.current_test:
-            self.current_test = CaseResult()
-            if test_index:
-                self.current_test.index = test_index
-            else:
-                self.current_test.index = uuid.uuid4().hex
-        return self.current_test
 
 
 class TestDescription(object):
@@ -183,9 +87,8 @@ class LogListener(IListener):
             ret = ResultCode(test_result.code).name
             if self.test_num:
                 LOG.info("[{}/{} {}] {}#{} {}"
-                         .format(test_result.current, self.test_num,
-                                 convert_serial(self.device_sn), test_result.test_class,
-                                 test_result.test_name, ret))
+                         .format(test_result.current, self.test_num, convert_serial(self.device_sn),
+                                 test_result.test_class, test_result.test_name, ret))
             else:
                 LOG.info("[{}/- {}] {}#{} {}"
                          .format(test_result.current, convert_serial(self.device_sn),
@@ -210,140 +113,42 @@ class LogListener(IListener):
 
 
 @Plugin(type=Plugin.LISTENER, id=ListenerType.report)
-class ReportListener(IListener):
+class ReportListener(PlusReportListener):
     """
     Listener test status information to the console
     """
 
-    def __init__(self):
-        self.result = list()
-        self.suites = dict()
-        self.tests = dict()
-        self.current_suite_id = 0
-        self.current_test_id = 0
-        self.report_path = ""
+    def handle_half_break(self, suites_name, error_message=''):
+        """测试套运行异常，将已运行的部分用例结果记录到结果文件"""
+        test_result = self.suites.get(self.current_suite_id)
+        if test_result is None:
+            return
+        self.__ended__(lifecycle=LifeCycle.TestSuite, test_result=test_result)
+        LOG.warning(f"Testsuite({test_result.suite_name}) is running abnormally")
+        self.__ended__(lifecycle=LifeCycle.TestSuites, test_result=test_result,
+                       suites_name=suites_name, message=error_message)
 
-    def _get_suite_result(self, test_result, create=False):
-        if test_result.index in self.suites:
-            return self.suites.get(test_result.index)
-        elif create:
-            suite = SuiteResult()
-            rid = uuid.uuid4().hex if test_result.index == "" else \
-                test_result.index
-            suite.index = rid
-            return self.suites.setdefault(rid, suite)
-        else:
-            return self.suites.get(self.current_suite_id)
-
-    def _get_test_result(self, test_result, create=False):
-        if test_result.index in self.tests:
-            return self.tests.get(test_result.index)
-        elif create:
-            test = CaseResult()
-            rid = uuid.uuid4().hex if test_result.index == "" else \
-                test_result.index
-            test.index = rid
-            return self.tests.setdefault(rid, test)
-        else:
-            return self.tests.get(self.current_test_id)
-
-    def _remove_current_test_result(self):
-        if self.current_test_id in self.tests:
-            del self.tests[self.current_test_id]
-
-    def __started__(self, lifecycle, test_result):
-        if lifecycle == LifeCycle.TestSuites:
-            suites = self._get_suite_result(test_result=test_result,
-                                            create=True)
-            suites.suites_name = test_result.suites_name
-            suites.test_num = test_result.test_num
-            self.current_suite_id = suites.index
-        elif lifecycle == LifeCycle.TestSuite:
-            suite = self._get_suite_result(test_result=test_result,
-                                           create=True)
-            suite.suite_name = test_result.suite_name
-            suite.test_num = test_result.test_num
-            self.current_suite_id = suite.index
-        elif lifecycle == LifeCycle.TestCase:
-            test = self._get_test_result(test_result=test_result, create=True)
-            test.test_name = test_result.test_name
-            test.test_class = test_result.test_class
-            self.current_test_id = test.index
-
-    def __ended__(self, lifecycle, test_result=None, **kwargs):
-        if lifecycle == LifeCycle.TestSuite:
-            suite = self._get_suite_result(test_result=test_result,
-                                           create=False)
-            if not suite:
-                return
-            suite.run_time = test_result.run_time
-            suite.code = test_result.code
-            is_clear = kwargs.get("is_clear", False)
-            suite.test_num = max(test_result.test_num, len(self.tests))
-            # generate suite report
-            if not kwargs.get("suite_report", False):
-                if len(self.result) > 0 and self.result[-1][0].suite_name == \
-                        self.suites[suite.index].suite_name:
-                    self.result[-1][1].extend(list(self.tests.values()))
-                    self.result[-1][0].test_num = max(suite.test_num,
-                                                      len(self.result[-1][1]))
-                else:
-                    self.result.append((self.suites[suite.index],
-                                        list(self.tests.values())))
+    def _handle_suite_end_data(self, suite, kwargs):
+        is_clear = kwargs.get("is_clear", False)
+        # generate suite report
+        if not kwargs.get("suite_report", False):
+            if len(self.result) > 0 and self.result[-1][0].suite_name == \
+                    self.suites.get(suite.index).suite_name:
+                self.result[-1][1].extend(list(self.tests.values()))
+                self.result[-1][0].test_num = max(suite.test_num,
+                                                  len(self.result[-1][1]))
             else:
-                result_dir = os.path.join(self.report_path, "result")
-                os.makedirs(result_dir, exist_ok=True)
-                self.result.append((self.suites[suite.index],
+                self.result.append((self.suites.get(suite.index),
                                     list(self.tests.values())))
-                results = [(suite, list(self.tests.values()))]
-                suite_report = SuiteReporter(results, suite.suite_name,
-                                             result_dir)
-                suite_report.generate_data_report()
-            if is_clear:
-                self.tests.clear()
-        elif lifecycle == LifeCycle.TestSuites:
-            if not kwargs.get("suite_report", False):
-                result_dir = os.path.join(self.report_path, "result")
-                os.makedirs(result_dir, exist_ok=True)
-                suites_name = kwargs.get("suites_name", "")
-                product_info = kwargs.get("product_info", "")
-                suite_report = SuiteReporter(self.result, suites_name,
-                                             result_dir,
-                                             product_info=product_info)
-                suite_report.generate_data_report()
-        elif lifecycle == LifeCycle.TestCase:
-            test = self._get_test_result(test_result=test_result, create=False)
-            test.run_time = test_result.run_time
-            test.stacktrace = test_result.stacktrace
-            test.code = test_result.code
-        elif lifecycle == LifeCycle.TestTask:
-            test_type = str(kwargs.get("test_type", TestType.all))
-            reporter = get_plugin(plugin_type=Plugin.REPORTER,
-                                  plugin_id=test_type)
-            if not reporter:
-                reporter = get_plugin(plugin_type=Plugin.REPORTER,
-                                      plugin_id=TestType.all)[0]
-            else:
-                reporter = reporter[0]
-            reporter.__generate_reports__(self.report_path,
-                                          task_info=test_result)
-
-    def __skipped__(self, lifecycle, test_result):
-        if lifecycle == LifeCycle.TestCase:
-            test = self._get_test_result(test_result=test_result, create=False)
-            test.stacktrace = test_result.stacktrace
-            test.code = ResultCode.SKIPPED.value
-
-    def __failed__(self, lifecycle, test_result):
-        if lifecycle == LifeCycle.TestSuite:
-            suite = self._get_suite_result(test_result=test_result,
-                                           create=False)
-            suite.stacktrace = test_result.stacktrace
-            suite.code = ResultCode.FAILED.value
-        elif lifecycle == LifeCycle.TestCase:
-            test = self._get_test_result(test_result=test_result, create=False)
-            test.stacktrace = test_result.stacktrace
-            test.code = ResultCode.FAILED.value
+        else:
+            result_dir = os.path.join(self.report_path, "result")
+            os.makedirs(result_dir, exist_ok=True)
+            self.result.append((self.suites.get(suite.index),
+                                list(self.tests.values())))
+            results = [(suite, list(self.tests.values()))]
+            self._generate_data_report(result_dir, results, suite.suite_name)
+        if is_clear:
+            self.tests.clear()
 
 
 @Plugin(type=Plugin.LISTENER, id=ListenerType.upload)

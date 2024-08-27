@@ -15,8 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-from dataclasses import dataclass
+import json
+import threading
 
 from _core.config.config_manager import UserConfigManager
 from _core.logger import platform_logger
@@ -26,7 +26,10 @@ from _core.plugin import get_plugin
 from _core.utils import convert_serial
 from _core.constants import ProductForm
 from _core.constants import ConfigConst
+from _core.constants import DeviceResult
 from _core.environment.device_state import DeviceAllocationState
+from _core.utils import get_current_time
+from _core.utils import check_mode_in_sys
 
 __all__ = ["EnvironmentManager", "DeviceSelectionOption", "Environment"]
 
@@ -81,8 +84,9 @@ class Environment(object):
             current = index
         else:
             current = self.device_recorder.get(label, 0) + 1
-        device.device_id = "%s%s" % (label, current)
-        LOG.debug("add_device, sn: {}, id: {}".format(device.device_sn, device.device_id))
+        device.device_id = "%s%s" % (label, current) if not device.device_id else device.device_id
+        LOG.debug("add_device, sn: {}, id: {}".format(device.device_sn,
+                                                      device.device_id))
         self.device_recorder.update({label: current})
         self.devices.append(device)
 
@@ -94,6 +98,14 @@ class EnvironmentManager(object):
     """
     __instance = None
     __init_flag = False
+
+    test_devices = {
+        DeviceResult.code: -1,
+        DeviceResult.date: get_current_time(),
+        DeviceResult.msg: "no mobile device",
+        DeviceResult.result: "false",
+        DeviceResult.data: []
+    }
 
     def __new__(cls, *args, **kwargs):
         """
@@ -108,28 +120,37 @@ class EnvironmentManager(object):
         if EnvironmentManager.__init_flag:
             return
         self.managers = {}
+        self.used_devices = []
+        self.environment_enable = True
         self.env_start(environment, user_config_file)
+        self.lock_con = threading.Condition()
+
         EnvironmentManager.__init_flag = True
 
     def env_start(self, environment="", user_config_file=""):
-
-        log_level_dict = UserConfigManager(
-            config_file=user_config_file, env=environment).get_log_level()
+        user_config_manager = UserConfigManager(
+            config_file=user_config_file, env=environment)
+        log_level_dict = user_config_manager.loglevel
         if log_level_dict:
             # change log level when load or reset EnvironmentManager object
             change_logger_level(log_level_dict)
+
+        self.environment_enable = user_config_manager.environment_enable()
+        if not self.environment_enable:
+            LOG.warning("The device element may not exist in user_config.xml! "
+                        "If this is not what you need, please check it")
+            return
 
         manager_plugins = get_plugin(Plugin.MANAGER)
         for manager_plugin in manager_plugins:
             try:
                 manager_instance = manager_plugin.__class__()
-                manager_instance.init_environment(environment,
-                                                  user_config_file)
-                self.managers[manager_instance.__class__.__name__] = \
-                    manager_instance
+                if manager_instance.init_environment(environment, user_config_file):
+                    self.managers[manager_instance.__class__.__name__] = manager_instance
             except Exception as error:
                 LOG.debug("Env start error: %s" % error)
-        if len(self.managers):
+        # 倒序排列, 优先加载OH设备
+        if self.managers:
             self.managers = dict(sorted(self.managers.items(), reverse=True))
 
     def env_stop(self):
@@ -160,9 +181,14 @@ class EnvironmentManager(object):
         return environment
 
     def release_environment(self, environment):
+        self.lock_con.acquire()
         for device in environment.devices:
             device.extend_value = {}
             self.release_device(device)
+            if device in self.used_devices:
+                LOG.debug("Device in used_devices, remove it.")
+                self.used_devices.remove(device)
+        self.lock_con.release()
 
     def reset_environment(self, used_devices):
         for _, device in used_devices.items():
@@ -190,7 +216,20 @@ class EnvironmentManager(object):
             if hasattr(device, "env_index"):
                 device.env_index = device_option.get_env_index()
             if device:
-                return device
+                has_allocated = False
+                self.lock_con.acquire()
+                for dev in self.used_devices:
+                    if hasattr(dev, "device_sn") and dev.device_sn == device.device_sn:
+                        has_allocated = True
+                        break
+                if has_allocated:
+                    self.lock_con.release()
+                    continue
+                else:
+                    self.used_devices.append(device)
+                    self.lock_con.release()
+                    return device
+
         else:
             return None
 
@@ -249,9 +288,23 @@ class EnvironmentManager(object):
                 manager.reset_device(device)
 
     def list_devices(self):
-        LOG.info("List devices.")
-        for manager in self.managers.values():
-            manager.list_devices()
+        if check_mode_in_sys(ConfigConst.app_test):
+            for manager in self.managers.values():
+                devices = manager.list_devices()
+                if devices and isinstance(devices, list):
+                    for device in devices:
+                        self.test_devices.get(DeviceResult.data).append(device)
+            if self.test_devices.get(DeviceResult.data):
+                self.test_devices[DeviceResult.code] = 0
+                self.test_devices[DeviceResult.result] = "true"
+                self.test_devices[DeviceResult.msg] = ""
+
+            print(json.dumps(self.test_devices, sort_keys=False,
+                             separators=(',', ':')))
+        else:
+            LOG.info("List devices.")
+            for manager in self.managers.values():
+                manager.list_devices()
 
 
 class DeviceSelectionOption(object):
@@ -260,9 +313,10 @@ class DeviceSelectionOption(object):
     """
 
     def __init__(self, options, label=None, test_source=None):
-        self.device_sn = [x for x in options["device_sn"].split(";") if x]
+        self.device_sn = [x for x in options[ConfigConst.device_sn].split(";") if x]
+        self.device_info = options.get(ConfigConst.device_info)
         self.label = label
-        self.test_driver = test_source.test_type
+        self.test_driver = test_source.test_type if test_source else None
         self.source_file = ""
         self.extend_value = {}
         self.required_manager = ""
@@ -301,6 +355,11 @@ class DeviceSelectionOption(object):
 
         if self.label and self.label != device.label:
             return False
+
+        # 匹配设备额外参数
+        if not device.check_advance_option(self.extend_value, device_info=self.device_info):
+            return False
+
         if self.required_component and \
                 hasattr(device, ConfigConst.support_component):
             subsystems, parts = getattr(device, ConfigConst.support_component)

@@ -16,10 +16,12 @@
 # limitations under the License.
 #
 
+import json
 import os
 from dataclasses import dataclass
 from xml.etree import ElementTree
 
+from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.logger import platform_logger
 from _core.utils import get_local_ip
@@ -27,6 +29,17 @@ from _core.constants import ConfigConst
 
 __all__ = ["UserConfigManager"]
 LOG = platform_logger("ConfigManager")
+
+
+def initialize(func):
+
+    def wrapper(self, *args, **kwargs):
+        name = "_" + func.__name__
+        if not hasattr(self, name):
+            setattr(self, name, func(self, *args, **kwargs))
+        return getattr(self, name)
+
+    return wrapper
 
 
 @dataclass
@@ -61,18 +74,240 @@ class UserConfigManager(object):
                     tree = ElementTree.parse(self.file_path)
                     self.config_content = tree.getroot()
                 else:
-                    raise ParamError("%s not found" % self.file_path,
-                                     error_no="00115")
+                    raise ParamError(ErrorMessage.UserConfig.Code_0103001)
 
         except SyntaxError as error:
-            if env:
-                raise ParamError(
-                    "Parse environment parameter fail! Error: %s" % error.args,
-                    error_no="00115")
+            err = ErrorMessage.UserConfig.Code_0103003 if env else ErrorMessage.UserConfig.Code_0103002
+            err_msg = err.format(error)
+            raise ParamError(err_msg) from error
+
+    @property
+    @initialize
+    def environment(self):
+        envs = []
+        ele_environment = self.config_content.find("environment")
+        if ele_environment is None:
+            return envs
+        dev_alias = {}
+        for device in ele_environment.findall("device"):
+            device_type = device.get("type", "").strip()
+            if not device_type or device_type == "com":
+                continue
+            # 设备管理器使用usb_type作为入参，故需将type转换为usb_type
+            data = {"usb_type": device_type, "label": ""}
+            data.update(device.attrib)
+            for info in device.findall("info"):
+                dev = {"ip": "", "port": "", "sn": "", "alias": ""}
+                dev.update(info.attrib)
+                dev.update(data)
+
+                # 去除空格，alias字符转大写
+                new_dev = {}
+                for k, v in dev.items():
+                    if k == "alias":
+                        v = v.upper()
+                    v = v.strip()
+                    new_dev[k] = v
+                dev.update(new_dev)
+
+                # 不允许设备的别名相同
+                sn, alias = dev.get("sn"), dev.get("alias")
+                if alias:
+                    for k, v in dev_alias.items():
+                        if alias == v:
+                            raise ParamError(ErrorMessage.UserConfig.Code_0103004.format(sn, k))
+                dev_alias.update({sn: alias})
+
+                ip = dev.get("ip")
+                if not ip:
+                    dev.update({"ip": "127.0.0.1"})
+                envs.append(dev)
+        return envs
+
+    @property
+    @initialize
+    def testcases(self):
+        return self.get_element_cfg("testcases")
+
+    @property
+    @initialize
+    def resource(self):
+        return self.get_element_cfg("resource")
+
+    @property
+    @initialize
+    def devicelog(self):
+        """
+        <devicelog>
+            <enable>ON</enable>
+            <clear>TRUE</clear>
+            <dir></dir>
+            <loglevel>INFO</loglevel>
+            <hdc>FALSE</hdc>
+        </devicelog>
+        """
+        tag = "devicelog"
+        cfg = self.get_element_cfg(tag)
+
+        # 若是旧配置方式<devicelog>ON</devicelog>，转换为{"enable": "ON"}
+        enable = cfg.get(tag)
+        if enable is not None:
+            cfg.pop(tag)
+            cfg.update({ConfigConst.tag_enable: "ON" if enable.upper() == "ON" else "OFF"})
+
+        # 从自定义参数中更新配置
+        if self.pass_through:
+            user_define = None
+            try:
+                user_define = json.loads(self.pass_through).get("user_define")
+            except ValueError:
+                pass
+            if user_define and isinstance(user_define, dict):
+                device_log = user_define.get(tag)
+                if device_log and isinstance(device_log, dict):
+                    cfg.update(device_log)
+
+        # 默认配置参数
+        data = {
+            ConfigConst.tag_enable: "ON",
+            ConfigConst.tag_clear: "TRUE",
+            ConfigConst.tag_dir: "",
+            ConfigConst.tag_loglevel: "INFO",
+            ConfigConst.tag_hdc: "FALSE"
+        }
+        # 刷新默认配置参数
+        for key in data.keys():
+            value = cfg.get(key)
+            if value:
+                data.update({key: value})
+        return data
+
+    @property
+    @initialize
+    def loglevel(self):
+        data = self.get_element_cfg(ConfigConst.tag_loglevel)
+        level = data.get(ConfigConst.tag_loglevel)
+        if level is not None:
+            data.pop(ConfigConst.tag_loglevel)
+            level = level.upper()
+            level = level if level in ["DEBUG", "INFO"] else ""
+            data.update({"console": level or "INFO"})
+        return data
+
+    @property
+    @initialize
+    def taskargs(self):
+        """
+        <taskargs>
+            <agent_mode></agent_mode>
+            <pass_through></pass_through>
+            <repeat></repeat>
+            <screenshot>false</screenshot>
+            <screenrecorder>false</screenrecorder>
+        </taskargs>
+        """
+        data = self.get_element_cfg("taskargs")
+        pass_through = data.get(ConfigConst.pass_through)
+        if pass_through:
+            user_define = None
+            try:
+                user_define = json.loads(pass_through).get("user_define")
+            except ValueError:
+                pass
+            if user_define:
+                self.update_task_args(data, user_define)
+        return data
+
+    @property
+    @initialize
+    def custom(self):
+        """
+        <custom></custom>
+        """
+        return self.get_element_cfg("custom")
+
+    @property
+    @initialize
+    def pass_through(self):
+        return self.taskargs.get(ConfigConst.pass_through)
+
+    def get_element_cfg(self, tag):
+        element = self.config_content.find(tag)
+        return {} if element is None else self.get_element_dict(element)
+
+    @staticmethod
+    def get_element_dict(element, is_top=True):
+        """
+        element: ElementTree.Element, traversal element
+        is_top: bool, when the element has no child and if is the top, result as dict else as text
+        return : dict
+        """
+        if not isinstance(element, ElementTree.Element):
+            raise TypeError("element must be instance of xml.etree.ElementTree.Element")
+        data = element.attrib
+        if len(element) == 0:
+            text = "" if element.text is None else element.text.strip()
+            if is_top:
+                data.update({element.tag: text})
+                data = {k: v.strip() for k, v in data.items()}
+                return data
+            return text
+
+        for sub in element:
+            k, v = sub.tag, UserConfigManager.get_element_dict(sub, is_top=False)
+            # 同一层级存在多个同名tag，数据存为列表
+            if len(element.findall(k)) > 1:
+                value = data.get(k) if k in data else []
+                value.append(v)
+                data.update({k: value})
             else:
-                raise ParamError(
-                    "Parse %s fail! Error: %s" % (self.file_path, error.args),
-                    error_no="00115")
+                data.update({k: v})
+        return data
+
+    def get_wifi_config(self):
+        wifi = self.taskargs.get("wifi")
+        if wifi:
+            return wifi.split(",")
+        wifi = self.custom.get("wifi")
+        # 未配置
+        if wifi is None:
+            return []
+        # 只配置了一个
+        if isinstance(wifi, dict):
+            wifi = [wifi]
+        data = []
+        for info in wifi:
+            if not isinstance(info, dict):
+                continue
+            ssid = info.get("ssid", "")
+            password = info.get("password", "")
+            wifi_type = info.get("type", "")
+            if not ssid:
+                continue
+            if not wifi_type:
+                data.append("{}:{}".format(ssid, password))
+            else:
+                data.append("{}:{}:{}".format(ssid, password, wifi_type))
+        return data
+
+    def update_task_args(self, task_args=None, new_args=None):
+        if task_args is None:
+            task_args = self.taskargs
+        if not isinstance(new_args, dict):
+            return
+        # 目前在用的参数列表
+        known_test_args = [
+            "agent_mode", ConfigConst.repeat, ConfigConst.pass_through,
+            "screenshot", "screenrecorder", ConfigConst.web_resource, "wifi",
+            "install_user0", "ui_adaptive", "kill_uitest"
+        ]
+        # 更新同名参数
+        keys = set(task_args.keys()) & set(new_args.keys()) | set(known_test_args)
+        for key in keys:
+            value = new_args.get(key)
+            if not value or task_args.get(key) == value:
+                continue
+            task_args.update({key: value})
 
     def get_user_config_list(self, tag_name):
         data_dic = {}
@@ -81,22 +316,6 @@ class UserConfigManager(object):
                 for sub in child:
                     data_dic[sub.tag] = sub.text
         return data_dic
-
-    @staticmethod
-    def _traversal_element(element, is_top=True):
-        """
-        element: ElementTree.Element, traversal element
-        is_top : bool, if is the top element
-        return : dict
-        """
-        if not isinstance(element, ElementTree.Element):
-            raise TypeError("element must be instance of xml.tree.ElementTree.Element")
-        data = {}
-        if len(element) == 0:
-            return {element.tag: element.text} if is_top else element.text
-        for sub in element:
-            data.setdefault(sub.tag, UserConfigManager._traversal_element(sub, is_top=False))
-        return data
 
     @staticmethod
     def remove_strip(value):
@@ -143,16 +362,6 @@ class UserConfigManager(object):
         remote_dic["port"] = remote_port
         return remote_dic
 
-    def get_testcases_dir_config(self):
-        data_dic = self.get_user_config_list("testcases")
-        if "dir" in data_dic.keys():
-            testcase_dir = data_dic.get("dir", "")
-            if testcase_dir is None:
-                testcase_dir = ""
-        else:
-            testcase_dir = ""
-        return testcase_dir
-
     def get_user_config(self, target_name, filter_name=None):
         data_dic = {}
         all_nodes = self.config_content.findall(target_name)
@@ -168,122 +377,39 @@ class UserConfigManager(object):
 
         return data_dic
 
-    def get_node_attr(self, target_name, attr_name):
-        nodes = self.config_content.find(target_name)
-        if attr_name in nodes.attrib:
-            return nodes.attrib.get(attr_name)
-        return None
-
-    def get_com_device(self, target_name):
-        devices = []
-
-        for node in self.config_content.findall(target_name):
-            if node.attrib["type"] != "com":
-                continue
-
-            device = [node.attrib]
-
-            # get remote device
-            data_dic = {}
-            for sub in node:
-                if sub.text is not None and sub.tag != "serial":
-                    data_dic[sub.tag] = sub.text
-            if data_dic:
-                if data_dic.get("ip", "") == get_local_ip():
-                    data_dic["ip"] = "127.0.0.1"
-                device.append(data_dic)
-                devices.append(device)
-                continue
-
-            # get local device
-            for serial in node.findall("serial"):
-                data_dic = {}
-                for sub in serial:
-                    if sub.text is None:
-                        data_dic[sub.tag] = ""
-                    else:
-                        data_dic[sub.tag] = sub.text
-                device.append(data_dic)
-            devices.append(device)
-        return devices
-
-    def get_device(self, target_name):
-        for node in self.config_content.findall(target_name):
-            data_dic = {}
-            if node.attrib["type"] != "usb-hdc" and \
-                    node.attrib["type"] != "usb-adb":
-                continue
-            data_dic["usb_type"] = node.attrib["type"]
-            for sub in node:
-                if sub.text is None:
-                    data_dic[sub.tag] = ""
-                else:
-                    data_dic[sub.tag] = sub.text
-            if data_dic.get("ip", "") == get_local_ip():
-                data_dic["ip"] = "127.0.0.1"
-            return data_dic
-        return None
-
     def get_testcases_dir(self):
         from xdevice import Variables
-        testcases_dir = self.get_testcases_dir_config()
+        testcases_dir = self.testcases.get(ConfigConst.tag_dir)
         if testcases_dir:
             if os.path.isabs(testcases_dir):
                 return testcases_dir
-            return os.path.abspath(os.path.join(Variables.exec_dir,
-                                                testcases_dir))
-
+            return os.path.abspath(
+                os.path.join(Variables.exec_dir, testcases_dir))
         return os.path.abspath(os.path.join(Variables.exec_dir, "testcases"))
 
     def get_resource_path(self):
         from xdevice import Variables
-        data_dic = self.get_user_config_list("resource")
-        if "dir" in data_dic.keys():
-            resource_dir = data_dic.get("dir", "")
-            if resource_dir:
-                if os.path.isabs(resource_dir):
-                    return resource_dir
-                return os.path.abspath(
-                    os.path.join(Variables.exec_dir, resource_dir))
-
-        return os.path.abspath(
-            os.path.join(Variables.exec_dir, "resource"))
-
-    def get_resource_conf(self):
-        resource = self.config_content.find("resource")
-        if resource is None:
-            return {}
-        return self._traversal_element(resource)
-
-    def get_log_level(self):
-        data_dic = {}
-        node = self.config_content.find("loglevel")
-        if node is not None:
-            if node.find("console") is None and node.find("file") is None:
-                # neither loglevel/console nor loglevel/file exists
-                data_dic.update({"console": str(node.text).strip()})
-            else:
-                for child in node:
-                    data_dic.update({child.tag: str(child.text).strip()})
-        return data_dic
-
-    def get_device_log_status(self):
-        data_dic = {}
-        node = self.config_content.find("devicelog")
-        if node is not None:
-            if node.find(ConfigConst.tag_enable) is not None \
-                    or node.find(ConfigConst.tag_dir) is not None:
-                for child in node:
-                    data_dic.update({child.tag: str(child.text).strip()})
-            else:
-                data_dic.update({ConfigConst.tag_enable: str(node.text).strip()})
-                data_dic.update({ConfigConst.tag_dir: None})
-                data_dic.update({ConfigConst.tag_loglevel: "INFO"})
-                data_dic.update({ConfigConst.tag_clear: "TRUE"})
-        return data_dic
+        resource_dir = self.resource.get(ConfigConst.tag_dir)
+        if resource_dir:
+            if os.path.isabs(resource_dir):
+                return resource_dir
+            return os.path.abspath(
+                os.path.join(Variables.exec_dir, resource_dir))
+        return os.path.abspath(os.path.join(Variables.exec_dir, "resource"))
 
     def environment_enable(self):
-        if self.config_content.find("environment") or\
+        if self.config_content.find("environment") or \
                 self.config_content.find("environment/device"):
             return True
         return False
+
+    @property
+    @initialize
+    def uploadtrack(self):
+        """
+        Below configuring closes uploading track data.
+        <uploadtrack>FALSE</uploadtrack>
+        """
+        tag = "uploadtrack"
+        cfg = self.get_element_cfg(tag)
+        return cfg

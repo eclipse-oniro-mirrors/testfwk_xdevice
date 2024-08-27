@@ -23,11 +23,12 @@ from xml.etree import ElementTree
 
 from devicetest.core.exception import TestPrepareError
 from devicetest.core.constants import RunResult
+from devicetest.error import ErrorMessage
 from devicetest.utils.util import get_base_name
 from devicetest.utils.util import import_from_file
 
 
-class PrepareHandler():
+class PrepareHandler:
 
     def __init__(self, log, cur_case, project, configs, devices, run_list):
         self.log = log
@@ -92,10 +93,10 @@ class PrepareHandler():
         elif sys_type == "Darwin":
             tokens = item.split(':')
         else:
-            raise TestPrepareError("sys type error:{}".format(sys_type))
+            self.log.error("system '{}' is not support".format(sys_type))
+            raise TestPrepareError(ErrorMessage.Common.Code_0201011)
         if len(tokens) > 2:
-            raise TestPrepareError(
-                "Syntax error in test specifier {}".format(item))
+            raise TestPrepareError(ErrorMessage.Common.Code_0201012.format(item))
         if len(tokens) == 1:
             # This should be considered a test class name
             self.parse_prepare_config(tokens[0], xml_path)
@@ -108,9 +109,7 @@ class PrepareHandler():
     def validate_test_name(self, name):
         """Checks if a test name is valid. """
         if name == "" or name is None or len(name) < 1:
-            raise TestPrepareError(
-                "Invalid test case name found:{},test method couldn't"
-                " be none.".format(name))
+            raise TestPrepareError(ErrorMessage.Common.Code_0201013.format(name))
 
     def _init_run_prepare(self, test_cls_name):
         """
@@ -152,9 +151,10 @@ class PrepareHandler():
                     test_cls_name = os.path.join(prepare_path,
                                                  cls + '.pyd')
                     if not os.access(test_cls_name, os.F_OK):
-                        err = "Can not find prepare script '{}'.".format(
-                            os.path.join(prepare_path, cls + '.py/d'))
-                        raise TestPrepareError(err)
+                        py_path = os.path.join(prepare_path, cls + '.py')
+                        # .py/.pyd
+                        msg = "{} or {}".format(py_path, py_path + "d")
+                        raise TestPrepareError(ErrorMessage.Common.Code_0201014.format(msg))
                 self.log.info("import prepare script:{}".format(cls))
                 self.project.cur_case_full_path = test_cls_name
                 test_cls = import_from_file(prepare_path, cls)
@@ -168,8 +168,7 @@ class PrepareHandler():
                             result = test_instance._exec_func(
                                 test_instance.setup)
                             if not result:
-                                raise TestPrepareError(
-                                    "prepare's setup may be error!")
+                                raise TestPrepareError(ErrorMessage.Common.Code_0201015)
                     else:
                         if 'executed' == val['status']:
                             self.project.prepare.config[cls][
@@ -177,17 +176,17 @@ class PrepareHandler():
                             result = test_instance._exec_func(
                                 test_instance.teardown)
                             if not result:
-                                self.log.warning(
-                                    "prepare's teardown may be error!")
+                                self.log.warning(ErrorMessage.Common.Code_0201016)
 
-        except TestPrepareError as err:
-            error_msg = "{}: {}".format(err, traceback.format_exc())
+        except TestPrepareError as e:
+            error_msg = str(e)
             self.log.error(error_msg)
+            self.log.error(traceback.format_exc())
 
-        except Exception:
-            error_msg = "run prepare error! {}".format(traceback.format_exc())
+        except Exception as e:
+            error_msg = "run prepare error! {}".format(e)
             self.log.error(error_msg)
-            self.log.debug(traceback.format_exc())
+            self.log.error(traceback.format_exc())
 
         finally:
             self.log.debug("exit prepare {}".format(func))
