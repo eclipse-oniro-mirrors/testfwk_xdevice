@@ -134,7 +134,7 @@ class CaseStart(StageEvent):
             ):
                 json_config = JsonParser(case_json.source_string)
             else:
-                LOG.error('No json config file or the json config file is empty!')
+                LOG.warning('No json config file or the json config file is empty!')
         except Exception as e:
             LOG.error(f'Error loading json config file because {e}')
         if json_config:

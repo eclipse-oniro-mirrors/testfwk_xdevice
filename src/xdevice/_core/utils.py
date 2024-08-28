@@ -301,7 +301,7 @@ def get_file_absolute_path(input_name, paths=None, alt_dir=None):
                 return os.path.abspath(file_path)
 
     err_msg = ErrorMessage.Common.Code_0101002.format(ErrorCategory.Environment, input_name)
-    LOG.error(err_msg)
+    LOG.warning(err_msg)
     if alt_dir:
         LOG.debug("Alt dir is %s" % alt_dir)
     LOG.debug("Paths is:")
