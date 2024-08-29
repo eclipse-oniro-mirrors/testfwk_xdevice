@@ -1579,13 +1579,15 @@ class DeviceLogCollector:
         if not begin:
             LOG.warning('hilog task begin time is not set')
             return
-        minutes, _ = divmod(int(time.time() - begin), 60)
+        minutes, seconds = divmod(int(time.time() - begin), 60)
         if minutes < 0:
             LOG.warning('get logs in a period failed!')
             LOG.warning('当前日志打印的时间先与开始抓取日志的时间')
             return
-        # 若时间间隔小于1分钟，则将1分钟内生成的日志都拉下来
-        unites = '%dm' % (minutes if minutes > 1 else 1)
+        if minutes > 0:
+            unites = '%dm' % minutes
+        else:
+            unites = '%ds' % seconds
 
         remote_tmp = '/data/local/tmp/' + os.path.basename(local_path)
         for remote_dir, on_folder in remotes.items():

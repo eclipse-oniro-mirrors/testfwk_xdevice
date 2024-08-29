@@ -31,6 +31,7 @@ from _core.constants import ConfigConst
 from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.logger import platform_logger
+from _core.testkit.json_parser import JsonParser
 from _core.utils import get_filename_extension
 from _core.utils import is_config_str
 from _core.utils import unique_id
@@ -332,7 +333,6 @@ def _make_test_descriptor(file_path, test_type_key):
 
 def _get_test_driver(test_source):
     try:
-        from _core.testkit.json_parser import JsonParser
         json_config = JsonParser(test_source)
         return json_config.get_driver_type()
     except ParamError as error:
@@ -380,12 +380,14 @@ def _make_test_descriptors_from_testsources(test_sources, config):
 
 def _get_module_info(config_file):
     module_info_path = config_file.replace(MODULE_CONFIG_SUFFIX, MODULE_INFO_SUFFIX)
+    if not os.path.exists(module_info_path):
+        return NO_MODULE_SUBSYSTEM
     try:
         from _core.testkit.json_parser import JsonParser
         json_config = JsonParser(module_info_path)
         return json_config.get_module_subsystem()
     except ParamError as error:
-        LOG.error(error, error_no=error.error_no)
+        LOG.warning(error, error_no=error.error_no)
         return NO_MODULE_SUBSYSTEM
 
 
