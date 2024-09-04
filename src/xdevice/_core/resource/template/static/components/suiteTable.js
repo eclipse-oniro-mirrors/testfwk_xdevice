@@ -18,7 +18,7 @@ const suiteTable = {
   component: {
     template: `<el-table :data="pageSuitesList" style="width: 100%" border @sort-change="handleSortChange" class="details-table" @row-click="handleRowClick"  row-class-name="table-row-clickable">
     <el-table-column type="index" label="#" min-width="3%"></el-table-column>
-    <el-table-column prop="name" label="Testsuite" show-overflow-tooltip="" width="380" resizable
+    <el-table-column prop="name" label="Testsuite" show-overflow-tooltip="" min-width="27%" resizable
     ></el-table-column>
     <el-table-column sortable prop="time" label="Time(s)" min-width="10%"> </el-table-column>
     <el-table-column sortable prop="tests" label="Tests" min-width="10%"> </el-table-column>

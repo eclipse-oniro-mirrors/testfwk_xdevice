@@ -28,7 +28,7 @@ const popoverCheckBox = {
       <div style="margin: 15px 0"></div>
       <el-checkbox-group v-model="checkedValues" @change="checkedChange">
         <el-checkbox v-for="item in filterOption" :label="item" :key="item" style="display:block">
-          {{ item }}
+          <span :title="item">{{ item }}</span>
         </el-checkbox>
       </el-checkbox-group>
     </el-scrollbar>

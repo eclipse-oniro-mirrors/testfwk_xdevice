@@ -182,9 +182,12 @@ p {
   border-right: 1px dashed transparent;
   border-right-color: #bcbcbc;
 }
+.el-table__body-wrapper .el-scrollbar .is-vertical {
+  display: block !important;
+}
 
 .h2-test {
-  margin-top: 0px;
+  margin-top: 0;
   text-align: center;
   color: #000000;
 }

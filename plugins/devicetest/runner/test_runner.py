@@ -23,6 +23,7 @@ import traceback
 from typing import Union
 
 from xdevice import calculate_elapsed_time
+from xdevice import check_result_report
 from xdevice import StateRecorder
 from xdevice import LifeCycle
 from xdevice import ResultCode
@@ -380,27 +381,26 @@ class TestSuiteRunner:
         """
         suite_dir_path = get_dir_path(test_cls_name)
         test_cls_instance = None
+        self.handle_suites_started()
+        self.handle_suite_started()
         try:
             test_cls = import_from_file(suite_dir_path, self.suite_name)
-            self.handle_suites_started()
-            self.handle_suite_started()
             self.log.info("Success to import {}.".format(self.suite_name))
             self.configs["cur_suite"] = test_cls
             with test_cls(self.configs, suite_dir_path) as test_cls_instance:
                 test_cls_instance.run()
 
             error_msg = test_cls_instance.error_msg
-
             self.handle_suite_ended(test_cls_instance)
-            self.handle_suites_ended()
-        except ImportError as e:
-            error_msg = str(e)
+        except Exception as e:
+            error_msg = ErrorMessage.TestCase.Code_0203017.format(e)
             self.log.error(error_msg)
             self.log.error(traceback.format_exc())
-        except Exception as e:
-            error_msg = str(e)
-            self.log.error("run suite error! Exception: {}".format(e))
-            self.log.error(traceback.format_exc())
+        self.handle_suites_ended(error_msg)
+        result_path = os.path.join(self.configs["report_path"], "result")
+        report_file = os.path.join(result_path, "%s.xml" % self.suite_name)
+        os.makedirs(result_path, exist_ok=True)
+        check_result_report("", report_file, error_message=error_msg)
         if test_cls_instance:
             try:
                 del test_cls_instance
@@ -427,12 +427,12 @@ class TestSuiteRunner:
             suite_report = copy.copy(test_suites)
             listener.__started__(LifeCycle.TestSuites, suite_report)
 
-    def handle_suites_ended(self):
+    def handle_suites_ended(self, error_msg):
         suites = self.state_machine.get_suites()
         suites.is_completed = True
+        suites.stacktrace = error_msg
         for listener in self.listeners:
-            listener.__ended__(LifeCycle.TestSuites, test_result=suites,
-                               suites_name=suites.suites_name)
+            listener.__ended__(LifeCycle.TestSuites, suites)
 
     def handle_suite_started(self):
         self.state_machine.suite(reset=True)

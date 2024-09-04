@@ -129,7 +129,7 @@ class _CommonErr:
                             "category": ErrorCategory.Environment,
                             "code": "0101020",
                             "suggestions": "测试报告路径需为一个空文件夹"})
-    Code_0101021 = Error(**{"error": "Test source '{}' required device does not exist",
+    Code_0101021 = Error(**{"error": "Test source required {} devices, actually {} devices were found",
                             "category": ErrorCategory.Environment,
                             "code": "0101021",
                             "suggestions": "测试用例的设备条件不满足"})

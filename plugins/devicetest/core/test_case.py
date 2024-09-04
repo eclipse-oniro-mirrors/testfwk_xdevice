@@ -149,7 +149,7 @@ class CoreCase:
             return
         step_error_id = f'step_error_{index}'
         self.log.error(f'<span id="{step_error_id}">{self.error_msg}</span>')
-        self.log.error(traceback.format_exc())
+        self.log.error(trace_info)
         _error = f'<a href="javascript:" onclick="gotoStep(\'{step_error_id}\')">{self.error_msg}</a>'
         UpdateStep(index, error=_error)
 

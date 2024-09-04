@@ -77,10 +77,10 @@ class SuiteReporter:
         # initial test suites element
         test_suites_element, test_suites_attributes, _ = \
             self._initial_test_suites()
-        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.failed:
-            test_suites_attributes[ReportConstant.failures] = 1
-        else:
+        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
             test_suites_attributes[ReportConstant.unavailable] = 1
+        else:
+            test_suites_attributes[ReportConstant.disabled] = 1
         self.data_helper.set_element_attributes(test_suites_element,
                                                 test_suites_attributes)
 
@@ -89,10 +89,10 @@ class SuiteReporter:
             suite_result)
         test_suite_element.text, test_suite_element.tail = \
             "", self.data_helper.LINE_BREAK
-        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.failed:
-            test_suite_attributes[ReportConstant.failures] = 1
-        else:
+        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
             test_suite_attributes[ReportConstant.unavailable] = 1
+        else:
+            test_suite_attributes[ReportConstant.disabled] = 1
         test_suite_attributes[ReportConstant.message] = suite_result.stacktrace
 
         if Context.session().mode == ModeType.decc:

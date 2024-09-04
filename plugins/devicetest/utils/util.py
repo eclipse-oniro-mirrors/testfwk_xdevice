@@ -91,10 +91,9 @@ def import_from_file(file_path, file_base_name):
     except Exception as exception:
         file_abs_path = os.path.join(file_path, file_base_name)
         error_msg = ErrorMessage.TestCase.Code_0203001.format(file_abs_path, exception)
-        log.error(error_msg, is_traceback=True)
         raise ImportError(error_msg) from exception
     if not hasattr(sys.modules.get(file_base_name), file_base_name):
-        raise ModuleNotAttributeError("File name and class name do not match")
+        raise ModuleNotAttributeError(ErrorMessage.TestCase.Code_0203016)
     return getattr(sys.modules[file_base_name], file_base_name)
 
 

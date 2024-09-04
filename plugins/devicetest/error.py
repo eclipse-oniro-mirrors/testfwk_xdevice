@@ -173,6 +173,18 @@ class _TestCaseErr:
                             "category": ErrorCategory.Script,
                             "code": "0203014",
                             "suggestions": "测试套json的testsuite字段未配置测试套py"})
+    Code_0203015 = Error(**{"error": "You can only use the loop decorator in a test case",
+                            "category": ErrorCategory.Script,
+                            "code": "0203015",
+                            "suggestions": "只能在测试用例里使用loop装饰器"})
+    Code_0203016 = Error(**{"error": "The file name of the test case must be the same as the class name",
+                            "category": ErrorCategory.Script,
+                            "code": "0203016",
+                            "suggestions": "测试用例的文件名与类名必须保持一致"})
+    Code_0203017 = Error(**{"error": "Failed to run the test suite, error: {}",
+                            "category": ErrorCategory.Script,
+                            "code": "0203017",
+                            "suggestions": "测试套运行失败"})
 
 
 class _AssertionErr:

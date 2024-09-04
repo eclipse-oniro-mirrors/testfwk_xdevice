@@ -60,7 +60,7 @@ class AbsReportListener(IListener, ABC):
         if lifecycle == LifeCycle.TestSuite:
             self._handle_testsuite_end(test_result, kwargs)
         elif lifecycle == LifeCycle.TestSuites:
-            self._handle_test_suites_end(kwargs)
+            self._handle_test_suites_end(test_result, kwargs)
         elif lifecycle == LifeCycle.TestCase:
             self._handle_case_end(test_result)
         elif lifecycle == LifeCycle.TestTask:
@@ -93,7 +93,7 @@ class AbsReportListener(IListener, ABC):
         pass
 
     @abstractmethod
-    def _handle_test_suites_end(self, kwargs):
+    def _handle_test_suites_end(self, test_result, kwargs):
         pass
 
     @abstractmethod
@@ -201,13 +201,17 @@ class ReportEventListener(AbsReportListener, ABC):
         test.code = test_result.code
         test.report = test_result.report
 
-    def _handle_test_suites_end(self, kwargs):
+    def _handle_test_suites_end(self, test_result, kwargs):
         if not kwargs.get("suite_report", False):
             result_dir = os.path.join(self.report_path, "result")
             os.makedirs(result_dir, exist_ok=True)
-            suites_name = kwargs.get("suites_name", "")
-            product_info = kwargs.get("product_info", "")
-            self._generate_data_report(result_dir, self.result, suites_name, product_info=product_info)
+            message = ""
+            if test_result:
+                message = test_result.stacktrace
+                suites_name = test_result.suites_name
+            else:
+                suites_name = kwargs.get("suites_name", "")
+            self._generate_data_report(result_dir, self.result, suites_name, message=message)
 
     def _handle_case_skip(self, test_result):
         test = self._get_test_result(test_result=test_result, create=False)

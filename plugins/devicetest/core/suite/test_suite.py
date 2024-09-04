@@ -20,6 +20,7 @@ import copy
 import sys
 import os
 import traceback
+from typing import List, Tuple
 
 from xdevice import ConfigConst
 from xdevice import calculate_elapsed_time
@@ -32,9 +33,11 @@ from xdevice import Variables
 
 from devicetest.core.constants import RunResult
 from devicetest.core.constants import FileAttribute
+from devicetest.core.test_case import UpdateStep
 from devicetest.core.variables import CurCase
 from devicetest.core.variables import DeccVariable
 from devicetest.core.variables import ProjectVariables
+from devicetest.error import ErrorMessage
 from devicetest.report.generation import add_log_caching_handler
 from devicetest.report.generation import del_log_caching_handler
 from devicetest.report.generation import get_caching_logs
@@ -42,9 +45,6 @@ from devicetest.report.generation import generate_report
 from devicetest.utils.util import get_base_name
 from devicetest.utils.util import get_dir_path
 from devicetest.utils.util import import_from_file
-
-suite_flag = None
-
 
 
 class TestSuite:
@@ -67,7 +67,7 @@ class TestSuite:
         self.log = self.configs["log"]
         self.error_msg = ''
         self.trace_info = ''
-        self.case_list = []
+        self.case_list: List[Tuple[str, str]] = []
         self.case_result = dict()
         self.suite_name = self.configs.get("suite_name")
         # 白名单用例
@@ -121,7 +121,13 @@ class TestSuite:
         try:
             self.cur_case.set_suite_instance(self)
             # 1.先判断是否在json中指定，否则先收集当前文件夹下所有testcase得到run_list
-            self.case_list = self._get_case_list(self.path)
+            for case_path in self._get_case_list(self.path):
+                case_name = get_base_name(case_path)
+                if (self.black_case_list and case_name in self.black_case_list) \
+                        or (self.white_case_list and case_name not in self.white_case_list):
+                    self.log.warning("case name {} is in black list or not in white list, ignored".format(case_name))
+                    continue
+                self.case_list.append((case_name, case_path))
             self.log.debug("Execute test case list: {}".format(self.case_list))
             # 2.先执行self.setup
             if self.run_setup():
@@ -133,16 +139,16 @@ class TestSuite:
                 total_case_num = len(self.case_list)
                 for index, case in enumerate(self.case_list, 1):
                     self._reset_screenrecorder_and_screenshot()
-                    self.log.info("[{} / {}] Executing suite case: {}".format(index, total_case_num, case))
+                    self.log.info("[{} / {}] Executing suite case: {}".format(index, total_case_num, case[1]))
                     self.run_one_test_case(case)
                 # 停止收集测试套子用例的运行日志
                 del_log_caching_handler(self._case_log_buffer_hdl)
             else:
-                for case_path in self.case_list:
-                    case_name = get_base_name(case_path)
-                    self.case_result[case_name] = {
-                        "result": RunResult.FAILED,
-                        "error": f"Test suite setup step execution failed! {self.error_msg}",
+                self.error_msg = ErrorMessage.TestCase.Code_0203017.format(self.error_msg)
+                for case in self.case_list:
+                    self.case_result[case[0]] = {
+                        "result": RunResult.BLOCKED,
+                        "error": self.error_msg,
                         "run_time": 0,
                         "report": report_path
                     }
@@ -286,7 +292,17 @@ class TestSuite:
         except Exception as exception:
             self.error_msg = str(exception)
             self.trace_info = traceback.format_exc()
-            self.log.error("run case error! Exception: {}".format(traceback.format_exc()))
+
+            index = self.cur_case.step_index
+            if index == -1:
+                self.log.error(self.error_msg)
+                self.log.error(self.trace_info)
+            else:
+                step_error_id = f'step_error_{index}'
+                self.log.error(f'<span id="{step_error_id}">{self.error_msg}</span>')
+                self.log.error(self.trace_info)
+                _error = f'<a href="javascript:" onclick="gotoStep(\'{step_error_id}\')">{self.error_msg}</a>'
+                UpdateStep(index, error=_error)
         else:
             result = True
         return result
@@ -302,20 +318,12 @@ class TestSuite:
         self.log.info("SetUp Failed!")
         return False
 
-    def run_one_test_case(self, case_path):
-        case_name = get_base_name(case_path)
-        if (self.black_case_list and case_name in self.black_case_list) \
-                or (self.white_case_list and case_name not in self.white_case_list):
-            self.log.warning("case name {} is in black list or not in white list, ignored".format(case_name))
-            return
+    def run_one_test_case(self, case: Tuple[str, str]):
+        case_name, case_path = case[0], case[1]
         start_time = get_cst_time()
         case_result = RunResult.FAILED
-        error_msg = ""
         test_cls_instance = None
-
-        # 用例测试结果的拓展内容
-        result_content = None
-
+        result_content = None   # 用例测试结果的拓展内容
         try:
             test_cls = import_from_file(get_dir_path(case_path), case_name)
             self.log.info("Success to import {}.".format(case_name))
@@ -325,40 +333,38 @@ class TestSuite:
                 test_cls_instance.run()
             case_result, error_msg = test_cls_instance.result, test_cls_instance.error_msg
             result_content = getattr(test_cls_instance, "result_content", None)
-        except ImportError as e:
-            error_msg = str(e)
-            self.log.error(error_msg)
-            self.log.error(traceback.format_exc())
         except Exception as e:
             error_msg = str(e)
             self.log.error("run case error! Exception: {}".format(e))
             self.log.error(traceback.format_exc())
-        finally:
-            if test_cls_instance is None:
-                case_result = RunResult.BLOCKED
-            Binder.notify_stage(CaseEnd(case_name, case_result))
 
-            end_time = get_cst_time()
-            cost = int(round((end_time - start_time).total_seconds() * 1000))
-            self.case_result[case_name] = {
-                "result": case_result, "error": error_msg,
-                "run_time": cost, "report": "", "result_content": result_content}
-            if test_cls_instance:
-                try:
-                    self.log.info("Executed case: {}, result: {}, cost time: {}".format(
-                        case_name, test_cls_instance.result, cost))
-                    del test_cls_instance
-                    self.log.debug("del test case instance success.")
-                except Exception as e:
-                    self.log.debug(traceback.format_exc())
-                    self.log.warning("del test case instance exception."
-                                     " Exception: {}".format(e))
+        if test_cls_instance is None:
+            case_result = RunResult.BLOCKED
+        if test_cls_instance:
+            try:
+                del test_cls_instance
+                self.log.debug("del test case instance success")
+            except Exception as e:
+                self.log.debug(traceback.format_exc())
+                self.log.warning("del test case instance exception. Exception: {}".format(e))
+        Binder.notify_stage(CaseEnd(case_name, case_result))
+
+        end_time = get_cst_time()
+        cost = int(round((end_time - start_time).total_seconds() * 1000))
+        self.log.info("Executed case: {}, result: {}, cost time: {}ms".format(case_name, case_result, cost))
+        self.case_result[case_name] = {
+            "result": case_result, "error": error_msg,
+            "run_time": cost, "report": "", "result_content": result_content}
+
+        try:
             self._device_close()
+        except Exception as e:
+            self.log.error("stop catch device log error! {}".format(e))
+            self.log.debug(traceback.format_exc())
 
         if self._case_log_buffer_hdl is None:
             return
         # 生成子用例的报告
-        end_time = get_cst_time()
         steps = self.cur_case.get_steps_info()
         base_info = {
             "name": case_name,

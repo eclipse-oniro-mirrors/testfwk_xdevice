@@ -182,7 +182,9 @@ class Scheduler(BaseScheduler):
                 LOG.error("Queue monitor thread is dead.")
                 break
             environment = env_manager.apply_environment(device_options)
-            if len(environment.devices) == len(device_options):
+            applied_device_cnt = len(environment.devices)
+            required_device_cnt = len(device_options)
+            if applied_device_cnt == required_device_cnt:
                 return environment
             else:
                 env_manager.release_environment(environment)
@@ -191,11 +193,7 @@ class Scheduler(BaseScheduler):
                 if env_manager.check_device_exist(device_options):
                     continue
                 else:
-                    LOG.debug("'%s' required %s devices, actually %s devices"
-                              " were found" % (test_driver[1].source.test_name,
-                                               len(device_options),
-                                               len(environment.devices)))
-                    raise DeviceError(ErrorMessage.Common.Code_0101021.format(test_driver[1].source.source_file))
+                    raise DeviceError(ErrorMessage.Common.Code_0101021.format(required_device_cnt, applied_device_cnt))
 
         return environment
 

@@ -18,11 +18,11 @@ const caseTable = {
   component: {
     template: `<el-table :data="pageCaseList" style="width: 100%" @sort-change="handleSortChange" class="details-table" border>
     <el-table-column type="index" label="#" min-width="3%"></el-table-column>
-    <el-table-column prop="suiteName" label="Testsuite" show-overflow-tooltip="" min-width="28%" width="380" resizable></el-table-column>
-    <el-table-column prop="name" label="Testcase" show-overflow-tooltip="" min-width="20%"></el-table-column>
-    <el-table-column sortable prop="time" label="Time(s)" min-width="10%">
+    <el-table-column prop="suiteName" label="Testsuite" show-overflow-tooltip="" min-width="27%" width="380" resizable></el-table-column>
+    <el-table-column prop="name" label="Testcase" show-overflow-tooltip="" min-width="27%"></el-table-column>
+    <el-table-column sortable prop="time" label="Time(s)" min-width="8%">
     </el-table-column>
-    <el-table-column label="Result" min-width="10%">
+    <el-table-column label="Result" min-width="8%">
       <template #header>
         <popover-checkbox
           headername="Result"
@@ -39,7 +39,7 @@ const caseTable = {
         >
       </template>
     </el-table-column>
-    <el-table-column prop="error" label="Error" min-width="30%">
+    <el-table-column prop="error" label="Error" min-width="27%">
       <template #default="scope">
         <el-popover
           placement="bottom"

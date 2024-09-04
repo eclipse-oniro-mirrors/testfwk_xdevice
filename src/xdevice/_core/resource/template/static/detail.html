@@ -170,7 +170,7 @@
 
   <div id="app">
     <div class="header" v-if="detailData">
-      <h3 style="margin: 12.5px 0">{{ detailData.name }}</h3>
+      <h3>{{ detailData.name }}</h3>
       <div>
         <el-descriptions class="custom-descriptions" title="Summary" :column="3" border>
           <el-descriptions-item label="Test Start">{{
@@ -205,29 +205,29 @@
       <h4>Test Devices</h4>
       <el-table :data="devicesList" style="width: 100%" ref="table" :max-height="maxHeight">
         <el-table-column type="index" label="#" min-width="3%"></el-table-column>
-        <el-table-column prop="sn" label="SN" width="380" show-overflow-tooltip="">
+        <el-table-column prop="sn" label="SN" min-width="22%" show-overflow-tooltip="">
           <template #default="scope">
             <span>{{scope.row.sn ? scope.row.sn : '-'}}</span>
           </template> </el-table-column>
-        <el-table-column prop="model" label="Model" min-width="10%">
+        <el-table-column prop="model" label="Model" min-width="14%">
           <template #default="scope">
             <span>{{scope.row.model ? scope.row.model : '-'}}</span>
           </template> </el-table-column>
-        <el-table-column prop="type" label="Type" min-width="10%">
+        <el-table-column prop="type" label="Type" min-width="14%">
           <template #default="scope">
             <span>{{scope.row.type ? scope.row.type : '-'}}</span>
           </template> </el-table-column>
-        <el-table-column prop="platform" label="Platform" min-width="10%">
+        <el-table-column prop="platform" label="Platform" min-width="14%">
           <template #default="scope">
             <span>{{scope.row.platform ? scope.row.platform : '-'}}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="version" label="Version" min-width="10%">
+        <el-table-column prop="version" label="Version" min-width="16%">
           <template #default="scope">
             <span>{{scope.row.version ? scope.row.version : '-'}}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="others" label="Others" min-width="30%">
+        <el-table-column prop="others" label="Others" min-width="17%">
           <template #default="scope">
             <div v-if="scope.row.others && Object.keys(scope.row.others).length !== 0">
               <span class="div-others div-error">{{scope.row.others}}</span>

@@ -256,7 +256,8 @@ class ResultReporter(IReporter):
             LOG.error(f"error message: {e}")
             return None
         module = ResultReporter._count_result(ele_module)
-        module_name = file_name[:-4] if module.name == "" else module.name.strip()
+        # 当模块名为空或为AllTests，将模块名设为结果xml的文件名
+        module_name = file_name[:-4] if module.name in ["", "AllTests"] else module.name.strip()
         suites = [self._parse_testsuite(ele_suite) for ele_suite in ele_module]
 
         # 为报告文件task_record.info提供数据

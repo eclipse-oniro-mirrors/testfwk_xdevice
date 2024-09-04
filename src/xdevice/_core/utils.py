@@ -446,8 +446,8 @@ def check_result_report(report_root_dir, report_file, error_message="",
     suite_result.stacktrace = error_message
     if module_name:
         suite_name = module_name
-    # 设置测试结果，默认结果是Failed
-    result_kind = kwargs.get("result_kind", CaseResult.failed)
+    # 设置测试结果，默认结果是Blocked
+    result_kind = kwargs.get("result_kind", CaseResult.blocked)
     suite_reporter = SuiteReporter(
         [(suite_result, [])], suite_name, result_dir,
         modulename=module_name, message=error_message, result_kind=result_kind)

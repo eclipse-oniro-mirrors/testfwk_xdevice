@@ -83,29 +83,29 @@
         <p>Test Devices</p>
         <el-table :data="devicesList" style="width: 100%" ref="table" :max-height="maxHeight">
           <el-table-column type="index" label="#" min-width="3%"></el-table-column>
-          <el-table-column prop="sn" label="SN" width="380" min-width="27%" show-overflow-tooltip="">
+          <el-table-column prop="sn" label="SN" min-width="22%" show-overflow-tooltip="">
             <template #default="scope">
               <span>{{scope.row.sn ? scope.row.sn : '-'}}</span>
             </template> </el-table-column>
-          <el-table-column prop="model" label="Model" min-width="10%">
+          <el-table-column prop="model" label="Model" min-width="14%">
             <template #default="scope">
               <span>{{scope.row.model ? scope.row.model : '-'}}</span>
             </template> </el-table-column>
-          <el-table-column prop="type" label="Type" min-width="10%">
+          <el-table-column prop="type" label="Type" min-width="14%">
             <template #default="scope">
               <span>{{scope.row.type ? scope.row.type : '-'}}</span>
             </template> </el-table-column>
-          <el-table-column prop="platform" label="Platform" min-width="10%">
+          <el-table-column prop="platform" label="Platform" min-width="14%">
             <template #default="scope">
               <span>{{scope.row.platform ? scope.row.platform : '-'}}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="version" label="Version" min-width="20%">
+          <el-table-column prop="version" label="Version" min-width="16%">
             <template #default="scope">
               <span>{{scope.row.version ? scope.row.version : '-'}}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="others" label="Others" :min-width="statistics && statistics.repeat > 1 ? '30%' : '20%'">
+          <el-table-column prop="others" label="Others" min-width="17%">
             <template #default="scope">
               <div v-if="scope.row.others && Object.keys(scope.row.others).length !== 0">
                 <span class="div-others div-error">{{scope.row.others}}</span>
@@ -138,7 +138,7 @@
         <p>Test Details</p>
         <el-table :data="list" style="width: 100%" border @sort-change="handleSortChange" class="details-table">
           <el-table-column type="index" label="#" min-width="3%"></el-table-column>
-          <el-table-column show-overflow-tooltip="" width="380" resizable>
+          <el-table-column show-overflow-tooltip="" min-width="22%" resizable>
             <template #header>
               <popover-checkbox headername="Module" :options="options" @change="handFilterChange">
               </popover-checkbox>
@@ -149,8 +149,7 @@
                 }}</el-link>
             </template>
           </el-table-column>
-          <el-table-column show-overflow-tooltip="" resizable min-width="10%"
-            v-if="statistics && statistics.repeat > 1">
+          <el-table-column show-overflow-tooltip="" resizable min-width="7%">
             <template #header>
               <popover-checkbox headername="Round" :options="roundOptions" @change="handRoundChange">
               </popover-checkbox>
@@ -161,24 +160,35 @@
                 }}</span>
             </template>
           </el-table-column>
-          <el-table-column sortable prop="time" label="Time(s)" min-width="10%"> </el-table-column>
-          <el-table-column sortable prop="tests" label="Tests" min-width="10%"> </el-table-column>
-          <el-table-column sortable prop="passed" label="Passed" min-width="10%"> </el-table-column>
-          <el-table-column sortable prop="failed" label="Failed" min-width="10%">
+          <el-table-column sortable prop="time" label="Time(s)" min-width="7%"> </el-table-column>
+          <el-table-column sortable prop="tests" label="Tests" min-width="7%"> </el-table-column>
+          <el-table-column sortable prop="passed" label="Passed" min-width="7%"> </el-table-column>
+          <el-table-column sortable prop="failed" label="Failed" min-width="7%">
             <template #default="scope">
               <span :class="[scope.row.failed > 0 ? 'table-error':'']">{{ scope.row.failed }}</span>
             </template>
           </el-table-column>
-          <el-table-column sortable prop="blocked" label="Blocked" min-width="10%">
+          <el-table-column sortable prop="blocked" label="Blocked" min-width="7%">
             <template #default="scope">
               <span :class="[scope.row.blocked > 0 ? 'table-blocked':'']">{{ scope.row.blocked }}</span>
             </template>
           </el-table-column>
-          <el-table-column sortable prop="ignored" label="Ignored" min-width="10%"> </el-table-column>
-          <el-table-column sortable prop="passingrate" label="Passing Rate" min-width="10%">
+          <el-table-column sortable prop="ignored" label="Ignored" min-width="7%"> </el-table-column>
+          <el-table-column sortable prop="passingrate" label="Passing Rate" min-width="9%">
             <template #default="scope">
               <el-progress :text-inside="true" :stroke-width="22" precision="2" status="success"
                 :percentage="scope.row.passingrate" :color="customColorMethod(scope.row.passingrate)" />
+            </template>
+          </el-table-column>
+          <el-table-column show-overflow-tooltip prop="error" label="Error" min-width="17%">
+            <template #header>
+              <popover-checkbox headername="Error" :options="errorOptions" @change="handErrorChange">
+              </popover-checkbox>
+            </template>
+            <template #default="scope">
+              <span>{{
+                scope.row.error
+                }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -201,6 +211,8 @@
         const options = reactive([]);
         const roundKeyword = reactive([]);
         const roundOptions = reactive([]);
+        const errorKeyword = reactive([]);
+        const errorOptions = reactive([]);
         const statistics = ref();
         const totalList = [];
         const list = ref([]);
@@ -218,6 +230,8 @@
           roundKeyword,
           options,
           roundOptions,
+          errorKeyword,
+          errorOptions,
           summary,
           statistics,
           totalList,
@@ -282,6 +296,9 @@
           if (this.roundKeyword.length) {
             filterData = this.totalList.filter((item) => this.roundKeyword.includes(item.round));
           }
+          if (this.errorKeyword.length) {
+            filterData = this.totalList.filter((item) => this.errorKeyword.includes(item.error));
+          }
           const pageData = filterData.slice(startIndex, endIndex);
           this.list.push(...pageData);
         },
@@ -301,8 +318,8 @@
 
           this.totalList = modules.map(item => {
             return {
-              name: item.name, time: item.time, tests: item.tests, failed: item.failed, ignored: item.ignored,
-              passed: item.passed, blocked: item.blocked, passingrate: item.passingrate, report: item.report, round: item.round
+              name: item.name, round: item.round, time: item.time, tests: item.tests, failed: item.failed, ignored: item.ignored,
+              passed: item.passed, blocked: item.blocked, passingrate: item.passingrate, report: item.report, error: item.error
             }
           });
 
@@ -320,6 +337,8 @@
           this.options.push(...new Set(nameList));
           const roundList = modules.map((item) => item.round);
           this.roundOptions.push(...new Set(roundList));
+          const errorList = modules.map((item) => item.error);
+          this.errorOptions.push(...new Set(errorList));
         },
         handFilterChange(val) {
           this.keyword.length = 0;
@@ -331,6 +350,12 @@
           this.roundKeyword.length = 0;
           this.paginationInfo.currentPage = 1;
           this.roundKeyword.push(...val);
+          this.getPageData();
+        },
+        handErrorChange(val) {
+          this.errorKeyword.length = 0;
+          this.paginationInfo.currentPage = 1;
+          this.errorKeyword.push(...val);
           this.getPageData();
         },
         viewDetail(data) {
