@@ -25,16 +25,19 @@ xdevice主要包括以下几个主要模块：
 ## 目录
 ```
 xdevice
-├── config                    # xdevice组件配置
-│     ├── user_config.xml     # xdevice环境配置
-├── src                       # 组件源码目录
+├── config                            # xdevice组件配置
+│     ├── user_config.xml             # xdevice环境配置
+├── src                               # 组件源码目录
 │     ├── xdevice
-├── plugins                   # xdevice扩展模块
-|     |—— ohos                # openharmony测试驱动插件
-│           ├── src           # 扩展模块源码
-│           └── setup.py      # ohos扩展模块安装脚本
-|     |--devicetest           # devicetest测试驱动插件
-|           └── setup.py      # deviectest扩展模块安装脚本
+├── template                          # 模板文件
+│     ├── report                      # 测试报告模板
+│     ├── build_report_template.py    # 测试报告模板构建脚本
+├── plugins                           # xdevice扩展模块
+|     |—— ohos                        # openharmony测试驱动插件
+│           ├── src                   # 扩展模块源码
+│           └── setup.py              # ohos扩展模块安装脚本
+|     |--devicetest                   # devicetest测试驱动插件
+|           └── setup.py              # deviectest扩展模块安装脚本
 ```
 
 
@@ -47,6 +50,12 @@ xdevice
 - rsa>=4.0
 
 ## 使用
+- **构建xdevice测试报告模板**
+```cmd
+python -m pip install requests
+python build_report_template.py
+```
+
 - **安装xdevice**
 
   1. 打开xdevice安装目录。

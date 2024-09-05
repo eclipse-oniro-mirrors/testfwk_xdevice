@@ -119,7 +119,7 @@ const suiteTable = {
       handleRowClick(row) {
         this.$emit("view-detail",row);
         setTimeout(() => {
-          window.emitter.emit("filter-name", {
+          window.emitter.emitEvent("filter-name", {
             type: "suite",
             value: row.name,
           });
