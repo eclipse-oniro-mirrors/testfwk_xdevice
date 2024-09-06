@@ -48,11 +48,23 @@ The environment requirements for using this module are as follows:
 -   RSA version: 4.0 or later
 
 ## Usage<a name="section2036431583"></a>
-- ** Build the xdevice test report template**
-```cmd
-python -m pip install requests
-python build_report_template.py
-```
+-   **Build the xdevice test report template**
+  
+  Since the repository does not allow uploading third-party open source files, the script build_deport_template.py needs to be used to automatically download the open source dependencies used in the report template and copy them to the xdevice source code path xdevice/_core/resource/template, and the directory structure of the copied file is as follows:
+  ```
+  src/xdevice/_core/resource/template
+  |--static
+  |--summary_report.html
+  ```
+  Installation dependency and running script (the running environment needs to be connected to the Internet)
+  ```cmd
+  pip install requests
+  python build_report_template.py
+  ```
+  **`For the environment without Internet connection, you can obtain the complete report template from the following link, and then manually copy it to the xdevice source code path xdevice/_core/resource/template`**
+  ```text
+  download link: TODO
+  ```
 
 -   **Installing XDevice**
     1.  Go to the installation directory of XDevice.

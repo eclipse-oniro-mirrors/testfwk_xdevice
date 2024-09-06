@@ -51,10 +51,23 @@ xdevice
 
 ## 使用
 - **构建xdevice测试报告模板**
-```cmd
-python -m pip install requests
-python build_report_template.py
-```
+
+  由于仓库不允许上传三方开源文件，故需使用脚本build_report_template.py，自动地将报告模板用到的开源依赖下载下来，并自动复制到xdevice源码路径xdevice/_core/resource/template<br>
+  复制后文件目录结构如下：
+  ```
+  src/xdevice/_core/resource/template
+  |--static
+  |--summary_report.html
+  ```
+  安装依赖和运行脚本（运行环境需要连接互联网）
+  ```cmd
+  pip install requests
+  python build_report_template.py
+  ```
+  **`对于没有连接互联网的环境，可从下面的链接，获取完整的报告模板，然后人工复制到xdevice源码路径xdevice/_core/resource/template下`**
+  ```text
+  下载链接：待补充
+  ```
 
 - **安装xdevice**
 
