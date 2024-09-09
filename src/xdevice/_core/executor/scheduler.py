@@ -99,7 +99,7 @@ class Scheduler(BaseScheduler):
         from _core.executor.request import Task
         repeat = Variables.config.taskargs.get(ConfigConst.repeat)
         if not repeat:
-            repeat = 1
+            repeat = args.get(ConfigConst.repeat, 1)
         args.update({ConfigConst.repeat: int(repeat)})
         config = Config()
         config.update(args)
