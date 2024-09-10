@@ -50,7 +50,7 @@ The environment requirements for using this module are as follows:
 ## Usage<a name="section2036431583"></a>
 -   **Build the xdevice test report template**
   
-  Since the repository does not allow uploading third-party open source files, the script build_deport_template.py needs to be used to automatically download the open source dependencies used in the report template and copy them to the xdevice source code path xdevice/_core/resource/template, and the directory structure of the copied file is as follows:
+  way 1:  Run the script build_deport_template.py will automatically download the open source dependencies used in the report template and copy them to the xdevice source code path xdevice/_core/resource/template, and the directory structure of the copied file is as follows:
   ```
   src/xdevice/_core/resource/template
   |--static
@@ -61,7 +61,7 @@ The environment requirements for using this module are as follows:
   pip install requests
   python build_report_template.py
   ```
-  **`For the environment without Internet connection, you can obtain the complete report template from the following link, and then manually copy it to the xdevice source code path xdevice/_core/resource/template`**
+  Way 2: For the environment without Internet connection, you can obtain the complete report template from the following link, and then manually copy it to the xdevice source code path xdevice/_core/resource/template
   ```text
   download link: TODO
   ```
