@@ -73,13 +73,11 @@ def setup_template_resource():
         try:
             request.urlretrieve(url, to_path)
         except Exception as e:
-            print(e)
-        if not os.path.exists(to_path):
+            print(f"get report template resource error, {e}")
             print("------" * 5)
             print(notice_zh)
             print(notice_en)
             print("------" * 5)
-            raise Exception("get report template resource error")
 
 
 setup_template_resource()
