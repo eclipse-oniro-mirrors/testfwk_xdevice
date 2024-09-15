@@ -232,6 +232,25 @@ class CreateUiDriverFailError(Exception):
         return str(self.error_msg)
 
 
+class ConnectAccessibilityFailError(Exception):
+
+    def __init__(self, error_msg):
+        super(ConnectAccessibilityFailError, self).__init__(error_msg)
+        self.error_msg = error_msg
+
+    def __str__(self):
+        return str(self.error_msg)
+
+
+class ModuleNotAttributeError(Exception):
+    def __init__(self, error_msg):
+        super(ModuleNotAttributeError, self).__init__(error_msg)
+        self.error_msg = error_msg
+
+    def __str__(self):
+        return str(self.error_msg)
+
+
 try:
     from xdevice import HdcCommandRejectedException
 except ImportError:

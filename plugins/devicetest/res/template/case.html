@@ -3,77 +3,21 @@
 
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-  <script type="text/javascript">
-    function displayMedia() {
-      let video_elements = document.getElementById("logs").getElementsByTagName("video");
-      for (let i = 0; i < video_elements.length; i++) {
-        let a_element = video_elements[i].parentNode;
-        let img_element = video_elements[i];
-        img_element.src = a_element.href;
-        img_element.style.display = "block";
-      }
-      let img_elements = document.getElementById("logs").getElementsByTagName("img");
-      for (let i = 0; i < img_elements.length; i++) {
-        let a_element = img_elements[i].parentNode;
-        let img_element = img_elements[i];
-        img_element.src = a_element.href;
-        img_element.style.display = "block";
-      }
-    }
-
-    function hideMedia() {
-      let video_elements = document.getElementById("logs").getElementsByTagName("video");
-      for (let i = 0; i < video_elements.length; i++) {
-        let a_element = video_elements[i].parentNode;
-        let img_element = video_elements[i];
-        img_element.src = a_element.href;
-        img_element.style.display = "none";
-      }
-      let img_elements = document.getElementById("logs").getElementsByTagName("img");
-      for (let i = 0; i < img_elements.length; i++) {
-        let a_element = img_elements[i].parentNode;
-        let img_element = img_elements[i];
-        img_element.src = a_element.href;
-        img_element.style.display = "none";
-      }
-    }
-
-    function gotoTrace() {
-      let errorMsg = document.getElementsByClassName("col_error")[0].innerHTML;
-      let elements = document.getElementById("logs").getElementsByClassName("error");
-      for (let i = 0; i < elements.length; i++) {
-        let element = elements[i];
-        if (element.innerHTML.indexOf(errorMsg) >= 0) {
-          document.documentElement.scrollTop = element.offsetTop;
-          break;
-        }
-      }
-    }
-
-    function gotoStep(stepId) {
-      let element = document.getElementById(stepId);
-      if (element != null) {
-        let distance = element.offsetTop - 50;
-        document.documentElement.scrollTo(0, distance);
-      }
-    }
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ case.name }}</title>
   <style>
-    body {
-      font-size: 0.875em;
-      margin-right: 50px;
-      margin-left: 50px;
-    }
-
+    /* Execution Log style Begin */
     a:link {
       text-decoration: none;
     }
 
     #logs div {
       white-space: pre-wrap;
+      font-size: 14px;
     }
 
-    .aw {
+    .aw,
+    .step {
       font-weight: bold;
       color: #1E90FF;
     }
@@ -86,159 +30,1234 @@
       color: #00CD00;
     }
 
+    .aw3 {
+      font-weight: bold;
+      background: linear-gradient(to right, red, orange, yellow, green, blue, indigo, violet);
+      -webkit-background-clip: text;
+      color: transparent;
+      display: inline-block;
+      background-repeat: no-repeat;
+    }
+
+    .aw3-container {
+      display: block; /* 确保容器是块级元素 */
+      overflow: hidden; /* 确保背景渐变效果 */
+    }
+
+    .ui_container {
+      background-color: black;
+      color: #18b302;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    .ui_component-number {
+      color: #18b302;
+    }
+
+    .ui_components {
+      display: flex;
+      flex-wrap: wrap;
+    }
+
+    .ui_component {
+      flex: 1;
+      margin: 5px;
+      color: #18b302;
+      background-color: #333;
+      padding: 10px;
+      box-sizing: border-box;
+      overflow-wrap: break-word; /* Ensures long words break */
+      word-break: break-all; /* Ensures long words break */
+    }
+
+    .ui_component pre {
+        white-space: pre-wrap;
+        word-wrap: break-word; /* Ensures long words break */
+    }
+
+    .ui_old-component .highlight {
+        color: red;
+    }
+    .ui_new-component .highlight {
+        color: yellow;
+    }
+
+    @media (max-width: 600px) {
+      .ui_components {
+            flex-direction: column;
+        }
+    }
+
     .error,
+    .blocked,
     .fail,
     .failed,
-    .investigated,
     .unavailable {
-      color: red;
+      color: red !important;
     }
 
     .pass,
     .passed {
-      color: green;
+      color: green !important;
     }
 
     .warn,
     .warning {
       color: #FFCC00;
     }
+    /* Execution Log style End */
 
-    .operations {
-      background-color: white;
-      position: sticky;
-      top: 0;
+    body {
+      margin: 0 100px;
+      background-color: #fff;
     }
 
-    table.steps {
-      border-collapse: collapse;
-      border: 1px solid #ddd;
+    h4 {
+      margin-top: 16px;
+      margin-bottom: 16px;
     }
 
-    table.steps thead,
-    table.steps tbody tr {
-      display: table;
-      width: 100%;
-      table-layout: fixed;
+    .el-descriptions__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
     }
 
-    table.steps tbody {
-      display: block;
-      max-height: 360px;
-      overflow-x: hidden;
+    .el-descriptions__title {
+      color: #000000;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .el-descriptions__body {
+      background-color: #ffffff;
+      max-height: 121px;
       overflow-y: auto;
     }
 
-    table.steps tbody::-webkit-scrollbar {
-      width: 0;
+    .el-descriptions__body .el-descriptions__table {
+      border-collapse: collapse;
+      width: 100%;
     }
 
-    table.steps th,
-    table.steps td {
-      padding: 1px 5px;
-      border-right: 1px solid #ddd;
-      border-bottom: 1px solid #ddd;
+    .el-descriptions__body .el-descriptions__table.is-bordered .el-descriptions__cell {
+      border: 1px solid #edeef5;
+      padding: 8px 11px;
     }
 
-    table.steps th {
-      background: #C6C6C6;
+    .el-descriptions__label.el-descriptions__cell.is-bordered-label {
+      font-weight: 700;
+      color: #606266;
+      background: #f5f7fa;
+    }
+
+    .el-descriptions__body .el-descriptions__table .el-descriptions__cell {
+      box-sizing: border-box;
       text-align: left;
+      line-height: 23px;
+      font-size: 14px;
     }
 
-    table.steps td {
+    .el-descriptions__table .el-descriptions__cell {
+      word-wrap: break-word;
       word-break: break-all;
     }
 
-    .col_no {
-      width: 3em;
+    .header .el-descriptions__table .el-descriptions__cell {
+      width: calc(100%/6);
     }
 
-    .col_time {
-      width: 7em;
+    .toolbar .el-descriptions__table .el-descriptions__label {
+      width: 12.5%;
     }
 
-    .col_shot {
+    .el-descriptions__content.el-descriptions__cell.is-bordered-content {
+      color: #303133;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+      border-radius: 8px;
+      background-color: #bcbcbc;
+    }
+
+    ::-webkit-scrollbar-track {
+      border-radius: 8px;
+      background-color: #f5f5f5;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      border-radius: 8px;
+      background-color: #bfc3c6;
+    }
+
+    .el-popover.el-popper {
+      min-width: 280px;
+    }
+
+    .el-progress-bar__innerText {
+      color: #37383a;
+    }
+
+    .el-descriptions__title {
+      color: #000000;
+    }
+
+    .el-table__body .el-table__cell,
+    .el-table__header-wrapper .el-table__cell {
+      border-left: none;
+      border-right: none;
+    }
+
+    .el-table--border .el-table__inner-wrapper::after,
+    .el-table__border-left-patch,
+    .el-table--border::after,
+    .el-table--border::before {
       display: none;
     }
+
+    .toolbar {
+      display: flex;
+      border: 1px solid #ebeef5;
+      max-height: 760px;
+    }
+
+    .toolbar ul {
+      min-width: 25%;
+      height: auto;
+      overflow-y: auto;
+      flex-direction: column;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      padding: 0;
+      padding-top: 0;
+      margin-top: 0;
+      margin-bottom: 0;
+      border-right: 1px solid #ebeef5;
+    }
+
+    .toolbar ul li {
+      height: 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-left: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #ebeef5;
+      background: #f5f7fa;
+    }
+
+    .toolbar ul li .li-div {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .toolbar ul li .li-span {
+      font-size: 14px;
+      display: -webkit-box;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 300px;
+      line-height: 23px;
+      white-space: normal;
+      word-break: break-all;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .toolbar ul li .li-tag {
+      margin-left: 10px;
+      font-size: 14px;
+    }
+
+    .toolbar ul li svg {
+      margin-right: 10px;
+      margin-left: 10px;
+      width: 16px;
+      height: 16px
+    }
+
+    .toolbar div img {
+      height: 514px;
+    }
+
+    .toolbar ul .isChecked {
+      background: #c9e1f8;
+    }
+
+    .toolbar ul .isPassed {
+      color: red;
+    }
+
+    .toolbar .img-div {
+      max-height: 630px;
+      overflow-y: auto;
+      display: flex;
+      justify-content: start;
+      margin-top: 10px;
+
+    }
+
+    .toolbar .screen-div {
+      min-width: 420px
+    }
+
+    .div-error {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .div-others {
+      display: inline-block;
+      width: 90%;
+      line-height: 23px;
+      vertical-align: sub
+    }
+
+    .span-img {
+      width: 5%;
+      display: inline-block;
+    }
+
+    .img {
+      margin-left: 5px;
+      cursor: pointer;
+      height: 16px;
+      width: 16px;
+    }
+
+    .div-dialog {
+      border-bottom: 1px solid #ebeef5;
+      border-top: 1px solid #ebeef5;
+    }
+
+    .des-style {
+      max-height: 342px !important;
+      overflow: auto;
+    }
+
+    .div-dialog .el-descriptions__table tr:nth-child(1) .el-descriptions__cell {
+      border-top: none;
+    }
+
+    .div-dialog .el-descriptions__table tr:last-child .el-descriptions__cell {
+      border-bottom: none;
+    }
+
+    .el-dialog__body {
+      padding-top: 10px;
+      padding-bottom: 40px;
+    }
+
+    .el-dialog__headerbtn {
+      top: -2px;
+    }
+
+    .el-table--fit {
+      border-right: 0;
+      border-bottom: 0;
+    }
+
+    .el-table {
+      position: relative;
+      overflow: hidden;
+      box-sizing: border-box;
+      height: fit-content;
+      width: 100%;
+      max-width: 100%;
+      background-color: #ffffff;
+      font-size: 14px;
+      color: #606266;
+    }
+
+    .el-table__inner-wrapper {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .el-table__header-wrapper {
+      overflow: hidden;
+      flex-shrink: 0;
+      width: 100%;
+    }
+
+    .el-table__header {
+      table-layout: fixed;
+      border-collapse: separate;
+    }
+
+    .el-table th.el-table__cell.is-leaf {
+      border-bottom: 1px solid #ebeef5;
+    }
+
+    .el-table th.el-table__cell {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      background-color: #ffffff;
+      border-left: none;
+      border-right: none;
+    }
+
+    .el-table .el-table__cell {
+      padding: 8px 0;
+      min-width: 0;
+      box-sizing: border-box;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+      position: relative;
+      text-align: left;
+      z-index: 1;
+    }
+
+    .el-table__body-wrapper {
+      overflow: hidden;
+      position: relative;
+      flex: 1;
+      width: 100%;
+    }
+
+    .el-table__body {
+      table-layout: fixed;
+      border-collapse: separate;
+    }
+
+    .el-table tr {
+      background-color: #ffffff;
+    }
+
+    .el-table--enable-row-hover .el-table__body tr:hover>td.el-table__cell {
+      background-color: #f5f7fa;
+    }
+
+    .el-table--enable-row-transition .el-table__body td.el-table__cell {
+      transition: background-color .25s ease;
+    }
+
+    .el-table td.el-table__cell,
+    .el-table th.el-table__cell.is-leaf {
+      border-bottom: 1px solid #ebeef5;
+    }
+
+    .el-table thead {
+      color: #909399;
+      font-weight: 500;
+    }
+
+    .el-table .cell {
+      box-sizing: border-box;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: normal;
+      word-break: break-all;
+      line-height: 23px;
+      padding: 0 12px;
+    }
+
+    .el-scrollbar {
+      overflow: hidden;
+      position: relative;
+      height: 100%;
+    }
+
+    .el-scrollbar__wrap--hidden-default {
+      scrollbar-width: none;
+    }
+
+    .el-scrollbar__wrap {
+      overflow: auto;
+      height: 100%;
+    }
+
+    .el-table .cell.el-tooltip {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 50px;
+    }
+
+    .mask {
+      background: rgba(0, 0, 0, 0.5);
+      width: 100%;
+      height: 100%;
+      position: fixed;
+      left: 0;
+      z-index: 20001;
+      top: 0;
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .mask-imgBg {
+      background-color: #fff;
+      position: relative;
+      border-radius: 0.1875rem;
+      border: 0.3125rem solid #fff;
+    }
+
+    .mask-delete {
+      position: absolute;
+      z-index: 5;
+      right: 18px;
+      top: 20px;
+      transform-origin: center center;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background-color: #f0f0f0;
+      text-align: center;
+      line-height: 50px;
+      font-weight: 700;
+      box-shadow: 0 0 6px rgba(0, 0, 0, .2);
+      cursor: pointer;
+    }
+
+    .mask-delete:hover {
+      cursor: pointer;
+    }
+
+    .svg-style {
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+    }
+
+    .btn-div {
+      margin-bottom: 5px;
+      border-bottom: 1px solid #d1cdcd;
+      padding: 5px;
+    }
+
+    .scroll-top-btn {
+      padding: 5px;
+    }
+
+    .table-margin {
+      margin-top: 10px;
+    }
   </style>
-  <title>{{ case.name }}</title>
 </head>
 
 <body>
-  <h1>{{ case.name }}</h1>
-  <h2>Summary</h2>
-  <table class="summary">
-    <tbody>
-      <tr>
-        <td>Begin/End/Elapsed:</td>
-        <td>{{ case.begin }}/{{ case.end }}/{{ case.elapsed }}</td>
-      </tr>
-      <tr>
-        <td>Result:</td>
-        <td class="{{ case.result | lower }}">{{ case.result | replace("\n", "<br>") }}</td>
-      </tr>
-      {% if case.error %}
-      <tr>
-        <td>Error:</td>
-        <td class="col_error error">{{ case.error }}</td>
-      </tr>
-      {% endif %}
-    </tbody>
-  </table>
-  {% if case.steps %}
-  <table class="steps">
-    <thead>
-      <tr>
-        <th class="col_no">No.</th>
-        <th>Step</th>
-        <th>Result</th>
-        <th class="col_time">Time(s)</th>
-        <th class="col_shot">Screenshot</th>
-        {% for head in case.extra_head %}
-        <th>{{ head | capitalize }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for step in case.steps %}
-      <tr>
-        <td class="col_no">{{ loop.index }}</td>
-        <td>
-          <a href="javascript:" onclick="gotoStep('{{ loop.index0 }}')">{{ step.name }}</a>
-        </td>
-        {% if step.result == "pass" %}
-        <td class="pass">{{ step.result }}</td>
-        {% else %}
-        <td class="fail">{{ step.result | replace("\n", "<br>") }}</td>
-        {% endif %}
-        <td class="col_time">{{ step.cost }}</td>
-        <td class="col_shot">{{ step.screenshot | join("<br>") }}</td>
-        {% for head in case.extra_head %}
-        {% if head == "video" and step.video %}
-        <td>
-          <a href="{{ step.video }}">view video</a>
-        </td>
-        {% else %}
-        <td>{{ step[head] }}</td>
-        {% endif %}
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+  <div id="app">
+    <h3>{{ case.name }}</h3>
+    <h4 style="margin-top: 0;">Summary</h4>
+    <div class="header">
+      <div>
+        <div class="el-descriptions">
+          <div class="el-descriptions__body">
+            <table class="el-descriptions__table is-bordered">
+              <tbody>
+                <tr>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Test Start</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content">{{ case.begin }}</td>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Test End</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content">{{ case.end }}</td>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Elapsed</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content">{{ case.elapsed }}</td>
+                </tr>
+                {% if case.subcases %}
 
-  <h2>Execution Log</h2>
-  <div class="operations">
-    <a href="javascript:" onclick="displayMedia()">display media</a> |
-    <a href="javascript:" onclick="hideMedia()">hide media</a> |
-    <a href="javascript:" onclick="gotoTrace()">goto trace</a>
+                <!-- 测试套，无Error/Result，不显示 -->
+                {% if case.error %}
+                <tr>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Logs</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content" colspan="5">{{ case.logs }}</td>
+                </tr>
+                {% endif %}
+
+                {% else %}
+                <!-- 测试用例 -->
+                <tr>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Result</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content {{ case.result | lower }}">{{ case.result }}</td>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Logs</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content" colspan="3">{{ case.logs }}</td>
+                </tr>
+                {% if case.error %}
+                <tr>
+                  <td class="el-descriptions__cell el-descriptions__label is-bordered-label">Error</td>
+                  <td class="el-descriptions__cell el-descriptions__content is-bordered-content col_error error" colspan="5">{{ case.error }}</td>
+                </tr>
+                {% endif %}
+
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if case.subcases %}
+    <div class="el-table--fit el-table--enable-row-hover el-table--enable-row-transition el-table table-margin"
+      data-prefix="el" style="width: 100%;">
+      <div class="el-table__inner-wrapper">
+        <div class="el-table__header-wrapper">
+          <table class="el-table__header" cellpadding="0" cellspacing="0" style="width: 100%; border: 0;">
+            <colgroup>
+              <col name="el-table_1_column_1" style="width: 3%;">
+              <col name="el-table_1_column_2" style="width: 30%;">
+              <col name="el-table_1_column_3" style="width: 7%;">
+              <col name="el-table_1_column_4" style="width: 42%;">
+              <col name="el-table_1_column_5" style="width: 9%;">
+              <col name="el-table_1_column_6" style="width: 9%;">
+            </colgroup>
+            <thead class="">
+              <tr class="">
+                <th class="el-table_1_column_1 is-leaf el-table__cell">
+                  <div class="cell">#</div>
+                </th>
+                <th class="el-table_1_column_2 is-leaf el-table__cell">
+                  <div class="cell">Testcase</div>
+                </th>
+                <th class="el-table_1_column_3 is-leaf el-table__cell">
+                  <div class="cell">Result</div>
+                </th>
+                <th class="el-table_1_column_4 is-leaf el-table__cell">
+                  <div class="cell">Error</div>
+                </th>
+                <th class="el-table_1_column_5 is-leaf el-table__cell">
+                  <div class="cell">Begin</div>
+                </th>
+                <th class="el-table_1_column_6 is-leaf el-table__cell">
+                  <div class="cell">Elapsed</div>
+                </th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+        <div class="el-table__body-wrapper">
+          <div class="el-scrollbar">
+            <div class="el-scrollbar__wrap el-scrollbar__wrap--hidden-default">
+              <div class="el-scrollbar__view" style="display: inline-block; vertical-align: middle;">
+                <table class="el-table__body" cellspacing="0" cellpadding="0"
+                  style="table-layout: fixed; width: 100%; border: 0;">
+                  <colgroup>
+                    <col name="el-table_1_column_1" style="width: 3%;">
+                    <col name="el-table_1_column_2" style="width: 30%;">
+                    <col name="el-table_1_column_3" style="width: 7%;">
+                    <col name="el-table_1_column_4" style="width: 42%;">
+                    <col name="el-table_1_column_5" style="width: 9%;">
+                    <col name="el-table_1_column_6" style="width: 9%;">
+                  </colgroup>
+                  <tbody id="casesTableBody">
+                    {% for subcase in case.subcases %}
+                    <tr class="el-table__row">
+                      <td class="el-table_1_column_1 el-table__cell">
+                        <div class="cell"><span>{{ loop.index }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_2 el-table__cell">
+                        <div class="cell el-tooltip"><a href="{{ subcase.report }}" target="_blank">{{ subcase.name }}</a>
+                        </div>
+                      </td>
+                      <td class="el-table_1_column_3 el-table__cell">
+                        <div class="cell {{ subcase.result | lower }}"><span>{{ subcase.result }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_4 el-table__cell">
+                        <div class="cell error"><span>{{ subcase.error }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_5 el-table__cell">
+                        <div class="cell"><span>{{ subcase.begin }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_6 el-table__cell">
+                        <div class="cell"><span>{{ subcase.elapsed }}</span></div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if case.devices %}
+    <h4>Test Devices</h4>
+    <div class="el-table--fit fit-height el-table--enable-row-hover el-table--enable-row-transition el-table"
+      data-prefix="el" style="width: 100%; max-height: 120px;">
+      <div class="el-table__inner-wrapper wrapper-height" style="max-height: 120px;">
+        <div class="el-table__header-wrapper">
+          <table class="el-table__header" cellpadding="0" cellspacing="0" style="width: 100%; border: 0;">
+            <colgroup>
+              <col name="el-table_1_column_1" style="width: 3%;">
+              <col name="el-table_1_column_2" style="width: 22%;">
+              <col name="el-table_1_column_3" style="width: 14%;">
+              <col name="el-table_1_column_4" style="width: 14%;">
+              <col name="el-table_1_column_5" style="width: 14%;">
+              <col name="el-table_1_column_6" style="width: 16%;">
+              <col name="el-table_1_column_7" style="width: 17%;">
+            </colgroup>
+            <thead class="">
+              <tr class="">
+                <th class="el-table_1_column_1 is-leaf el-table__cell">
+                  <div class="cell">#</div>
+                </th>
+                <th class="el-table_1_column_2 is-leaf el-table__cell">
+                  <div class="cell">SN</div>
+                </th>
+                <th class="el-table_1_column_3 is-leaf el-table__cell">
+                  <div class="cell">Model</div>
+                </th>
+                <th class="el-table_1_column_4 is-leaf el-table__cell">
+                  <div class="cell">Type</div>
+                </th>
+                <th class="el-table_1_column_5 is-leaf el-table__cell">
+                  <div class="cell">Platform</div>
+                </th>
+                <th class="el-table_1_column_6 is-leaf el-table__cell">
+                  <div class="cell">Version</div>
+                </th>
+                <th class="el-table_1_column_7 is-leaf el-table__cell">
+                  <div class="cell">Others</div>
+                </th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+        <div class="el-table__body-wrapper">
+          <div class="el-scrollbar">
+            <div class="el-scrollbar__wrap" style="max-height: calc(80px);">
+              <div class="el-scrollbar__view" style="display: inline-block; vertical-align: middle;">
+                <table class="el-table__body" cellspacing="0" cellpadding="0"
+                  style="table-layout: fixed; width: 100%; border: 0;">
+                  <colgroup>
+                    <col name="el-table_1_column_1" style="width: 3%;">
+                    <col name="el-table_1_column_2" style="width: 22%;">
+                    <col name="el-table_1_column_3" style="width: 14%;">
+                    <col name="el-table_1_column_4" style="width: 14%;">
+                    <col name="el-table_1_column_5" style="width: 14%;">
+                    <col name="el-table_1_column_6" style="width: 16%;">
+                    <col name="el-table_1_column_7" style="width: 17%;">
+                  </colgroup>
+                  <tbody>
+                    {% for device in case.devices %}
+                    <tr class="el-table__row">
+                      <td class="el-table_1_column_1 el-table__cell">
+                        <div class="cell"><span>{{ loop.index }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_2 el-table__cell">
+                        <div class="cell el-tooltip"><span>{{ device.sn }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_3 el-table__cell">
+                        <div class="cell"><span>{{ device.model }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_4 el-table__cell">
+                        <div class="cell"><span>{{ device.type }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_5 el-table__cell">
+                        <div class="cell"><span>{{ device.platform }}</span></div>
+                      </td>
+                      <td class="el-table_1_column_6 el-table__cell">
+                        <div class="cell"><span>{{ device.version }}</span></div>
+                      </td>
+                      {% if device.others %}
+                      <td class="el-table_1_column_7 el-table__cell">
+                        <div class="cell"><span>{{ device.others }}</span></div>
+                      </td>
+                      {% else %}
+                      <td class="el-table_1_column_7 el-table__cell">
+                        <div class="cell"><span>-</span></div>
+                      </td>
+                      {% endif %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div id="details">
+      <h4>Test Details</h4>
+      <div class="toolbar">
+        <ul id="phoneErrorPosition" ref="phoneLeft">
+        </ul>
+        <div class="err" style="overflow: auto; margin-left: 10px; width: 75%; position: relative; min-height: 625px;">
+          <div class="el-descriptions__body err-scroll" style="margin-top: 10px;">
+            <table class="el-descriptions__table is-bordered">
+              <tbody id="message">
+              </tbody>
+            </table>
+          </div>
+          <div class="img-div">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="dialog" class="mask">
+      <div class="mask-imgBg"></div>
+      <div class="mask-delete" onclick="closeDialog()">
+        <svg style="vertical-align: -0.125em" focusable="false" data-icon="close"
+          width="1em" height="1em" fill="currentColor" aria-hidden="true" fill-rule="evenodd" viewBox="64 64 896 896">
+          <path
+            d="M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z">
+          </path>
+        </svg>
+      </div>
+    </div>
   </div>
+
+  <div class="btns"
+    style="position: fixed; z-index: 5000; bottom: 90px; right: 90px; display: none; border: 1px solid #d1cdcd;">
+    <div class="btn-div">
+      <div id="svg-show-media" style="display: none;" title="显示图片/视频">
+        <svg onclick="displayMedia('block')" class="svg-style" xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 1024 1024" data-v-ea893728="">
+          <path fill="currentColor"
+            d="M512 160c320 0 512 352 512 352S832 864 512 864 0 512 0 512s192-352 512-352m0 64c-225.28 0-384.128 208.064-436.8 288 52.608 79.872 211.456 288 436.8 288 225.28 0 384.128-208.064 436.8-288-52.608-79.872-211.456-288-436.8-288zm0 64a224 224 0 1 1 0 448 224 224 0 0 1 0-448m0 64a160.192 160.192 0 0 0-160 160c0 88.192 71.744 160 160 160s160-71.808 160-160-71.744-160-160-160">
+          </path>
+        </svg>
+      </div>
+      <div id="svg-hide-media" title="隐藏图片/视频">
+        <svg onclick="displayMedia('none')" class="svg-style" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"
+          data-v-ea893728="">
+          <path fill="currentColor"
+            d="M876.8 156.8c0-9.6-3.2-16-9.6-22.4-6.4-6.4-12.8-9.6-22.4-9.6-9.6 0-16 3.2-22.4 9.6L736 220.8c-64-32-137.6-51.2-224-60.8-160 16-288 73.6-377.6 176C44.8 438.4 0 496 0 512s48 73.6 134.4 176c22.4 25.6 44.8 48 73.6 67.2l-86.4 89.6c-6.4 6.4-9.6 12.8-9.6 22.4 0 9.6 3.2 16 9.6 22.4 6.4 6.4 12.8 9.6 22.4 9.6 9.6 0 16-3.2 22.4-9.6l704-710.4c3.2-6.4 6.4-12.8 6.4-22.4Zm-646.4 528c-76.8-70.4-128-128-153.6-172.8 28.8-48 80-105.6 153.6-172.8C304 272 400 230.4 512 224c64 3.2 124.8 19.2 176 44.8l-54.4 54.4C598.4 300.8 560 288 512 288c-64 0-115.2 22.4-160 64s-64 96-64 160c0 48 12.8 89.6 35.2 124.8L256 707.2c-9.6-6.4-19.2-16-25.6-22.4Zm140.8-96c-12.8-22.4-19.2-48-19.2-76.8 0-44.8 16-83.2 48-112 32-28.8 67.2-48 112-48 28.8 0 54.4 6.4 73.6 19.2zM889.599 336c-12.8-16-28.8-28.8-41.6-41.6l-48 48c73.6 67.2 124.8 124.8 150.4 169.6-28.8 48-80 105.6-153.6 172.8-73.6 67.2-172.8 108.8-284.8 115.2-51.2-3.2-99.2-12.8-140.8-28.8l-48 48c57.6 22.4 118.4 38.4 188.8 44.8 160-16 288-73.6 377.6-176C979.199 585.6 1024 528 1024 512s-48.001-73.6-134.401-176Z">
+          </path>
+          <path fill="currentColor"
+            d="M511.998 672c-12.8 0-25.6-3.2-38.4-6.4l-51.2 51.2c28.8 12.8 57.6 19.2 89.6 19.2 64 0 115.2-22.4 160-64 41.6-41.6 64-96 64-160 0-32-6.4-64-19.2-89.6l-51.2 51.2c3.2 12.8 6.4 25.6 6.4 38.4 0 44.8-16 83.2-48 112-32 28.8-67.2 48-112 48Z">
+          </path>
+        </svg>
+      </div>
+    </div>
+    <div title="查看错误详情" class="btn-div">
+      <svg onclick="gotoTrace()" class="svg-style" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"
+        data-v-ea893728="">
+        <path fill="currentColor"
+          d="M832 384H576V128H192v768h640zm-26.496-64L640 154.496V320zM160 64h480l256 256v608a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V96a32 32 0 0 1 32-32m160 448h384v64H320zm0-192h160v64H320zm0 384h384v64H320z">
+        </path>
+      </svg>
+    </div>
+    <div title="回到顶部" class="scroll-top-btn"><svg class="svg-style" xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 1024 1024" data-v-ea893728="">
+        <path fill="currentColor"
+          d="M572.235 205.282v600.365a30.118 30.118 0 1 1-60.235 0V205.282L292.382 438.633a28.913 28.913 0 0 1-42.646 0 33.43 33.43 0 0 1 0-45.236l271.058-288.045a28.913 28.913 0 0 1 42.647 0L834.5 393.397a33.43 33.43 0 0 1 0 45.176 28.913 28.913 0 0 1-42.647 0l-219.618-233.23z">
+        </path>
+      </svg></div>
+  </div>
+
+  <h4 class="h4">Execution Log</h4>
   <div id="logs">
-    {% for log in case.logs %}
+    {% for log in logs.content %}
     <div>{{ log | replace("\n", "<br>") }}</div>
     {% endfor %}
   </div>
+
+  <script>
+    const reportData = {{ case }};
+
+    const element = document.querySelector('#logs');
+    const elementPosition = element.offsetTop;
+    const btns = document.querySelector('.btns');
+    const scrollButton = document.querySelector('.scroll-top-btn');
+    window.addEventListener('scroll', () => {
+      if (window.scrollY > elementPosition + 200) {
+        btns.style.display = 'block';
+      } else {
+        btns.style.display = 'none';
+      }
+    });
+    scrollButton.addEventListener('click', function () {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    });
+
+    // 获取ul元素
+    const ul = document.getElementById('phoneErrorPosition');
+    const imgDiv = document.querySelector('.img-div');
+    const err = document.querySelector('.err');
+    const dialog = document.getElementById('dialog');
+    const maskImgBg = document.querySelector('.mask-imgBg');
+    const detailsId = document.getElementById('details');
+
+    const { steps } = reportData;
+    if (!steps?.length) {
+      detailsId.remove();
+    } else {
+      addLi();
+    }
+
+    // 定义一个函数，用于将li数据渲染成HTML字符串
+    function renderLi(data, index) {
+      return `<li class="${data.error !== '' ? 'isPassed' : ''} ${data.isChecked ? 'isChecked' : ''}"  onclick="clickLi(${index})">
+        <div class="li-div">
+          <span title="${data.name}" class="li-span">${data.name}</span>
+          <span>
+            <span class="li-tag">${data.cost}s</span>
+            <span style="vertical-align: middle;" title="查看日志" onclick="gotoStep(${index})">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" data-v-ea893728=""><path fill="currentColor" d="M832 384H576V128H192v768h640zm-26.496-64L640 154.496V320zM160 64h480l256 256v608a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V96a32 32 0 0 1 32-32m160 448h384v64H320zm0-192h160v64H320zm0 384h384v64H320z"></path></svg>
+            </span>
+          </span>
+        </div>
+      </li>`;
+    }
+
+    function renderTr(key, value) {
+      return `<td class="el-descriptions__cell el-descriptions__label is-bordered-label" colspan="1">${key}</td>
+              <td class="el-descriptions__cell el-descriptions__content is-bordered-content" colspan="3">${value}</td>`;
+    }
+
+    // 定义一个函数，用于添加li元素
+    function clickLi(index) {
+      const liList = ul.getElementsByTagName('li'); // 获取所有li元素
+      for (let i = 0; i < liList.length; i++) {
+        liList[i].classList.remove('isChecked');  // 移除class-name类名
+      }
+      const li = ul.getElementsByTagName('li')[index]; // 获取点击的li元素
+      li.classList.add('isChecked'); // 添加class-name
+      showStep(steps[index]);
+    }
+
+    function addLi() {
+      let step = steps.findIndex(item => item.error !== '');
+      if (step !== -1) {
+        steps[step].isChecked = true;
+        showStep(steps[step]);
+      } else {
+        steps[0].isChecked = true;
+        showStep(steps[0]);
+      }
+      steps.forEach((item, index) => {
+        ul.innerHTML += renderLi(item, index);
+      });
+    }
+
+    function showStep(step) {
+      const message = document.getElementById('message');
+      while (message.firstChild) {
+        message.removeChild(message.firstChild);
+      }
+      if (step.error) {
+        message.innerHTML = `<td class="el-descriptions__cell el-descriptions__label is-bordered-label" colspan="1">Error</td>
+                <td class="errorInfo el-descriptions__cell el-descriptions__content is-bordered-content error-content" colspan="7"
+                  style="color: red;">${step.error}
+                </td>`
+      }
+      let tds = []
+      for (const key in step.extras) {
+        let h = renderTr(key, step.extras[key]);
+        tds.push(h);
+      }
+      let count = 0;
+      let trs = null;
+      // 遍历所有的td元素
+      for (let i = 0; i < tds.length; i++) {
+        // 如果计数器为0，则创建一个新的tr元素
+        if (count === 0) {
+          trs = document.createElement('tr');
+        }
+        // 将当前的td元素添加到tr元素中
+        trs.innerHTML += tds[i];
+        // 计数器加1
+        count++;
+        // 如果计数器为2，则将tr元素添加到表格中，并将计数器重置为0
+        if (count === 2) {
+          message.appendChild(trs);
+          count = 0;
+        }
+      }
+      // 如果计数器不为0，则将剩余的td元素添加到一个新的tr元素中，并将其添加到表格中
+      if (count !== 0) {
+        message.appendChild(trs);
+      }
+      const screen = step.screenshot.reduce((acc, cur) => {
+        const prefix = cur.link.split('.')[0]; // 获取字符串中第一个 . 之前的部分作为前缀
+        if (!acc[prefix]) {
+          acc[prefix] = []; // 如果前缀不存在，则创建一个新的数组
+        }
+        acc[prefix].push(cur); // 将当前字符串添加到对应的数组中
+        return acc;
+      }, {});
+      const numOfProperties = Object.keys(screen).length;
+      const errScroll = document.querySelector('.err-scroll');
+      imgDiv.scrollTop = 0;
+      errScroll.scrollTop = 0;
+      while (imgDiv.firstChild) {
+        imgDiv.removeChild(imgDiv.firstChild);
+      }
+      if (numOfProperties > 1) {
+        multipleSn(screen);
+      } else {
+        singleSn(screen);
+      }
+      if (message.children.length === 0) {
+        errScroll.style.marginTop = 0;
+      } else {
+        errScroll.style.marginTop = '10px';
+      }
+    }
+
+    function singleSn(screen) {
+      for (const [key, item] of Object.entries(screen)) {
+        const title = document.createElement('div');
+        const screenDiv = document.createElement('div');
+        screenDiv.scrollLeft = 0;
+        title.textContent = key.split('/')[1];
+        screenDiv.appendChild(title);
+        screenDiv.className = 'screen-div';
+        screenDiv.style.textAlign = 'center';
+        title.style.backgroundColor = '#f5f7fa';
+        title.style.fontWeight = 700;
+        title.style.lineHeight = '38px';
+        title.style.color = '#606266';
+        title.style.fontSize = '15px';
+        const div2 = document.createElement('div');
+        div2.style.display = 'flex';
+        imgDiv.appendChild(title);
+        imgDiv.style.display = 'block';
+        imgDiv.style.textAlign = 'center';
+        imgDiv.style.overflowX = 'hidden';
+        screenDiv.style.overflowX = 'auto';
+        for (let i = 0; i < item.length; i++) {
+          const div = document.createElement('div');
+          div.style.padding = '10px 0 20px 0';
+          if (item.length > 1) {
+            div.style.marginRight = '50px';
+          }
+          screenDiv.style.marginRight = '0';
+          const div3 = document.createElement('div');
+          if (item[i].link.includes('.avi') || item[i].link.includes('.mp4')) {
+            div.appendChild(isVideo(item[i].link));
+          } else {
+            const img = isImage(item[i].link);
+            div.appendChild(img);
+            img.onload = function() {
+              div3.style.width = img.width + 'px';
+            }
+          }
+          const fileName = item[i].name;
+          addStyle(div3, fileName);
+          div.appendChild(div3);
+          div2.appendChild(div);
+          screenDiv.appendChild(div2);
+        }
+        imgDiv.appendChild(screenDiv);
+      }
+    }
+
+    function multipleSn(screen) {
+      const noSingleDiv = document.createElement('div');
+      noSingleDiv.style.backgroundColor = '#f5f7fa';
+      noSingleDiv.style.height = '38px';
+      noSingleDiv.style.width = '100%';
+      noSingleDiv.style.position = 'absolute';
+      noSingleDiv.style.zIndex = -1;
+      imgDiv.appendChild(noSingleDiv);
+      const keys = Object.keys(screen);
+      const maxLength = Math.max(...keys.map(key => screen[key].length));
+      // 构建新数组
+      const result = [];
+      for (let i = 0; i < maxLength; i++) {
+        const item = {};
+        keys.forEach(key => {
+          item[key] = screen[key][i] || {
+            link: '', name: ''
+          }; // 如果属性值数组长度不够，用空字符串填充
+        });
+        result.push(item);
+      }
+      const tableImg = document.createElement('table');
+      const theadImg = document.createElement('thead');
+      const theadTrImg = document.createElement('tr');
+      keys.forEach(item => {
+        const thImg = document.createElement('th');
+        thImg.textContent = item.split('/')[1];
+        thImg.style.position = 'sticky';
+        thImg.style.top = 0;
+        thImg.style.backgroundColor = '#f5f7fa';
+        thImg.style.zIndex = 10;
+        theadTrImg.appendChild(thImg);
+      })
+      theadTrImg.style.height = '38px';
+      theadTrImg.style.color = '#606266';
+      theadTrImg.style.fontSize = '15px';
+      theadImg.appendChild(theadTrImg);
+      tableImg.appendChild(theadImg);
+      tableImg.style.borderCollapse = 'collapse';
+      const tbodyImg = document.createElement('tbody');
+      for (let i = 0; i < maxLength; i++) {
+        const trImg = document.createElement('tr');
+        for (const key in result[i]) {
+          const tdImg = document.createElement('td');
+          const div = document.createElement('div');
+          div.style.padding = '10px 0 20px 0';
+          const div3 = document.createElement('div');
+          div3.style.width = '230px';
+          if (result[i][key].link.includes('.avi') || result[i][key].link.includes('.mp4')) {
+            div.appendChild(isVideo(result[i][key].link));
+          } else {
+            const img = isImage(result[i][key].link);
+            div.appendChild(img);
+            img.onload = function() {
+              div3.style.width = img.width + 'px';
+            };
+          }
+          const fileName = result[i][key].name;
+          addStyle(div3, fileName);
+          div.appendChild(div3);
+          div.style.minWidth = '470px';
+          tdImg.appendChild(div);
+          trImg.appendChild(tdImg);
+        }
+        tbodyImg.appendChild(trImg);
+      }
+      tableImg.appendChild(tbodyImg);
+      imgDiv.appendChild(tableImg);
+      imgDiv.style.display = 'flex';
+      imgDiv.style.overflowX = 'auto';
+      imgDiv.style.textAlign = 'center';
+    }
+
+    function addStyle(div, fileName) {
+      div.textContent = fileName;
+      div.title = fileName;
+      div.style.fontSize = '14px';
+      div.style.margin = '0 auto';
+      div.style.overflow = 'hidden';
+      div.style. whiteSpace = 'nowrap';
+      div.style.textOverflow = 'ellipsis';
+    }
+
+    function isVideo(item) {
+      const video = document.createElement('video');
+      video.controls = 'controls';
+      video.muted = 'muted';
+      video.style.width = '236px';
+      video.style.height = '514px';
+      video.src = item;
+      video.addEventListener('click', (event) => {
+        clickScreenShot('video', item);
+        if (!event.target.classList.contains('controls')) {
+          event.preventDefault();
+          return false;
+        }
+      });
+      return video;
+    }
+
+    function isImage(item) {
+      const img = document.createElement('img');
+      img.src = item;
+      img.alt = '';
+      img.style.cursor = 'pointer';
+      img.addEventListener('click', (event) => clickScreenShot('img', item));
+      if (item) {
+        img.onerror = function () {
+          img.style.width = '230px';
+        };
+      }
+      return img;
+    }
+
+    const clickScreenShot = (type, index) => {
+      const screenHeight = window.innerHeight;
+      dialog.style.display = 'flex';
+      if (type === 'video') {
+        const video = document.createElement('video');
+        video.controls = 'controls';
+        video.muted = 'muted';
+        video.style.width = 'auto';
+        video.style.height = 0.8 * screenHeight + 'px';
+        video.src = index;
+        maskImgBg.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = index;
+        img.alt = '';
+        img.style.cursor = 'pointer';
+        img.style.width = 'auto';
+        img.style.height = 0.8 * screenHeight + 'px';
+        maskImgBg.appendChild(img);
+      }
+    }
+
+    function closeDialog() {
+      const images = maskImgBg.getElementsByTagName('img');
+      for (let i = 0; i < images.length; i++) {
+        maskImgBg.removeChild(images[i]);
+      }
+      const videos = maskImgBg.getElementsByTagName('video');
+      for (let i = 0; i < videos.length; i++) {
+        maskImgBg.removeChild(videos[i]);
+      }
+      dialog.style.display = 'none';
+    }
+
+    function displayMedia(value) {
+      const el_svg_show_media = document.getElementById('svg-show-media');
+      const el_svg_hide_media = document.getElementById('svg-hide-media');
+      const el_log = document.getElementById('logs');
+      const el_images = el_log.getElementsByTagName('img');
+      const el_videos = el_log.getElementsByTagName('video');
+
+      let elements = [];
+      elements.push(...el_images, ...el_videos);
+      for (let i = 0; i < elements.length; i++) {
+        let element = elements[i];
+        let element_a = element.parentNode;
+        element.src = element_a.href;
+        if (value === 'block') {
+          element.style.display = 'block';
+          el_svg_hide_media.style.display = 'block';
+          el_svg_show_media.style.display = 'none';
+        } else {
+          element.style.display = 'none';
+          el_svg_hide_media.style.display = 'none';
+          el_svg_show_media.style.display = 'block';
+        }
+      }
+    }
+
+    function gotoStep(stepId) {
+      let element = document.getElementById(stepId);
+      if (element != null) {
+        let distance = element.offsetTop - 50;
+        document.documentElement.scrollTo(0, distance);
+      }
+    }
+
+    function gotoTrace() {
+      const columns = document.getElementsByClassName('col_error');
+      if (columns.length === 0) {
+        return;
+      }
+      const errorMsg = columns[0].textContent;
+      if (!errorMsg) {
+        return;
+      }
+      const elements = document.getElementById('logs').getElementsByClassName('error');
+      for (let i = 0; i < elements.length; i++) {
+        let element = elements[i];
+        if (element.textContent.indexOf(errorMsg) >= 0) {
+          document.documentElement.scrollTop = element.offsetTop;
+          break;
+        }
+      }
+    }
+
+    const rainbowText = document.getElementById('rainbowText');
+    const textLength = rainbowText.offsetWidth;
+    rainbowText.style.backgroundSize = `${textLength}px 100%`;
+  </script>
 </body>
 
 </html>

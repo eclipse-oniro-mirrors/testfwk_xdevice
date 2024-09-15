@@ -20,33 +20,34 @@ import copy
 import sys
 import os
 import traceback
+from typing import List, Tuple
 
 from xdevice import ConfigConst
+from xdevice import calculate_elapsed_time
 from xdevice import get_cst_time
 from xdevice import get_file_absolute_path
-from xdevice import LifeStage
-from xdevice import Scheduler
+from xdevice import FilePermission
+from xdevice import CaseEnd
+from xdevice import Binder
+from xdevice import Variables
 
-from devicetest.core.constants import RunStatus
 from devicetest.core.constants import RunResult
 from devicetest.core.constants import FileAttribute
+from devicetest.core.test_case import UpdateStep
 from devicetest.core.variables import CurCase
 from devicetest.core.variables import DeccVariable
 from devicetest.core.variables import ProjectVariables
-from devicetest.log.logger import DeviceTestLog
+from devicetest.error import ErrorMessage
 from devicetest.report.generation import add_log_caching_handler
 from devicetest.report.generation import del_log_caching_handler
 from devicetest.report.generation import get_caching_logs
 from devicetest.report.generation import generate_report
-from devicetest.utils.util import calculate_execution_time
 from devicetest.utils.util import get_base_name
 from devicetest.utils.util import get_dir_path
 from devicetest.utils.util import import_from_file
 
-suite_flag = None
 
-
-class TestSuite(object):
+class TestSuite:
     """Base class for all test classes to inherit from.
 
     This class gets all the controller objects from test_runner and executes
@@ -60,12 +61,13 @@ class TestSuite(object):
         self.device1 = None
         self.device2 = None
         # 透传的参数
-        self.pass_through = None
+        self.pass_through = Variables.config.pass_through
         self.set_devices(self.configs["devices"])
         self.path = path
         self.log = self.configs["log"]
         self.error_msg = ''
-        self.case_list = []
+        self.trace_info = ''
+        self.case_list: List[Tuple[str, str]] = []
         self.case_result = dict()
         self.suite_name = self.configs.get("suite_name")
         # 白名单用例
@@ -92,6 +94,10 @@ class TestSuite(object):
         # device录屏截图属性
         self.devices_media = dict()
 
+        self._repeat = self.configs.get("request").config.repeat
+        self._repeat_round = self.configs.get("request").get_repeat_round()
+        self._round_folder = f"round{self._repeat_round}" if self._repeat > 1 else ""
+
     def __enter__(self):
         return self
 
@@ -106,34 +112,48 @@ class TestSuite(object):
 
     def run(self):
         self._init_devicetest()
+        report_path = os.path.join("details", self._round_folder, self.suite_name, self.suite_name + ".html")
         start_time = get_cst_time()
+        # 记录录屏和截图属性
+        self._get_screenrecorder_and_screenshot()
         # 开始收集测试套（setup和teardown）的运行日志
         suite_log_buffer_hdl = add_log_caching_handler()
         try:
             self.cur_case.set_suite_instance(self)
             # 1.先判断是否在json中指定，否则先收集当前文件夹下所有testcase得到run_list
-            self.case_list = self._get_case_list(self.path)
+            for case_path in self._get_case_list(self.path):
+                case_name = get_base_name(case_path)
+                if (self.black_case_list and case_name in self.black_case_list) \
+                        or (self.white_case_list and case_name not in self.white_case_list):
+                    self.log.warning("case name {} is in black list or not in white list, ignored".format(case_name))
+                    continue
+                self.case_list.append((case_name, case_path))
             self.log.debug("Execute test case list: {}".format(self.case_list))
             # 2.先执行self.setup
-            if RunStatus.FINISHED == self.run_setup():
-                return
-
-            # 在运行测试套子用例前，停止收集测试套（setup和teardown）的运行日志
-            del_log_caching_handler(suite_log_buffer_hdl)
-            # 3.依次执行所有的run_list
-            # 开始收集测试套子用例的运行日志
-            self._case_log_buffer_hdl = add_log_caching_handler()
-            total_case_num = len(self.case_list)
-            case_num = 1
-            for case in self.case_list:
-                self.log.info("[{} / {}] Executing suite case: {}".format(case_num, total_case_num, case))
-                self.run_one_test_case(case)
-                case_num = case_num + 1
-
-            # 停止收集测试套子用例的运行日志
-            del_log_caching_handler(self._case_log_buffer_hdl)
+            if self.run_setup():
+                # 在运行测试套子用例前，停止收集测试套setup步骤的运行日志
+                del_log_caching_handler(suite_log_buffer_hdl)
+                # 3.依次执行所有的run_list
+                # 开始收集测试套子用例的运行日志
+                self._case_log_buffer_hdl = add_log_caching_handler()
+                total_case_num = len(self.case_list)
+                for index, case in enumerate(self.case_list, 1):
+                    self._reset_screenrecorder_and_screenshot()
+                    self.log.info("[{} / {}] Executing suite case: {}".format(index, total_case_num, case[1]))
+                    self.run_one_test_case(case)
+                # 停止收集测试套子用例的运行日志
+                del_log_caching_handler(self._case_log_buffer_hdl)
+            else:
+                self.error_msg = ErrorMessage.TestCase.Code_0203017.format(self.error_msg)
+                for case in self.case_list:
+                    self.case_result[case[0]] = {
+                        "result": RunResult.BLOCKED,
+                        "error": self.error_msg,
+                        "run_time": 0,
+                        "report": report_path
+                    }
             self._case_log_buffer_hdl = None
-            # 在运行测试套子用例前，重新开始收集测试套（setup和teardown）的运行日志
+            # 在运行测试套子用例后，重新开始收集测试套teardown步骤的运行日志
             add_log_caching_handler(buffer_hdl=suite_log_buffer_hdl)
         finally:
             # 4.执行self.teardown
@@ -141,7 +161,6 @@ class TestSuite(object):
             self.cur_case.set_suite_instance(None)
 
         steps = self.cur_case.get_steps_info()
-        self.log.info(f"test suite steps: {steps}")
         # 停止收集测试套（setup和teardown）的运行日志
         del_log_caching_handler(suite_log_buffer_hdl)
         if suite_log_buffer_hdl is None:
@@ -149,19 +168,24 @@ class TestSuite(object):
         # 生成测试套的报告
         self.log.info("generate suite report")
         end_time = get_cst_time()
+        environment = self.configs.get("request").config.environment
         suite_info = {
             "name": self.suite_name,
             "result": "",
             "begin": start_time.strftime("%Y-%m-%d %H:%M:%S"),
             "end": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            'elapsed': calculate_execution_time(start_time, end_time),
+            'elapsed': calculate_elapsed_time(start_time, end_time),
             "error": "",
-            "logs": get_caching_logs(suite_log_buffer_hdl),
-            "cases": self.suite_case_results
+            "logs": "",
+            "subcases": self.suite_case_results,
+            "devices": [] if environment is None else environment.get_description(),
+            "steps": steps
         }
-        report_path = os.path.join("details", self.suite_name, self.suite_name + ".html")
+        log_content = {
+            "content": get_caching_logs(suite_log_buffer_hdl)
+        }
         to_file = os.path.join(self.get_case_report_path(), report_path)
-        generate_report(to_file, template="suite.html", suite=suite_info)
+        generate_report(to_file, case=suite_info, logs=log_content)
         del suite_log_buffer_hdl
 
         # 往结果xml添加测试套的报告路径
@@ -219,17 +243,14 @@ class TestSuite(object):
             return
 
         try:
-            num = 1
-
-            for _, _ad in enumerate(self.devices):
-                if not hasattr(_ad, "device_id"):
+            for num, _ad in enumerate(self.devices, 1):
+                if not hasattr(_ad, "device_id") or not getattr(_ad, "device_id"):
                     setattr(_ad, "device_id", "device{}".format(num))
                 # 兼容release2 增加id、serial
                 setattr(_ad, "id", _ad.device_id)
                 setattr(_ad, "serial", _ad.device_sn)
                 setattr(self, _ad.device_id, _ad)
                 setattr(self, "device{}".format(num), _ad)
-                num += 1
         except Exception as error:
             self.log.error("Failed to initialize the device object in the "
                            "TestCase.", error_no="01218")
@@ -269,8 +290,19 @@ class TestSuite(object):
         try:
             func(*args)
         except Exception as exception:
-            self.error_msg = "{}:{}".format(str(exception), traceback.format_exc())
-            self.log.error("run case error! Exception: {}".format(self.error_msg))
+            self.error_msg = str(exception)
+            self.trace_info = traceback.format_exc()
+
+            index = self.cur_case.step_index
+            if index == -1:
+                self.log.error(self.error_msg)
+                self.log.error(self.trace_info)
+            else:
+                step_error_id = f'step_error_{index}'
+                self.log.error(f'<span id="{step_error_id}">{self.error_msg}</span>')
+                self.log.error(self.trace_info)
+                _error = f'<a href="javascript:" onclick="gotoStep(\'{step_error_id}\')">{self.error_msg}</a>'
+                UpdateStep(index, error=_error)
         else:
             result = True
         return result
@@ -282,20 +314,16 @@ class TestSuite(object):
         self.log.info("**********SetUp Ends!")
         if ret:
             self.setup_end()
-            return RunStatus.RUNNING
+            return True
         self.log.info("SetUp Failed!")
-        return RunStatus.FINISHED
+        return False
 
-    def run_one_test_case(self, case_path):
-        case_name = get_base_name(case_path)
-        if (self.black_case_list and case_name in self.black_case_list) \
-                or (self.white_case_list and case_name not in self.white_case_list):
-            self.log.warning("case name {} is in black list or not in white list, ignored".format(case_name))
-            return
+    def run_one_test_case(self, case: Tuple[str, str]):
+        case_name, case_path = case[0], case[1]
         start_time = get_cst_time()
         case_result = RunResult.FAILED
-        error_msg = ""
         test_cls_instance = None
+        result_content = None   # 用例测试结果的拓展内容
         try:
             test_cls = import_from_file(get_dir_path(case_path), case_name)
             self.log.info("Success to import {}.".format(case_name))
@@ -304,56 +332,61 @@ class TestSuite(object):
                 self.cur_case.set_case_instance(test_cls_instance)
                 test_cls_instance.run()
             case_result, error_msg = test_cls_instance.result, test_cls_instance.error_msg
+            result_content = getattr(test_cls_instance, "result_content", None)
         except Exception as e:
-            self.log.debug(traceback.format_exc())
+            error_msg = str(e)
             self.log.error("run case error! Exception: {}".format(e))
-        finally:
-            if test_cls_instance is None:
-                case_result = RunResult.BLOCKED
+            self.log.error(traceback.format_exc())
 
-            Scheduler.call_life_stage_action(stage=LifeStage.case_end,
-                                             case_name=case_name,
-                                             case_result=case_result)
+        if test_cls_instance is None:
+            case_result = RunResult.BLOCKED
+        if test_cls_instance:
+            try:
+                del test_cls_instance
+                self.log.debug("del test case instance success")
+            except Exception as e:
+                self.log.debug(traceback.format_exc())
+                self.log.warning("del test case instance exception. Exception: {}".format(e))
+        Binder.notify_stage(CaseEnd(case_name, case_result))
 
-            end_time = get_cst_time()
-            cost = int(round((end_time - start_time).total_seconds() * 1000))
-            self.case_result[case_name] = {
-                "result": case_result, "error": error_msg,
-                "run_time": cost, "report": ""}
-            self.log.info("Executed case: {}, result: {}, cost time: {}".format(
-                case_name, test_cls_instance.result, cost))
-            if test_cls_instance:
-                try:
-                    del test_cls_instance
-                    self.log.debug("del test case instance success.")
-                except Exception as e:
-                    self.log.debug(traceback.format_exc())
-                    self.log.warning("del test case instance exception."
-                                     " Exception: {}".format(e))
+        end_time = get_cst_time()
+        cost = int(round((end_time - start_time).total_seconds() * 1000))
+        self.log.info("Executed case: {}, result: {}, cost time: {}ms".format(case_name, case_result, cost))
+        self.case_result[case_name] = {
+            "result": case_result, "error": error_msg,
+            "run_time": cost, "report": "", "result_content": result_content}
+
+        try:
             self._device_close()
+        except Exception as e:
+            self.log.error("stop catch device log error! {}".format(e))
+            self.log.debug(traceback.format_exc())
 
         if self._case_log_buffer_hdl is None:
             return
         # 生成子用例的报告
-        end_time = get_cst_time()
-        extra_head = self.cur_case.get_steps_extra_head()
         steps = self.cur_case.get_steps_info()
         base_info = {
             "name": case_name,
             "result": case_result,
             "begin": start_time.strftime("%Y-%m-%d %H:%M:%S"),
             "end": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            'elapsed': calculate_execution_time(start_time, end_time),
-            "error": error_msg,
-            "extra_head": extra_head,
-            "steps": steps
+            'elapsed': calculate_elapsed_time(start_time, end_time),
+            "error": error_msg
         }
         case_info = copy.copy(base_info)
-        case_info["logs"] = copy.copy(get_caching_logs(self._case_log_buffer_hdl))
+        case_info.update({
+            "logs": "",
+            "devices": [],
+            "steps": steps
+        })
+        log_content = {
+            "content": copy.copy(get_caching_logs(self._case_log_buffer_hdl))
+        }
         case_html = case_name + ".html"
-        report_path = os.path.join("details", self.suite_name, case_html)
-        to_path = os.path.join(self.configs.get("report_path"), report_path)
-        generate_report(to_path, case=case_info)
+        report_path = os.path.join("details", self._round_folder, self.suite_name, case_html)
+        to_file = os.path.join(self.configs.get("report_path"), report_path)
+        generate_report(to_file, case=case_info, logs=log_content)
         base_info["report"] = case_html
         self.suite_case_results.append(base_info)
         # 清空日志缓存
@@ -393,8 +426,6 @@ class TestSuite(object):
                     else:
                         self.app_result_info[key] = value
                         setattr(sys, "app_result_info", self.app_result_info)
-            elif para_name == ConfigConst.pass_through:
-                self.pass_through = para_values
             else:
                 continue
 
@@ -413,8 +444,9 @@ class TestSuite(object):
         self.configs["project"] = project_var
 
     def _init_devicetest(self):
-        DeviceTestLog.set_log(self.log)
         self.cur_case = CurCase(self.log)
         self.cur_case.suite_name = self.suite_name
-        self.cur_case.set_case_screenshot_dir(None, self.get_case_report_path(), None)
+        self.cur_case.set_case_screenshot_dir(
+            None, self.get_case_report_path(), None,
+            repeat=self._repeat, repeat_round=self._repeat_round)
         DeccVariable.set_cur_case_obj(self.cur_case)

@@ -21,11 +21,12 @@ from dataclasses import dataclass
 __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "DeviceTestType", "HostTestType", "HostDrivenTestType",
            "SchedulerType", "ListenerType", "ToolCommandType",
-           "TEST_DRIVER_SET", "LogType", "CKit",
+           "TEST_DRIVER_SET", "LogMode", "LogType", "CKit",
            "DeviceLabelType", "GTestConst", "ManagerType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
-           "DeviceConnectorType", "AdvanceDeviceOption", "DeviceProperties", "ReportConst",
-           "LifeStage", "Platform"]
+           "DeviceConnectorType", "ReportConst", "DeviceProperties", "AdvanceDeviceOption",
+           "LoggerMethod", "LifeStage", "Platform", "HcpTestMode", "DeviceResult",
+           "AgentMode", "CaseResult"]
 
 
 @dataclass
@@ -123,9 +124,17 @@ class DeviceTestType(object):
     ltp_posix_test = "LtpPosixTest"
     oh_kernel_test = "OHKernelTest"
     oh_jsunit_test = "OHJSUnitTest"
+    hm_os_jsunit_test = "HMOSJSUnitTest"
+    hcp_test_lite = "HcpTestLite"
     oh_rust_test = "OHRustTest"
     oh_yara_test = "OHYaraTest"
-    validator_test = "ValidatorTest"
+    hcp_test = "HcpTest"
+    ValidatorTest = "ValidatorTest"
+    arkuix_jsunit_test = "ARKUIXJSUnitTest"
+    oh_jslocal_test = "OHJSLocalTestDriver"
+    stability_test = "StabilityTest"
+    ux_test = "UXTest"
+    ark_web_test = "ArkWebTest"
 
 
 @dataclass
@@ -162,7 +171,9 @@ TEST_DRIVER_SET = {
     DeviceTestType.ltp_posix_test,
     DeviceTestType.oh_kernel_test,
     DeviceTestType.oh_jsunit_test,
-    HostDrivenTestType.device_test
+    HostDrivenTestType.device_test,
+    DeviceTestType.ux_test,
+    DeviceTestType.stability_test
 }
 
 
@@ -173,6 +184,17 @@ class SchedulerType(object):
     """
     # default scheduler
     scheduler = "Scheduler"
+    # module
+    module = "module"
+    # synchronize
+    synchronize = "synchronize"
+
+
+@dataclass
+class LogMode:
+    name = "log_mode"
+    default = "default"
+    no_console = "no_console"
 
 
 @dataclass
@@ -185,6 +207,7 @@ class LogType:
 class ListenerType:
     log = "Log"
     report = "Report"
+    stack_report = "StackReport"
     upload = "Upload"
     collect = "Collect"
     collect_lite = "CollectLite"
@@ -202,6 +225,7 @@ class CommonParserType:
     oh_jsunit_list = "OHJSUnitList"
     oh_rust = "OHRust"
     oh_yara = "OHYara"
+    worker = "Worker"
 
 
 @dataclass
@@ -237,6 +261,7 @@ class ModeType(object):
     decc = "decc"
     factory = "factory"
     developer = "developer"
+    controller = "controller"
 
 
 @dataclass
@@ -266,11 +291,16 @@ class ConfigConst(object):
     repeat = "repeat"
     subsystems = "subsystems"
     parts = "parts"
+    export_report = "export_report"
     renew_report = "renew_report"
+    device_info = "device_info"
     kits_in_module = "kits_in_module"
     kits_params = "kits_params"
     auto_retry = "auto_retry"
+    enable_unicode = "enable_unicode"
     module_config = "module_config"
+    scheduler = "scheduler"
+    common_kits = "common_kits"
 
     # Runtime Constant
     history_report_path = "history_report_path"
@@ -291,16 +321,28 @@ class ConfigConst(object):
     device_log = "device_log"
     device_log_on = "ON"
     device_log_off = "OFF"
+    app_test = "app_test"
     tag_dir = "dir"
     tag_enable = "enable"
-    tag_loglevel = "loglevel"
     tag_clear = "clear"
+    tag_loglevel = "loglevel"
+    tag_hdc = "hdc"
+
+    # Ignore testcase path
+    ignore_testcases_path = "__pycache__|.git|.svn|.idea"
+
+    screenshot_on_failure = "screenshot_on_failure"
+    report_plus = "report_plus"
+    silence_install = "silence_install"
     env_pool_cache = "env_pool_cache"
 
     web_resource = "web_resource"
     enable_web_resource = "enable_web_resource"
 
     tag_url = "url"
+
+    # if upload track data
+    tag_uploadtrack = "uploadtrack"
 
 
 @dataclass
@@ -324,19 +366,66 @@ class DeviceConnectorType:
 
 
 @dataclass
+class DeviceResult(object):
+    """
+    DeviceResult enumeration
+    """
+    code = "code"
+    date = "date"
+    msg = "msg"
+    result = "result"
+    data = 'data'
+
+
+@dataclass
 class DeviceProperties(object):
-    sn = "sn"
+    """
+    DeviceProperties enumeration
+    """
+    system_sdk = "system_sdk"
+    system_version = "system_version"
+    build_number = "buildNumber"
+    cpu_abi = "cpuAbi"
+    device_form = "deviceForm"
+    software_version = "software_version"
+    fault_code = "faultCode"
+    fold_screen = "foldScreen"
+    hardware = "hardware"
+    is_ark = "isArk"
+    mac = "mac"
+    mobile_service = "mobileService"
     model = "model"
-    type_ = "type"
+    rom = "rom"
+    rooted = "rooted"
+    sn = "sn"
+    xres = "xres"
+    yres = "yres"
+    manufacturer = "manufacturer"
+    kind = "kind"
     platform = "platform"
+    type_ = "type"
     version = "version"
     others = "others"
+    alias = "alias"
+
+
+@dataclass
+class LoggerMethod:
+    """
+    method name in logger
+    """
+
+    info = "info"
+    debug = "debug"
+    error = "error"
+    warning = "warning"
+    exception = "exception"
 
 
 @dataclass
 class AdvanceDeviceOption(object):
     """
-    Advance Device Option
+    method name in logger
     """
     advance = "advance"
     type = "type"
@@ -357,6 +446,14 @@ class Platform(object):
 
 
 @dataclass
+class HcpTestMode(object):
+    """
+    HcpTestMode enumeration
+    """
+    hcp_mode = False
+
+
+@dataclass
 class LifeStage(object):
     """
     LifeStage enumeration
@@ -366,3 +463,21 @@ class LifeStage(object):
     case_start = "CaseStart"
     case_end = "CaseEnd"
 
+
+@dataclass
+class AgentMode(object):
+    """
+    Agent mode
+    """
+    hap = "hap"
+    abc = "abc"
+    bin = "bin"
+
+
+@dataclass
+class CaseResult:
+    passed = "Passed"
+    failed = "Failed"
+    blocked = "Blocked"
+    ignored = "Ignored"
+    unavailable = "Unavailable"

@@ -18,25 +18,26 @@
 
 import os
 
-class DTConstants:
+
+class DTConstants():
     FAILED = 'failed'
     PASSED = 'passed'
 
 
-class RunSection:
+class RunSection(object):
     SETUP = "SETUP"
     TEST = "TEST"
     TEARDOWN = "TEARDOWN"
 
 
-class RunStatus:
+class RunStatus(object):
     INITING = "Initing"
     RUNNING = "Running"
     STOPPED = "Stopped"
     FINISHED = "Finished"
 
 
-class RunResult:
+class RunResult(object):
     PASSED = "Passed"
     FAILED = "Failed"
     BLOCKED = "Blocked"

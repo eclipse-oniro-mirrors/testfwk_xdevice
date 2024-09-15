@@ -17,8 +17,10 @@
 #
 
 import argparse
+import json
 import os
 import platform
+import re
 import signal
 import sys
 import threading
@@ -32,17 +34,20 @@ from _core.constants import ReportConst
 from _core.constants import ModeType
 from _core.constants import ToolCommandType
 from _core.environment.manager_env import EnvironmentManager
+from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.exception import ExecuteTerminate
 from _core.executor.request import Task
-from _core.executor.scheduler import Scheduler
 from _core.logger import platform_logger
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
+from _core.utils import convert_mac
 from _core.utils import SplicingAction
-from _core.utils import get_instance_name
 from _core.utils import is_python_satisfied
 from _core.report.result_reporter import ResultReporter
+from _core.context.center import Context
+from _core.context.upload import Uploader
+from _core.variables import Variables
 
 __all__ = ["Console"]
 
@@ -50,7 +55,7 @@ LOG = platform_logger("Console")
 try:
     if platform.system() != 'Windows':
         import readline
-except (ModuleNotFoundError, ImportError):  # pylint:disable=undefined-variable
+except ImportError:  # pylint:disable=undefined-variable
     LOG.warning("Readline module is not exist.")
 
 MAX_VISIBLE_LENGTH = 49
@@ -60,7 +65,7 @@ Argument = namedtuple('Argument', 'options unparsed valid_param parser')
 
 class Console(object):
     """
-    Class representing an console for executing test.
+    Class representing a console for executing test.
     Main xDevice console providing user with the interface to interact
     """
     __instance = None
@@ -80,13 +85,15 @@ class Console(object):
     def handler_terminate_signal(cls, signalnum, frame):
         # ctrl+c
         del signalnum, frame
-        if not Scheduler.is_execute:
+        if not Context.is_executing():
             return
+        Context.set_execute_status(False)
         LOG.info("Get terminate input")
-        terminate_thread = threading.Thread(
-            target=Scheduler.terminate_cmd_exec)
-        terminate_thread.setDaemon(True)
-        terminate_thread.start()
+        if Context.terminate_cmd_exec():
+            terminate_thread = threading.Thread(
+                target=Context.terminate_cmd_exec())
+            terminate_thread.daemon = True
+            terminate_thread.start()
 
     def console(self, args):
         """
@@ -97,11 +104,13 @@ class Console(object):
 
         if args is None or len(args) < 2:
             # init environment manager
+            Context.set_execute_status(True)
             EnvironmentManager()
             # Enter xDevice console
             self._console()
         else:
             # init environment manager
+            Context.set_execute_status(True)
             EnvironmentManager()
             # Enter xDevice command parser
             self.command_parser(" ".join(args[1:]))
@@ -301,7 +310,7 @@ class Console(object):
                                      "requirements")
             parser.add_argument("--repeat",
                                 type=int,
-                                default=0,
+                                default=1,
                                 dest=ConfigConst.repeat,
                                 help="number of times that a task is executed"
                                      " repeatedly")
@@ -318,6 +327,11 @@ class Console(object):
                                 action="store",
                                 type=str,
                                 help="- Specify the list of part")
+            parser.add_argument("-di", "--device_info",
+                                dest=ConfigConst.device_info,
+                                action="store",
+                                type=str,
+                                help="- describe device info in json style")
             parser.add_argument("-kim", "--kits_in_module",
                                 dest=ConfigConst.kits_in_module,
                                 action=SplicingAction,
@@ -331,20 +345,35 @@ class Console(object):
                                 type=str,
                                 nargs='+',
                                 default="",
-                                help="- the params of kits that related to module")
+                                help='- the params of kits that related to'
+                                     ' module'
+                                )
             parser.add_argument("--auto_retry",
                                 dest=ConfigConst.auto_retry,
                                 type=int,
                                 default=0,
-                                help="- the count of auto retry"),
+                                help="- the count of auto retry")
+            parser.add_argument("--enable_unicode",
+                                dest=ConfigConst.enable_unicode,
+                                action="store_true",
+                                help="enable unicode about test args."
+                                     "It must be used with and immediately "
+                                     "following the -ta or --testargs parameter")
             parser.add_argument("-module_config",
                                 action=SplicingAction,
                                 type=str,
                                 nargs='+',
                                 dest=ConfigConst.module_config,
                                 default="",
-                                help="Specify module config json path"
-                                )
+                                help="Specify module config json path"),
+            parser.add_argument("--scheduler",
+                                dest=ConfigConst.scheduler,
+                                action="store",
+                                type=str,
+                                default="default",
+                                help="Select different scheduling schemes."
+                                     "--scheduler module")
+
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)
             if unparsed:
@@ -355,6 +384,7 @@ class Console(object):
             valid_param = False
             parser.print_help()
             LOG.warning("Parameter parsing system exit exception.")
+
         return Argument(options, unparsed, valid_param, parser)
 
     @classmethod
@@ -372,10 +402,21 @@ class Console(object):
                 para_list[index] = "!%s" % param
 
     def _params_post_processing(self, options):
+        # 重新初始化对象，无需重新进入命令交互窗口，可以使用最新的配置信息
+        Variables.config = UserConfigManager()
+        if options.config:
+            Variables.config = UserConfigManager(config_file=options.config)
+        if options.test_environment:
+            Variables.config = UserConfigManager(env=options.test_environment)
+        self._update_task_args(options)
+
         # params post-processing
         if options.task == Task.EMPTY_TASK:
             setattr(options, ConfigConst.task, "")
         if options.testargs:
+            if options.enable_unicode:
+                test_args = str(options.testargs).encode("utf-8").decode('unicode_escape')
+                setattr(options, ConfigConst.testargs, test_args)
             if not options.pass_through:
                 test_args = self._parse_combination_param(options.testargs)
                 setattr(options, ConfigConst.testargs, test_args)
@@ -383,36 +424,37 @@ class Console(object):
                 setattr(options, ConfigConst.testargs, {
                     ConfigConst.pass_through: options.testargs})
         if not options.resource_path:
-            resource_path = UserConfigManager(
-                config_file=options.config, env=options.test_environment).\
-                get_resource_path()
-            setattr(options, ConfigConst.resource_path, resource_path)
+            setattr(options, ConfigConst.resource_path, Variables.config.get_resource_path())
         if not options.testcases_path:
-            testcases_path = UserConfigManager(
-                config_file=options.config, env=options.test_environment).\
-                get_testcases_dir()
-            setattr(options, ConfigConst.testcases_path, testcases_path)
-        device_log_dict = UserConfigManager(
-            config_file=options.config, env=options.test_environment). \
-            get_device_log_status()
-        setattr(options, ConfigConst.device_log, device_log_dict)
+            setattr(options, ConfigConst.testcases_path, Variables.config.get_testcases_dir())
+        setattr(options, ConfigConst.device_log, Variables.config.devicelog)
         if options.subsystems:
             subsystem_list = str(options.subsystems).split(";")
             setattr(options, ConfigConst.subsystems, subsystem_list)
         if options.parts:
             part_list = str(options.parts).split(";")
             setattr(options, ConfigConst.parts, part_list)
+        if options.device_info:
+            device_info = self._parse_extension_device_info(str(options.device_info))
+            setattr(options, ConfigConst.device_info, device_info)
+        if options.kits_in_module:
+            kit_list = str(options.kits_in_module).split(";")
+            setattr(options, ConfigConst.kits_in_module, kit_list)
+            params = getattr(options, ConfigConst.kits_params, "")
+            setattr(options, ConfigConst.kits_params,
+                    self._parse_kit_params(params))
 
     def command_parser(self, args):
         try:
-            Scheduler.command_queue.append(args)
-            LOG.info("Input command: {}".format(args))
+            Context.command_queue().append(args)
+            LOG.info("Input command: {}".format(convert_mac(args)))
+            args = self._pre_handle_test_args(args)
             para_list = args.split()
             argument = self.argument_parser(para_list)
             options = argument.options
             if options is None or not argument.valid_param:
                 LOG.warning("Options is None.")
-                return None
+                return
             if options.action == ToolCommandType.toolcmd_key_run and \
                     options.retry:
                 if hasattr(options, ConfigConst.auto_retry):
@@ -436,15 +478,12 @@ class Console(object):
             self._process_command(command, options, para_list, argument.parser)
         except (ParamError, ValueError, TypeError, SyntaxError,
                 AttributeError) as exception:
-            error_no = getattr(exception, "error_no", "00000")
-            LOG.exception("%s: %s" % (get_instance_name(exception), exception),
-                          exc_info=False, error_no=error_no)
-            if Scheduler.upload_address:
-                Scheduler.upload_unavailable_result(str(exception.args))
-                Scheduler.upload_report_end()
+            LOG.exception(exception, exc_info=False)
+            Uploader.upload_unavailable_result(str(exception.args))
+            Uploader.upload_report_end()
         finally:
-            if isinstance(Scheduler.command_queue[-1], str):
-                Scheduler.command_queue.pop()
+            if isinstance(Context.command_queue().get(-1), str):
+                Context.command_queue().pop()
 
     def _process_command(self, command, options, para_list, parser):
         if command.startswith(ToolCommandType.toolcmd_key_help):
@@ -470,16 +509,16 @@ class Console(object):
             options)
         LOG.info("History command: %s", history_command)
         if not os.path.exists(history_report_path) and \
-                Scheduler.mode != ModeType.decc:
-            raise ParamError(
-                "history report path %s not exists" % history_report_path)
+                Context.session().mode != ModeType.decc:
+            raise ParamError(ErrorMessage.Common.Code_0101005.format(history_report_path))
 
         # parse history command, set history report path
         is_dry_run = True if options.dry_run else False
 
         history_command = self._wash_history_command(history_command)
+        history_command_inner = self._pre_handle_test_args(history_command)
 
-        argument = self.argument_parser(history_command.split())
+        argument = self.argument_parser(history_command_inner.split())
         argument.options.dry_run = is_dry_run
         setattr(argument.options, "history_report_path", history_report_path)
         # modify history_command -rp param and -sn param
@@ -488,9 +527,9 @@ class Console(object):
                 history_command, (input_options, argument.options),
                 option_tuple)
 
-        # add history command to Scheduler.command_queue
+        # add history command to command_queue
         LOG.info("Retry command: %s", history_command)
-        Scheduler.command_queue[-1] = history_command
+        Context.command_queue().update(-1, history_command)
         return argument.options
 
     @classmethod
@@ -552,15 +591,19 @@ class Console(object):
             LOG.error("Wrong exit command. Use 'quit' to quit program")
         return
 
+    @classmethod
     def _process_command_tool(cls, command, para_list, options):
         if not command.startswith(ToolCommandType.toolcmd_key_tool):
             LOG.error("Wrong tool command.")
             return
         if len(para_list) > 2:
-            if para_list[1] == ConfigConst.renew_report:
-                if options.report_path:
-                    report_list = str(options.report_path).split(";")
-                    cls._renew_report(report_list)
+            tool_name = para_list[1]
+            if tool_name in [ConfigConst.renew_report, ConfigConst.export_report]:
+                report_path = str(getattr(options, ConfigConst.report_path, ""))
+                if not report_path:
+                    LOG.error("report path must be specified, you can pass it with option -rp ")
+                    return
+                cls._report_helper(report_path.split(";"), tool_name)
 
     @staticmethod
     def _parse_combination_param(combination_value):
@@ -570,7 +613,7 @@ class Console(object):
         for key_value_pair in key_value_pairs:
             key, value = key_value_pair.split(":", 1)
             if not value:
-                raise ParamError("'%s' no value" % key)
+                raise ParamError(ErrorMessage.Common.Code_0101006.format(value))
             if ConfigConst.pass_through not in key:
                 value_list = str(value).split(",")
                 exist_list = parse_result.get(key, [])
@@ -580,12 +623,34 @@ class Console(object):
                 parse_result[key] = value
         return parse_result
 
+    @staticmethod
+    def _parse_extension_device_info(device_info_str):
+        parse_result = json.loads(device_info_str).get("devices", None)
+        if isinstance(parse_result, list):
+            parse_result = [x for x in parse_result if 'sn' in x and 'type' in x]
+        else:
+            parse_result = None
+        return parse_result
+
+    @staticmethod
+    def _update_task_args(options):
+        args = {}
+        repeat = options.repeat
+        # 命令行repeat设值大于1时，才更新
+        if repeat > 1:
+            args.update({ConfigConst.repeat: repeat})
+        if options.testargs and not options.pass_through:
+            for combine_value in options.testargs.split(";"):
+                arg = combine_value.split(":", 1)
+                args.update({arg[0].strip(): arg[1].strip()})
+        Variables.config.update_task_args(new_args=args)
+
     @classmethod
     def _list_history(cls):
         print("Command history:")
         print("{0:<16}{1:<50}{2:<50}".format(
             "TaskId", "Command", "ReportPath"))
-        for command_info in Scheduler.command_queue[:-1]:
+        for command_info in Context.command_queue().list_history():
             command, report_path = command_info[1], command_info[2]
             if len(command) > MAX_VISIBLE_LENGTH:
                 command = "%s..." % command[:MAX_RESERVED_LENGTH]
@@ -598,7 +663,7 @@ class Console(object):
     def _list_task_id(cls, task_id):
         print("List task:")
         task_id, command, report_path = task_id, "", ""
-        for command_info in Scheduler.command_queue[:-1]:
+        for command_info in Context.command_queue().list_history():
             if command_info[0] != task_id:
                 continue
             task_id, command, report_path = command_info
@@ -611,13 +676,13 @@ class Console(object):
     def _list_retry_case(cls, history_path):
         params = ResultReporter.get_task_info_params(history_path)
         if not params:
-            raise ParamError("no retry case exists")
+            raise ParamError(ErrorMessage.Common.Code_0101007)
         session_id, command, report_path, failed_list = \
             params[ReportConst.session_id], params[ReportConst.command], \
-            params[ReportConst.report_path], \
-            [(module, failed) for module, case_list in params[ReportConst.unsuccessful_params].items()
-             for failed in case_list]
-        if Scheduler.mode == ModeType.decc:
+                params[ReportConst.report_path], \
+                [(module, failed) for module, case_list in params[ReportConst.unsuccessful_params].items()
+                 for failed in case_list]
+        if Context.session().mode == ModeType.decc:
             from xdevice import SuiteReporter
             SuiteReporter.failed_case_list = failed_list
             return
@@ -666,49 +731,47 @@ class Console(object):
 
     @classmethod
     def _find_history_path(cls, session):
-        from xdevice import Variables
         if os.path.isdir(session):
             return session
 
         target_path = os.path.join(
             Variables.exec_dir, Variables.report_vars.report_dir, session)
         if not os.path.isdir(target_path):
-            raise ParamError("session '%s' is invalid!" % session)
+            raise ParamError(ErrorMessage.Common.Code_0101008.format(session))
 
         return target_path
 
     def _parse_retry_option(self, options):
-        if Scheduler.mode == ModeType.decc:
-            if len(Scheduler.command_queue) < 2:
-                raise ParamError("no previous command executed")
+        if Context.session().mode == ModeType.decc:
+            if Context.command_queue().size() < 2:
+                raise ParamError(ErrorMessage.Common.Code_0101009)
             _, history_command, history_report_path = \
-                Scheduler.command_queue[-2]
+                Context.command_queue().get(-2)
             return history_command, history_report_path
 
         # get history_command, history_report_path
         if options.retry == "retry_previous_command":
-            from xdevice import Variables
             history_path = os.path.join(Variables.temp_dir, "latest")
             if options.session:
                 history_path = self._find_history_path(options.session)
 
             params = ResultReporter.get_task_info_params(history_path)
             if not params:
-                error_msg = "no previous command executed" if not \
-                    options.session else "'%s' has no command executed" % \
-                                         options.session
+                error_msg = ErrorMessage.Common.Code_0101009 if not options.session \
+                    else ErrorMessage.Common.Code_0101010.format(options.session)
+
                 raise ParamError(error_msg)
             history_command, history_report_path = params[ReportConst.command], params[ReportConst.report_path]
         else:
             history_command, history_report_path = "", ""
-            for command_tuple in Scheduler.command_queue[:-1]:
+            for command_tuple in Context.command_queue().list_history():
                 if command_tuple[0] != options.retry:
                     continue
                 history_command, history_report_path = \
                     command_tuple[1], command_tuple[2]
                 break
             if not history_command:
-                raise ParamError("wrong task id input: %s" % options.retry)
+                raise ParamError(ErrorMessage.Common.Code_0101011.format(options.retry))
         return history_command, history_report_path
 
     @classmethod
@@ -736,7 +799,7 @@ class Console(object):
                 setattr(history_options, option_name, input_value)
             else:
                 history_command = str(history_command).replace(
-                    history_value, "").replace(full_option_str, "").\
+                    history_value, "").replace(full_option_str, ""). \
                     replace(short_option_str, "")
         else:
             if input_value:
@@ -764,19 +827,36 @@ class Console(object):
         return option_str_list
 
     @classmethod
-    def _renew_report(cls, report_list):
-        from _core.report.__main__ import main_report
+    def _report_helper(cls, report_list, tool_name):
+        from _core.report.__main__ import main_report, export_report
         for report in report_list:
-            run_command = Scheduler.command_queue.pop()
-            Scheduler.command_queue.append(("", run_command, report))
+            run_command = Context.command_queue().pop()
+            Context.command_queue().append(("", run_command, report))
             sys.argv.insert(1, report)
-            main_report()
+            if tool_name == ConfigConst.renew_report:
+                main_report()
+            elif tool_name == ConfigConst.export_report:
+                export_report()
             sys.argv.pop(1)
+
+    @classmethod
+    def _parse_kit_params(cls, kits_params):
+        params_result = dict()
+        if not kits_params:
+            return params_result
+        kits_params_list = str(kits_params).split(" ")
+        if len(kits_params_list) % 2 != 0:
+            LOG.warning("Unavailable kit params")
+        else:
+            for index in range(0, len(kits_params_list), 2):
+                params_result.update(
+                    {kits_params_list[index]: kits_params_list[index + 1]})
+        return params_result
 
     @classmethod
     def _wash_history_command(cls, history_command):
         # clear redundant content in history command. e.g. repeat,sn
-        if "--repeat" in history_command or "-sn" in history_command\
+        if "--repeat" in history_command or "-sn" in history_command \
                 or "--auto_retry" in history_command:
             split_list = list(history_command.split())
             if "--repeat" in split_list:
@@ -791,6 +871,16 @@ class Console(object):
             return " ".join(split_list)
         else:
             return history_command
+
+    @classmethod
+    def _pre_handle_test_args(cls, args):
+        res = re.match(".+(?:-ta|--testargs)\\s+(.+)\\s+--enable_unicode",
+                       args, re.S)
+        if not res:
+            return args
+        unicode = ''.join(rf'\u{ord(x):04x}' for x in res.group(1))
+        args = args[:res.start(1)] + unicode + args[res.end(1):]
+        return args
 
 
 RUN_INFORMATION = """run:
@@ -809,7 +899,7 @@ usage: run [-l TESTLIST [TESTLIST ...] | -tf TESTFILE
            [-td TESTDRIVER] [-tl TESTLEVEL] [-bv BUILD_VARIANT]
            [-cov COVERAGE] [--retry RETRY] [--session SESSION]
            [--dryrun] [--reboot-per-module] [--check-device]
-           [--repeat REPEAT]
+           [--repeat REPEAT] [--scheduler SCHEDULER]
            action task
 
 Specify tests to run.
@@ -857,12 +947,13 @@ TEST_ENVIRONMENT [TEST_ENVIRONMENT ...]
                         Specify build variant(release,debug)
     -cov COVERAGE, --coverage COVERAGE
                         Specify coverage
-    --retry RETRY         Specify retry command
-    --session SESSION     retry task by session id
-    --dryrun              show retry test case list
-    --reboot-per-module   reboot devices before executing each module
-    --check-device        check the test device meets the requirements
-    --repeat REPEAT       number of times that a task is executed repeatedly
+    --retry RETRY          Specify retry command
+    --session SESSION      retry task by session id
+    --dryrun               show retry test case list
+    --reboot-per-module    reboot devices before executing each module
+    --check-device         check the test device meets the requirements
+    --repeat REPEAT        number of times that a task is executed repeatedly
+    --scheduler SCHEDULER  Select different scheduling schemes
 
 Examples:
     run -l <module name>;<module name>
@@ -916,7 +1007,6 @@ Examples:
     list history
     list 6e****90
 """
-
 
 GUIDE_INFORMATION = """help:
     use help to get  information.

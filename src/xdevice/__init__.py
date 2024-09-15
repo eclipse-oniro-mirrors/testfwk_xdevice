@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # coding=utf-8
-
 #
 # Copyright (c) 2020-2022 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,22 +15,26 @@
 # limitations under the License.
 #
 
+import os
 import pkg_resources
+import sys
 
-from .variables import Variables
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+from _core.variables import Variables
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.logger import platform_logger
 from _core.interface import IDriver
 from _core.interface import IDevice
 from _core.interface import IDeviceManager
+from _core.interface import IFilter
 from _core.interface import IParser
 from _core.interface import LifeCycle
 from _core.interface import IShellReceiver
 from _core.interface import ITestKit
 from _core.interface import IListener
 from _core.interface import IReporter
-from _core.interface import IFilter
 from _core.exception import ParamError
 from _core.exception import DeviceError
 from _core.exception import LiteDeviceError
@@ -42,8 +45,8 @@ from _core.exception import HdcCommandRejectedException
 from _core.exception import ShellCommandUnresponsiveException
 from _core.exception import DeviceUnresponsiveException
 from _core.exception import AppInstallError
-from _core.exception import HapNotSupportTest
 from _core.exception import RpcNotRunningError
+from _core.exception import HapNotSupportTest
 from _core.constants import DeviceTestType
 from _core.constants import DeviceLabelType
 from _core.constants import ManagerType
@@ -63,14 +66,19 @@ from _core.constants import HostDrivenTestType
 from _core.constants import DeviceConnectorType
 from _core.constants import DeviceProperties
 from _core.constants import AdvanceDeviceOption
-from _core.constants import LifeStage
 from _core.constants import Platform
+from _core.constants import HcpTestMode
+from _core.constants import LifeStage
+from _core.constants import AgentMode
 from _core.config.config_manager import UserConfigManager
 from _core.config.resource_manager import ResourceManager
-from _core.executor.listener import CaseResult
-from _core.executor.listener import SuiteResult
-from _core.executor.listener import SuitesResult
-from _core.executor.listener import StateRecorder
+from _core.error import Error
+from _core.error import ErrorCategory
+from _core.executor.abs import UniversalReportListener
+from _core.executor.bean import CaseResult
+from _core.executor.bean import SuiteResult
+from _core.executor.bean import SuitesResult
+from _core.executor.bean import StateRecorder
 from _core.executor.listener import TestDescription
 from _core.executor.listener import CollectingTestListener
 from _core.executor.request import Task
@@ -85,8 +93,8 @@ from _core.testkit.kit import disable_keyguard
 from _core.testkit.kit import unlock_screen
 from _core.testkit.kit import unlock_device
 from _core.testkit.kit import get_class
+from _core.testkit.kit import check_device_ohca
 from _core.driver.parser_lite import ShellHandler
-from _core.driver.parser_lite import driver_output_method
 from _core.report.encrypt import check_pub_key_exist
 from _core.utils import get_file_absolute_path
 from _core.utils import check_result_report
@@ -98,9 +106,9 @@ from _core.utils import check_device_name
 from _core.utils import do_module_kit_setup
 from _core.utils import do_module_kit_teardown
 from _core.utils import convert_serial
+from _core.utils import convert_mac
 from _core.utils import convert_ip
 from _core.utils import convert_port
-from _core.utils import convert_mac
 from _core.utils import check_mode
 from _core.utils import get_filename_extension
 from _core.utils import get_test_component_version
@@ -111,13 +119,16 @@ from _core.utils import check_path_legal
 from _core.utils import modify_props
 from _core.utils import get_shell_handler
 from _core.utils import get_decode
+from _core.utils import start_standing_subprocess
+from _core.utils import stop_standing_subprocess
+from _core.utils import check_mode_in_sys
+from _core.utils import get_current_time
 from _core.utils import get_cst_time
 from _core.utils import get_delta_time_ms
 from _core.utils import get_netstat_proc_pid
 from _core.utils import calculate_elapsed_time
-from _core.utils import check_mode_in_sys
-from _core.utils import start_standing_subprocess
-from _core.utils import stop_standing_subprocess
+from _core.utils import copy_folder
+from _core.utils import check_uitest_version
 from _core.logger import LogQueue
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.environment.manager_env import EnvironmentManager
@@ -136,16 +147,22 @@ from _core.environment.device_state import \
     DeviceAllocationState
 from _core.environment.device_monitor import DeviceStateListener
 from _core.environment.device_monitor import DeviceStateMonitor
-from _core.executor.scheduler import Scheduler
+from _core.context.life_stage import CaseStart
+from _core.context.life_stage import CaseEnd
+from _core.context.proxy import Binder
+from _core.context.proxy import UploadParams as Scheduler
+from _core.context.proxy import SessionInfo
+from _core.context.proxy import Connector
 from _core.report.suite_reporter import SuiteReporter
 from _core.report.suite_reporter import ResultCode
 from _core.report.reporter_helper import ExecInfo
+from _core.report.reporter_helper import ReportConstant
 from _core.report.result_reporter import ResultReporter
 from _core.report.reporter_helper import DataHelper
 from _core.report.__main__ import main_report
 from _core.command.console import Console
 
-VERSION = "2.39.0.1042"
+VERSION = '5.0.6.100'
 
 __all__ = [
     "VERSION",
@@ -157,8 +174,8 @@ __all__ = [
     "IDriver",
     "IDevice",
     "IDeviceManager",
-    "IParser",
     "IFilter",
+    "IParser",
     "LifeCycle",
     "IShellReceiver",
     "ITestKit",
@@ -174,8 +191,8 @@ __all__ = [
     "ShellCommandUnresponsiveException",
     "DeviceUnresponsiveException",
     "AppInstallError",
-    "HapNotSupportTest",
     "RpcNotRunningError",
+    "HapNotSupportTest",
     "DeviceTestType",
     "DeviceLabelType",
     "ManagerType",
@@ -197,6 +214,7 @@ __all__ = [
     "AdvanceDeviceOption",
     "UserConfigManager",
     "ResourceManager",
+    "UniversalReportListener",
     "CaseResult",
     "SuiteResult",
     "SuitesResult",
@@ -204,7 +222,12 @@ __all__ = [
     "TestDescription",
     "CollectingTestListener",
     "Task",
+    "CaseStart",
+    "CaseEnd",
+    "Binder",
     "Scheduler",
+    "SessionInfo",
+    "Connector",
     "SuiteReporter",
     "DeviceSelectionOption",
     "EnvironmentManager",
@@ -233,8 +256,8 @@ __all__ = [
     "unlock_device",
     "get_class",
     "ShellHandler",
-    "driver_output_method",
     "ResultCode",
+    "calculate_elapsed_time",
     "check_pub_key_exist",
     "check_result_report",
     "get_file_absolute_path",
@@ -246,9 +269,9 @@ __all__ = [
     "do_module_kit_setup",
     "do_module_kit_teardown",
     "convert_serial",
+    "convert_mac",
     "convert_ip",
     "convert_port",
-    "convert_mac",
     "check_mode",
     "get_filename_extension",
     "get_test_component_version",
@@ -259,20 +282,28 @@ __all__ = [
     "modify_props",
     "get_shell_handler",
     "get_decode",
-    "get_cst_time",
-    "get_delta_time_ms",
-    "get_netstat_proc_pid",
-    "calculate_elapsed_time",
-    "check_mode_in_sys",
     "start_standing_subprocess",
     "stop_standing_subprocess",
+    "check_mode_in_sys",
+    "get_current_time",
+    "get_delta_time_ms",
+    "get_cst_time",
+    "get_netstat_proc_pid",
+    "check_device_ohca",
     "ExecInfo",
+    "ReportConstant",
     "ResultReporter",
     "DataHelper",
     "main_report",
+    "Platform",
     "LogQueue",
+    "HcpTestMode",
     "LifeStage",
-    "Platform"
+    "AgentMode",
+    "copy_folder",
+    "check_uitest_version",
+    "Error",
+    "ErrorCategory"
 ]
 
 
@@ -288,3 +319,4 @@ def _load_external_plugins():
 
 _load_external_plugins()
 del _load_external_plugins
+Variables.config = UserConfigManager()

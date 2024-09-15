@@ -25,14 +25,17 @@ XDevice consists of the following sub-modules:
 
 ```
 xdevice
-├── config                        # XDevice configuration
-│     ├── user_config.xml         # XDevice environment configuration
-├── src                           # Source code
+├── config                            # XDevice configuration
+│     ├── user_config.xml             # XDevice environment configuration
+├── src                               # Source code
 │     ├── xdevice
-├── plugins                       # XDevice plugins
-│     ├── ohos                    # OpenHarmony plugins
-|          ├── src                # OpenHarmony plugins source code
-│          └── setup.py           # Installation script of the plugins
+├── template                          # template files
+│     ├── report                      # template files for test report
+│     ├── build_report_template.py    # build report template
+├── plugins                           # XDevice plugins
+│     ├── ohos                        # OpenHarmony plugins
+|          ├── src                    # OpenHarmony plugins source code
+│          └── setup.py               # Installation script of the plugins
 ```
 
 ## Constraints<a name="section118067583303"></a>

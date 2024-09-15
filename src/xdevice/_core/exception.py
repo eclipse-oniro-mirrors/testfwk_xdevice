@@ -52,6 +52,7 @@ class ReportException(Exception):
     Exception thrown when a shell command executed on a device takes too long
     to send its output.
     """
+
     def __init__(self, error_msg="ReportException", error_no=""):
         super(ReportException, self).__init__(error_msg, error_no)
         self.error_msg = error_msg
@@ -104,9 +105,10 @@ class ShellCommandUnresponsiveException(HdcError):
     Exception thrown when a shell command executed on a device takes too long
     to send its output.
     """
+
     def __init__(self, error_msg="ShellCommandUnresponsiveException",
                  error_no=""):
-        super(ShellCommandUnresponsiveException, self).\
+        super(ShellCommandUnresponsiveException, self). \
             __init__(error_msg, error_no)
         self.error_msg = error_msg
         self.error_no = error_no
@@ -120,6 +122,7 @@ class DeviceUnresponsiveException(HdcError):
     Exception thrown when a shell command executed on a device takes too long
     to send its output.
     """
+
     def __init__(self, error_msg="DeviceUnresponsiveException", error_no=""):
         super(DeviceUnresponsiveException, self).__init__(error_msg, error_no)
         self.error_msg = error_msg
@@ -139,9 +142,9 @@ class AppInstallError(DeviceError):
         return str(self.error_msg)
 
 
-class HapNotSupportTest(DeviceError):
+class RpcNotRunningError(DeviceError):
     def __init__(self, error_msg, error_no=""):
-        super(HapNotSupportTest, self).__init__(error_msg, error_no)
+        super(RpcNotRunningError, self).__init__(error_msg, error_no)
         self.error_msg = error_msg
         self.error_no = error_no
 
@@ -149,9 +152,9 @@ class HapNotSupportTest(DeviceError):
         return str(self.error_msg)
 
 
-class RpcNotRunningError(DeviceError):
+class HapNotSupportTest(DeviceError):
     def __init__(self, error_msg, error_no=""):
-        super(RpcNotRunningError, self).__init__(error_msg, error_no)
+        super(HapNotSupportTest, self).__init__(error_msg, error_no)
         self.error_msg = error_msg
         self.error_no = error_no
 

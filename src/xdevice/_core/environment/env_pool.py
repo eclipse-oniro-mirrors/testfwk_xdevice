@@ -35,7 +35,7 @@ from _core.utils import get_cst_time
 from _core.logger import change_logger_level
 from _core.constants import ConfigConst
 from _core.constants import FilePermission
-from _core.executor.scheduler import Scheduler
+from _core.context.log import RuntimeLogs
 
 LOG = platform_logger("EnvPool")
 
@@ -83,15 +83,19 @@ class EnvPool(object):
 
     def _load_managers(self):
         LOG.info("Load Managers ...")
+        from xdevice import EnvironmentManager
+        if EnvironmentManager._EnvironmentManager__init_flag:
+            LOG.info("Managers has inited, using EnvironmentManager managers...")
+            self._managers = EnvironmentManager._EnvironmentManager__instance.managers
+            return
         manager_plugins = get_plugin(Plugin.MANAGER)
         for manager_plugin in manager_plugins:
             try:
                 manager_instance = manager_plugin.__class__()
-                self._managers[manager_instance.__class__.__name__] = \
-                    manager_instance
+                self._managers[manager_instance.__class__.__name__] = manager_instance
             except Exception as error:
                 LOG.error("Pool start error: {}".format(error))
-        # reverse sort
+        # 倒序排列, 优先加载OH设备
         if self._managers:
             self._managers = dict(sorted(self._managers.items(), reverse=True))
 
@@ -99,8 +103,9 @@ class EnvPool(object):
         for manager in self._managers.values():
             if manager.__class__.__name__ not in self._filters:
                 continue
-            manager.devices_list = []
-        self._managers = {}
+            manager.devices_list.clear()
+            manager.env_stop()
+        self._managers.clear()
         EnvPool.__init_flag = False
 
     def get_device(self, selector, timeout=10):
@@ -138,6 +143,8 @@ class EnvPool(object):
                 device.remove_ports()
         self._unload_manager()
         self._stop_task_log()
+        EnvPool.instance = None
+        EnvPool.__init_flag = False
 
     def _apply_device(self, selector, timeout=3):
         LOG.info("Apply device in pool")
@@ -187,11 +194,11 @@ class EnvPool(object):
             os.makedirs(report_folder_path)
         LOG.info("Report path: {}".format(report_folder_path))
         EnvPool.report_path = report_folder_path
-        Scheduler.start_task_log(report_folder_path)
+        RuntimeLogs.start_task_log(report_folder_path)
 
     @classmethod
     def _stop_task_log(cls):
-        Scheduler.stop_task_logcat()
+        RuntimeLogs.stop_task_logcat()
 
 
 class XMLNode(metaclass=ABCMeta):
@@ -409,7 +416,7 @@ class Cache:
         flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
         with os.fdopen(os.open(self.cache_file, flags, FilePermission.mode_755),
                        "wb") as f:
-            f.write(b'123')
+            f.write(b'123')  # 写入字节数据
 
 
 def is_env_pool_run_mode():

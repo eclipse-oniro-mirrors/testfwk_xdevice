@@ -16,44 +16,34 @@
 # limitations under the License.
 #
 from devicetest.core.constants import RunResult
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import DeviceTestError
 from devicetest.core.report import ReportHandler
-from devicetest.log.logger import DeviceTestLog as log
+from devicetest.error import ErrorMessage
+from devicetest.log.logger import DeviceTestLog as Log
 from xdevice import SuiteReporter
 
 
 class UploadResultHandler:
 
     def __init__(self, report_path):
-        self.__log = log
         self.__test_runner = None
         self.__report_path = None
         self.__upload_suitereporter_lock = False
         self.report_handler = ReportHandler(report_path)
 
-    def set_test_runner(self, _log, test_runner):
-        self.__log = _log
+    def set_test_runner(self, test_runner):
         self.__test_runner = test_runner
-        self.__log.info("finish set test runner.")
+        Log.info("set test runner finish")
 
     def get_error_msg(self, test_runner, is_cur_case_error=False):
-        if test_runner.project.record.get_is_manual_stop_status():
-            error_msg = ErrorMessage.Error_01300.Topic if is_cur_case_error \
-                else ErrorMessage.Error_01301.Topic
-
-        else:
-            error_msg = ErrorMessage.Error_01400.Topic if is_cur_case_error \
-                else ErrorMessage.Error_01404.Topic
-        return error_msg
+        return ErrorMessage.Common.Code_0201004
 
     def flash_os_test_results(self, test_runner, test_results):
         cur_case_error_msg = self.get_error_msg(test_runner,
                                                 is_cur_case_error=True)
         if not test_results:
             test_result = test_runner.record_cls_result(
-                test_runner.project.execute_case_name,
-                error=cur_case_error_msg)
+                test_runner.project.execute_case_name, None, None, None, cur_case_error_msg)
             test_results.append(test_result)
         else:
             if test_results[-1].get("result").strip() == RunResult.FAILED \
@@ -65,15 +55,13 @@ class UploadResultHandler:
         report_result_tuple = self.report_handler.generate_test_report(
             self.__test_runner, test_results)
         SuiteReporter.append_report_result(report_result_tuple)
-        self.__log.debug("result tuple:{}".format(report_result_tuple))
-        self.__log.info("upload suitereporter success.")
+        Log.debug("result tuple:{}".format(report_result_tuple))
+        Log.info("upload suitereporter success.")
 
     def upload_suitereporter(self, is_stoped=False):
         try:
             self.upload_suite_reporter()
         except DeviceTestError as err:
-            log.error(err)
+            Log.error(err)
         except Exception:
-            self.__log.error(ErrorMessage.Error_01427.Message.en,
-                             error_no=ErrorMessage.Error_01427.Code,
-                             is_traceback=True)
+            Log.error(ErrorMessage.Common.Code_0201003, is_traceback=True)

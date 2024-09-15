@@ -16,7 +16,11 @@
 # limitations under the License.
 #
 
-class DetailErrorMassage():
+import warnings
+warnings.warn("this module is deprecated, use 'devicetest.error' instead", DeprecationWarning)
+
+
+class DetailErrorMassage:
     Error_01100 = {
         "Topic": "测试资源加载异常[01100]",
         "Code": "01100",
@@ -1119,6 +1123,42 @@ class DetailErrorMassage():
         "Message": {
             "en": "The RPC process is not found.",
             "ch": "RPC进程未查询到。"
+        }
+    }
+
+    Error_01441 = {
+        "Topic": "测试用例执行失败[01441]",
+        "Code": "01441",
+        "Message": {
+            "en": "Device's developer mode is false.",
+            "ch": "当前设备开发者模式为关闭状态。"
+        }
+    }
+
+    Error_01442 = {
+        "Topic": "测试用例执行失败[01442]",
+        "Code": "01442",
+        "Message": {
+            "en": "HDC fport tcp port fail.",
+            "ch": "HDC端口转发失败。"
+        }
+    }
+
+    Error_01446 = {
+        "Topic": "测试用例执行失败[01446]",
+        "Code": "01446",
+        "Message": {
+            "en": "BIN(ABC) RPC process is not found.",
+            "ch": "BIN(ABC) RPC进程未查询到。"
+        }
+    }
+
+    Error_01447 = {
+        "Topic": "测试用例执行失败[01447]",
+        "Code": "01447",
+        "Message": {
+            "en": "BIN(ABC) RPC listening port number is not found.",
+            "ch": "BIN(ABC) RPC监听端口号未查询到。"
         }
     }
 

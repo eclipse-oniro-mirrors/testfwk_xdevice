@@ -19,7 +19,6 @@ import os
 import stat
 from setuptools import setup
 
-
 INSTALL_REQUIRES = [
     "jinja2",
     "xdevice"
@@ -51,11 +50,15 @@ setup(
         'driver': [
             'device_test=devicetest.driver.device_test',
             'windows=devicetest.driver.windows'
-        ]
+        ],
     },
     zip_safe=False,
     install_requires=INSTALL_REQUIRES,
     extras_require={
-        "full": ["numpy", "pillow", "opencv-python"]
+        "full": [
+            "numpy",
+            "pillow",
+            "opencv-python",
+        ]
     },
 )

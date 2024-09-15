@@ -19,9 +19,10 @@
 import os
 import hashlib
 
-from _core.logger import platform_logger
-from _core.exception import ParamError
 from _core.constants import FilePermission
+from _core.error import ErrorMessage
+from _core.exception import ParamError
+from _core.logger import platform_logger
 
 __all__ = ["check_pub_key_exist", "do_rsa_encrypt", "do_rsa_decrypt",
            "generate_key_file", "get_file_summary"]
@@ -89,10 +90,8 @@ def do_rsa_encrypt(content):
             cipher_text += cipher_text_frag
         return cipher_text
 
-    except (ModuleNotFoundError, ValueError, TypeError, UnicodeError,
-            Exception) as error:
-        error_msg = "rsa encryption error occurs, %s" % error.args[0]
-        raise ParamError(error_msg, error_no="00113")
+    except (ModuleNotFoundError, ValueError, TypeError) as error:
+        raise ParamError(ErrorMessage.Common.Code_0101025.format(error.args[0])) from error
 
 
 def do_rsa_decrypt(content):
@@ -126,13 +125,13 @@ def do_rsa_decrypt(content):
                     plain_text += plain_text_frag
                 return plain_text.decode(encoding='utf-8')
             except rsa.pkcs1.CryptoError as error:
-                error_msg = "rsa decryption error occurs, %s" % error.args[0]
-                LOG.error(error_msg, error_no="00114")
+                error_msg = ErrorMessage.Common.Code_0101026.format(error.args[0])
+                LOG.error(error_msg)
                 return error_msg
 
-    except (ModuleNotFoundError, ValueError, TypeError, UnicodeError) as error:
-        error_msg = "rsa decryption error occurs, %s" % error.args[0]
-        LOG.error(error_msg, error_no="00114")
+    except (ModuleNotFoundError, ValueError, TypeError) as error:
+        error_msg = ErrorMessage.Common.Code_0101026.format(error.args[0])
+        LOG.error(error_msg)
         return error_msg
 
 

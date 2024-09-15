@@ -17,6 +17,8 @@
 #
 
 import os
+import sys
 
-VERSION = '2.39.0.1042'
+
+VERSION = '5.0.6.100'
 RESOURCE_PATH = os.path.dirname(os.path.abspath(__file__))

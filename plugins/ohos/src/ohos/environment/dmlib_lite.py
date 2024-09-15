@@ -15,13 +15,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import json
+import os
+import sys
 import time
 import re
 
 from xdevice import DeviceTestType
+from xdevice import FilePermission
+from xdevice import HcpTestMode
+from xdevice import convert_mac
 from xdevice import ExecuteTerminate
 from xdevice import platform_logger
+from ohos.error import ErrorMessage
 from ohos.exception import LiteDeviceTimeout
 from ohos.exception import LiteDeviceConnectError
 from ohos.exception import LiteDeviceExecuteCommandError
@@ -84,13 +89,13 @@ def check_read_test_end(result=None, input_command=None):
         if "%s%s" % (CPP_ERR_MESSAGE, input_command[2:]) in result_output:
             LOG.error("Execute file not exist, result is %s" % result_output,
                       error_no="00402")
-            raise LiteDeviceExecuteCommandError("execute file not exist",
-                                                error_no="00402")
+            raise LiteDeviceExecuteCommandError(ErrorMessage.Common.Code_0301005)
     elif input_command.startswith("zcat"):
         return False
     elif input_command == "uname":
-        if ("Linux" in result_output and "# " in result_output) \
-              or ("OHOS #" in result_output or "#" in result_output):
+        is_linux_uname = "Linux" in result_output and "# " in result_output
+        is_liteos_uname = "OHOS #" in result_output or "# " in result_output
+        if is_linux_uname or is_liteos_uname:
             return True
     elif input_command.startswith("chmod +x") and input_command.find("query.bin"):
         if PRODUCT_PARAMS_END in result_output:
@@ -134,15 +139,14 @@ class LiteHelper:
             timeout: timeout for read result
             receiver: parser handler
         """
-        from xdevice import Scheduler
+        from xdevice import Binder
         time.sleep(2)
         start_time = time.time()
         status = True
         error_message = ""
         result = ""
         if not telnet:
-            raise LiteDeviceConnectError("remote device is not connected.",
-                                         error_no="00402")
+            raise LiteDeviceConnectError(ErrorMessage.Device.Code_0303018)
 
         telnet.write(command.encode('ascii') + b"\n")
         while time.time() - start_time < timeout:
@@ -159,8 +163,8 @@ class LiteHelper:
                          bytes(CPP_TEST_END_SIGN, encoding="utf8"),
                          bytes(CPP_TEST_STOP_SIGN, encoding="utf8")]
         while time.time() - start_time < timeout:
-            if not Scheduler.is_execute:
-                raise ExecuteTerminate("Execute terminate", error_no="00300")
+            if not Binder.is_executing():
+                raise ExecuteTerminate(ErrorMessage.Common.Code_0301013)
             _, _, data = telnet.expect(expect_result, timeout=1)
             data = PATTERN.sub('', data.decode('gbk', 'ignore')).replace(
                 "\r", "")
@@ -177,7 +181,7 @@ class LiteHelper:
             receiver.__done__()
 
         if not status and command.startswith("uname"):
-            raise LiteDeviceTimeout("Execute command time out:%s" % command)
+            raise LiteDeviceTimeout(ErrorMessage.Device.Code_0303014.format(command))
 
         return result, status, error_message
 
@@ -185,18 +189,95 @@ class LiteHelper:
     def read_local_output_test(com=None, command=None, timeout=TIMEOUT,
                                receiver=None):
         input_command = command
-        linux_end_command = ""
-        if "--gtest_output=" in command:
-            linux_end_command = input_command.split(":")[1].split(
-                "reports")[0].rstrip("/") + " #"
-        error_message = ""
         start_time = time.time()
+        # 增加对执行测试套命令时
+        if HcpTestMode.hcp_mode and input_command.startswith("./") and input_command.find(".bin") and (
+                "--gtest_list_tests" not in input_command):
+            device_log_file = getattr(sys, "device_log_file", "")
+            LOG.info("device_log_file:{}".format(device_log_file))
+            result, status, error_message = LiteHelper.parser_hcp_test_suite_execute_log(com, start_time, timeout,
+                                                                                         input_command, device_log_file)
+        else:
+            # 非测试套执行命令
+            result, status, error_message = LiteHelper.parser_common_execute(com, start_time, timeout, input_command,
+                                                                             receiver)
+
+        if receiver:
+            receiver.__done__()
+
+        if not status and command.startswith("uname"):
+            raise LiteDeviceTimeout(ErrorMessage.Device.Code_0303014.format(command))
+        return result, status, error_message
+
+    @staticmethod
+    def parser_hcp_test_suite_execute_log(com, start_time, timeout, input_command, device_log_file):
+        from xdevice import Binder
         result = ""
+        error_message = ""
         status = True
-        from xdevice import Scheduler
+        # 增加对执行测试套命令时
+        device_log_file_open = os.open(device_log_file, os.O_WRONLY |
+                                       os.O_CREAT | os.O_APPEND,
+                                       FilePermission.mode_755)
+        try:
+            with os.fdopen(device_log_file_open, "a") as file_name:
+                while time.time() - start_time < timeout:
+                    if not Binder.is_executing():
+                        raise ExecuteTerminate(ErrorMessage.Common.Code_0301013)
+                    if com.in_waiting == 0:
+                        continue
+                    data = com.read(com.in_waiting).decode('gbk', errors='ignore')
+                    data = PATTERN.sub('', data).replace("\r", "")
+                    data = convert_mac(data)
+                    file_name.write(data)
+                    file_name.flush()
+                    time_diff = time.time() - start_time
+                    if timeout - 60 <= time_diff:
+                        if LiteHelper.check_string_in_file(device_log_file, CPP_TEST_END_SIGN):
+                            break
+                    if CPP_TEST_END_SIGN in data or "Gtest xml" in data or "output finished" in data:
+                        LOG.info("parser hcptest end:{}".format(data))
+                        break
+                else:
+                    error_message = "execute {} timed out {} ".format(input_command, timeout)
+                    status = False
+        except (UnicodeDecodeError, IOError, OSError) as exception:
+            if not getattr(exception, "error_no", ""):
+                setattr(exception, "error_no", "03403")
+            LOG.exception(exception, exc_info=True, error_no="03403")
+            raise exception
+        except Exception as exception:
+            exception_error = "run parser hcptest suite execute log error:{}".format(exception)
+            if not getattr(exception, "error_no", ""):
+                setattr(exception, "error_no", "03403")
+            LOG.exception(exception_error, exc_info=True, error_no="03403")
+            raise exception
+        finally:
+            LOG.debug("run parser hcptest end")
+        return " ", status, error_message
+
+    @staticmethod
+    def check_string_in_file(file_path, target_string):
+        try:
+            with open(file_path, 'r') as file:
+                for line in file:
+                    if target_string in line:
+                        LOG.info("{} is exist!".format(target_string))
+                        return True
+            return False
+        except FileNotFoundError:
+            LOG.info("{} doesn't exist!".format(target_string))
+            return False
+
+    @staticmethod
+    def parser_common_execute(com, start_time, timeout, input_command, receiver):
+        from xdevice import Binder
+        result = ""
+        error_message = ""
+        status = True
         while time.time() - start_time < timeout:
-            if not Scheduler.is_execute:
-                raise ExecuteTerminate("Execute terminate", error_no="00300")
+            if not Binder.is_executing():
+                raise ExecuteTerminate(ErrorMessage.Common.Code_0301013)
             if com.in_waiting == 0:
                 continue
             data = com.read(com.in_waiting).decode('gbk', errors='ignore')
@@ -207,15 +288,8 @@ class LiteHelper:
             if check_read_test_end(result, input_command):
                 break
         else:
-            error_message = "execute %s timed out %s " % (command, timeout)
+            error_message = "execute %s timed out %s " % (input_command, timeout)
             status = False
-
-        if receiver:
-            receiver.__done__()
-
-        if not status and command.startswith("uname"):
-            raise LiteDeviceTimeout("Execute command time out:%s" % command)
-
         return result, status, error_message
 
     @staticmethod
@@ -225,10 +299,10 @@ class LiteHelper:
         input_command = command
 
         start = time.time()
-        from xdevice import Scheduler
+        from xdevice import Binder
         while True:
-            if not Scheduler.is_execute:
-                raise ExecuteTerminate("Execute terminate", error_no="00300")
+            if not Binder.is_executing():
+                raise ExecuteTerminate(ErrorMessage.Common.Code_0301013)
             data = com.readline().decode('gbk', errors='ignore')
             data = PATTERN.sub('', data)
             if isinstance(input_command, list):
@@ -279,11 +353,10 @@ class LiteHelper:
         timeout = args.get("timeout", TIMEOUT)
         receiver = args.get("receiver", None)
         if not com:
-            raise LiteDeviceConnectError("local device is not connected.",
-                                         error_no="00402")
+            raise LiteDeviceConnectError(ErrorMessage.Device.Code_0303010)
 
-        LOG.info("local_%s execute command shell %s with timeout %ss" %
-                 (com.port, command, str(timeout)))
+        LOG.info("local_{} execute command shell {} with "
+                 "timeout {}s".format(com.port, convert_mac(command), str(timeout)))
 
         if isinstance(command, str):
             command = command.encode("utf-8")
@@ -302,11 +375,10 @@ class LiteHelper:
         Execute command on the serial and read all the output from the serial.
         """
         if not com:
-            raise LiteDeviceConnectError("local device is not connected.",
-                                         error_no="00402")
+            raise LiteDeviceConnectError(ErrorMessage.Device.Code_0303010)
 
         LOG.info(
-            "local_%s execute command shell %s" % (com.port, command))
+            "local_%s execute command shell %s" % (com.port, convert_mac(command)))
         command = command.encode("utf-8")
         if command[-2:] != b"\r\n":
             command = command.rstrip() + b'\r\n'

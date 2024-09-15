@@ -21,11 +21,14 @@ import time
 from enum import Enum
 from threading import RLock
 
+from _core.constants import CaseResult
 from _core.constants import ModeType
 from _core.logger import platform_logger
 from _core.report.encrypt import check_pub_key_exist
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ReportConstant
+from _core.context.center import Context
+from _core.context.handler import get_case_result
 
 LOG = platform_logger("SuiteReporter")
 SUITE_REPORTER_LOCK = RLock()
@@ -61,8 +64,7 @@ class SuiteReporter:
             self.report_path, "%s%s" % (
                 report_name, self.data_helper.DATA_REPORT_SUFFIX))
         self.kwargs = kwargs
-        from xdevice import Scheduler
-        if not check_pub_key_exist() and Scheduler.mode != ModeType.decc:
+        if not check_pub_key_exist() and Context.session().mode != ModeType.decc:
             SuiteReporter.suite_report_result.clear()
 
     def create_empty_report(self):
@@ -75,7 +77,10 @@ class SuiteReporter:
         # initial test suites element
         test_suites_element, test_suites_attributes, _ = \
             self._initial_test_suites()
-        test_suites_attributes[ReportConstant.unavailable] = 1
+        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
+            test_suites_attributes[ReportConstant.unavailable] = 1
+        else:
+            test_suites_attributes[ReportConstant.disabled] = 1
         self.data_helper.set_element_attributes(test_suites_element,
                                                 test_suites_attributes)
 
@@ -84,11 +89,13 @@ class SuiteReporter:
             suite_result)
         test_suite_element.text, test_suite_element.tail = \
             "", self.data_helper.LINE_BREAK
-        test_suite_attributes[ReportConstant.unavailable] = 1
+        if self.kwargs.get(ReportConstant.result_kind) == CaseResult.unavailable:
+            test_suite_attributes[ReportConstant.unavailable] = 1
+        else:
+            test_suite_attributes[ReportConstant.disabled] = 1
         test_suite_attributes[ReportConstant.message] = suite_result.stacktrace
 
-        from xdevice import Scheduler
-        if Scheduler.mode == ModeType.decc:
+        if Context.session().mode == ModeType.decc:
             test_suite_attributes[ReportConstant.result] = ReportConstant.false
         self.data_helper.set_element_attributes(test_suite_element,
                                                 test_suite_attributes)
@@ -98,8 +105,7 @@ class SuiteReporter:
 
         # generate report
         if test_suites_element:
-            from xdevice import Scheduler
-            if Scheduler.mode != ModeType.decc:
+            if Context.session().mode != ModeType.decc:
                 self.data_helper.generate_report(test_suites_element,
                                                  self.suite_data_path)
             SuiteReporter.append_report_result((
@@ -161,7 +167,6 @@ class SuiteReporter:
             ReportConstant.tests: 0,
             ReportConstant.ignored: 0,
             ReportConstant.unavailable: 0,
-            ReportConstant.product_info: self.kwargs.get(ReportConstant.product_info_, ""),
             # module's failure message
             ReportConstant.message: self.kwargs.get(ReportConstant.message, "")
         }
@@ -248,7 +253,8 @@ class SuiteReporter:
             ReportConstant.failures: 0,
             ReportConstant.ignored: 0,
             ReportConstant.tests: suite_result.test_num,
-            ReportConstant.message: suite_result.stacktrace
+            ReportConstant.message: suite_result.stacktrace,
+            ReportConstant.report: suite_result.report
         }
         if self.kwargs.get(ReportConstant.module_name, ""):
             test_suite_attributes[ReportConstant.module_name] = self.kwargs.get(
@@ -262,15 +268,17 @@ class SuiteReporter:
             if char_index in [10, 13]:  # chr(10): LF, chr(13): CR
                 continue
             case_stacktrace = case_stacktrace.replace(chr(char_index), "")
-        test_case_attributes = {ReportConstant.name: case_result.test_name,
-                                ReportConstant.status: "",
-                                ReportConstant.time: round(float(
-                                     case_result.run_time) / 1000, 3),
-                                ReportConstant.class_name:
-                                    case_result.test_class,
-                                ReportConstant.result: "",
-                                ReportConstant.level: 1,
-                                ReportConstant.message: case_stacktrace}
+        test_case_attributes = {
+            ReportConstant.name: case_result.test_name,
+            ReportConstant.status: "",
+            ReportConstant.time: round(float(case_result.run_time) / 1000, 3),
+            ReportConstant.class_name: case_result.test_class,
+            ReportConstant.result: "",
+            ReportConstant.level: 1,
+            ReportConstant.message: case_stacktrace,
+            ReportConstant.report: case_result.report,
+            ReportConstant.result_content: getattr(case_result, ReportConstant.result_content, "")
+        }
         return test_case_element, test_case_attributes
 
     @classmethod
@@ -302,23 +310,21 @@ class SuiteReporter:
 
     @classmethod
     def _upload_case_result(cls, result_str):
-        from xdevice import Scheduler
-        if Scheduler.mode != ModeType.decc:
+        if Context.session().mode != ModeType.decc:
             return
         element = DataHelper.parse_data_report(result_str)
         if len(element) == 0:
             LOG.debug("%s is error", result_str)
             return
         element = element[0]
-        result, error_msg = Scheduler.get_script_result(element)
+        result, error_msg = get_case_result(element)
         case_name = element.get(ReportConstant.name, "")
         try:
             from agent.decc import Handler
             LOG.info("Upload case result to decc")
             Handler.upload_case_result(case_name, result, error_msg)
         except ModuleNotFoundError as error:
-            from xdevice import Scheduler
-            if Scheduler.mode == ModeType.decc:
+            if Context.session().mode == ModeType.decc:
                 LOG.error("Module not found %s", error.args)
 
     @classmethod

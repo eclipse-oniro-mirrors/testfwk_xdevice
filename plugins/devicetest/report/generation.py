@@ -81,10 +81,7 @@ def generate_report(to_file, template="case.html", **kwargs):
         to_file : str, render to file
         template: str, render template
     Example:
-        单用例：
-        generate_report(to_file, case=case)
-        测试套：
-        generate_report(to_file, template="suite.html", suite=suite)
+        generate_report(to_file, case=case_info, logs=log_content)
     """
     try:
         create_dir(os.path.dirname(to_file))

@@ -15,6 +15,11 @@
 -->
 <user_config>
     <environment>
+        <device type="usb-hdc">
+            <ip></ip>
+            <port></port>
+            <sn></sn>
+        </device>
         <device type="com" label="wifiiot">
             <serial>
                 <com></com>
@@ -59,5 +64,24 @@
     <resource>
         <dir></dir>
     </resource>
+    <devicelog>
+        <enable>ON</enable>
+        <loglevel>DEBUG</loglevel>
+        <dir></dir>
+    </devicelog>
     <loglevel>INFO</loglevel>
+    <taskargs>
+        <agent_mode></agent_mode>
+        <pass_through></pass_through>
+        <repeat></repeat>
+        <screenshot>false</screenshot>
+        <screenrecorder>false</screenrecorder>
+    </taskargs>
+    <custom>
+        <wifi>
+            <ssid></ssid>
+            <password></password>
+        </wifi>
+    </custom>
+    <uploadtrack>true</uploadtrack>
 </user_config>

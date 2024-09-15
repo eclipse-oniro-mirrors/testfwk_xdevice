@@ -17,19 +17,24 @@
 #
 
 import importlib
+import hashlib
 import os
+import platform
 import re
 import secrets
+import site
 import socket
+import subprocess
 import sys
 
-from xdevice import calculate_elapsed_time
 from xdevice import get_decode
 from xdevice import ParamError
 from xdevice import DeviceConnectorType
 
-from devicetest.core.error_message import ErrorMessage
 from devicetest.core.exception import DeviceTestError
+from devicetest.core.exception import ModuleNotAttributeError
+from devicetest.error import ErrorCategory
+from devicetest.error import ErrorMessage
 from devicetest.log.logger import DeviceTestLog as log
 
 
@@ -85,20 +90,17 @@ def import_from_file(file_path, file_base_name):
         importlib.import_module(file_base_name)
     except Exception as exception:
         file_abs_path = os.path.join(file_path, file_base_name)
-        error_msg = "Can't load file {}".format(file_abs_path)
-        log.error(error_msg, is_traceback=True)
+        error_msg = ErrorMessage.TestCase.Code_0203001.format(file_abs_path, exception)
         raise ImportError(error_msg) from exception
+    if not hasattr(sys.modules.get(file_base_name), file_base_name):
+        raise ModuleNotAttributeError(ErrorMessage.TestCase.Code_0203016)
     return getattr(sys.modules[file_base_name], file_base_name)
 
 
 def get_forward_ports(self=None):
     try:
         ports_list = []
-        if hasattr(self, "is_oh") or self.usb_type == DeviceConnectorType.hdc:
-            # get hdc
-            cmd = "fport ls"
-        else:
-            cmd = "forward --list"
+        cmd = "fport ls"
         out = get_decode(self.connector_command(cmd)).strip()
         clean_lines = out.split('\n')
         for line_text in clean_lines:
@@ -115,8 +117,7 @@ def get_forward_ports(self=None):
             ports_list.append(int(connector_tokens[1]))
         return ports_list
     except Exception:
-        log.error(ErrorMessage.Error_01208.Message.en,
-                  error_no=ErrorMessage.Error_01208.Code)
+        log.error(ErrorMessage.Common.Code_0201005)
         return []
 
 
@@ -137,23 +138,25 @@ def is_port_idle(host: str = "127.0.0.1", port: int = None) -> bool:
     return is_idle
 
 
-def get_forward_port(self, host=None, port=None):
+def get_forward_port(self, host: str = None, port: int = None, filter_ports: list = None):
+    if filter_ports is None:
+        filter_ports = []
     try:
         ports_list = get_forward_ports(self)
 
         port = 9999 - secrets.randbelow(99)
         cnt = 0
         while cnt < 10 and port > 1024:
-            if port not in ports_list and is_port_idle(host, port):
+            if port not in filter_ports and port not in ports_list and is_port_idle(host, port):
                 cnt += 1
                 break
 
             port -= 1
         return port
     except Exception as error:
-        log.error(ErrorMessage.Error_01208.Message.en,
-                  error_no=ErrorMessage.Error_01208.Code)
-        raise DeviceTestError(ErrorMessage.Error_01208.Topic) from error
+        err_msg = ErrorMessage.Common.Code_0201005
+        log.error(err_msg)
+        raise DeviceTestError(err_msg) from error
 
 
 def get_local_ip_address():
@@ -163,17 +166,6 @@ def get_local_ip_address():
     """
     ip = "127.0.0.1"
     return ip
-
-
-def calculate_execution_time(begin, end):
-    """计算时间间隔
-    Args:
-        begin: datetime, begin time
-        end  : datetime, end time
-    Returns:
-        elapsed time description
-    """
-    return calculate_elapsed_time(begin, end)
 
 
 def compare_version(version, base_version: tuple, rex: str):
@@ -191,7 +183,38 @@ def compare_version(version, base_version: tuple, rex: str):
         version = tuple(version.split("."))
         if version > base_version:
             return True
+    else:
+        return True
     return False
+
+
+def extract_version(version_str: str):
+    """
+    获取版本
+    :param version_str: 版本信息 ALN-AL00 5.0.0.26(SP1C00E25R4P5log)
+    :return: 5.0.0.26
+    """
+    match = re.search(r'(\d+\.\d+\.\d+\.\d+)', version_str)
+    if match:
+        return match.group(1)
+    return None
+
+
+def compare_versions_by_product(version1: str, version2: str):
+    """
+    比较两个版本号
+    :param version1: 5.0.0.26
+    :param version2: 5.0.0.23
+    :return:
+    """
+    version1 = extract_version(version1)
+    version2 = extract_version(version2)
+    v1 = tuple(map(int, version1.split('.')))
+    v2 = tuple(map(int, version2.split('.')))
+    if v1 > v2:
+        return True
+    else:
+        return False
 
 
 class DeviceFileUtils:
@@ -248,3 +271,85 @@ def get_process_pid(device, process_name):
             pid = pid.split()
             return pid[1]
     return None
+
+
+def check_port_state(port: int = None) -> None:
+    """查看端口状态"""
+    try:
+        log.debug("##########port state##########")
+        sys_type = platform.system()
+        if sys_type == "Linux" or sys_type == "Darwin":
+            cmd = "lsof -i:{}".format(port)
+            out = shell_command(cmd)
+            log.debug(out)
+        else:
+            out = shell_command("netstat -aon", "findstr :{}".format(port))
+            log.debug(out)
+            results = out.strip("\r\n")
+            if results:
+                results = results.split("\r\n")
+            for result in results:
+                items = result.split()
+                if items[0] == "TCP" and items[-2] == "LISTENING":
+                    out = shell_command("tasklist", "findstr {}".format(items[-1]))
+                    log.debug(out)
+        log.debug("##########port state##########")
+    except Exception as e:
+        log.error("check port state error, reason: {}".format(e))
+
+
+def shell_command(cmd: str, findstr: str = "") -> str:
+    command = cmd.split(" ")
+    first_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+    if findstr:
+        findstr_command = findstr.split(" ")
+        findstr_process = subprocess.Popen(findstr_command, stdin=first_process.stdout,
+                                           stderr=subprocess.PIPE,
+                                           stdout=subprocess.PIPE,
+                                           shell=False)
+        out, _ = findstr_process.communicate(timeout=10)
+    else:
+        out, _ = first_process.communicate(timeout=10)
+    out = out.decode("utf-8")
+    return out
+
+
+def check_device_file_md5(device, pc_file: str, device_file: str) -> bool:
+    if not os.path.isfile(pc_file):
+        raise FileNotFoundError(ErrorMessage.Common.Code_0201001.format(ErrorCategory.Environment, pc_file))
+    _, local_file_name = os.path.split(pc_file)
+    device_md5 = device.execute_shell_command(
+        "md5sum {}".format(device_file)).split()[0].strip()
+    device.log.debug("device {} md5: {}".format(local_file_name, device_md5))
+    with open(pc_file, "rb") as f:
+        data = f.read()
+        md5hash = hashlib.md5(data)
+        local_md5 = md5hash.hexdigest()
+    device.log.debug("local {} md5: {}".format(local_file_name, local_md5))
+    return True if device_md5 == local_md5 else False
+
+
+def is_standard_lib(file_path):
+    """Check if the file is part of the standard library."""
+    std_lib_path = os.path.join(sys.base_prefix, 'lib')
+    return file_path.startswith(std_lib_path)
+
+
+def is_third_party_lib(file_path):
+    """Check if the file is part of a third-party library."""
+    site_packages = [os.path.join(sys.prefix, 'lib', 'site-packages')]
+    if hasattr(sys, 'real_prefix'):  # This means we are in a virtual environment
+        site_packages.append(os.path.join(sys.real_prefix, 'lib', 'site-packages'))
+    site_packages.append(site.getusersitepackages())
+    return any(file_path.startswith(site_package) for site_package in site_packages)
+
+
+def extract_file_method_code(stack_line):
+    """Extract the Python file name and the method after 'in' from a stack trace line."""
+    match = re.search(r'File "(.*?)", line \d+, in (.+)', stack_line)
+    if match:
+        file_name = match.group(1).split(os.sep)[-1]
+        method_name = match.group(2).strip()
+        code_line = stack_line.split('\n')[-2].strip()
+        return file_name, method_name, code_line
+    return None, None, None

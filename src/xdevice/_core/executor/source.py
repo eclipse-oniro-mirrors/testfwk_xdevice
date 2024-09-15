@@ -23,22 +23,29 @@ import stat
 from collections import namedtuple
 
 from _core.constants import DeviceTestType
+from _core.constants import SchedulerType
 from _core.constants import ModeType
 from _core.constants import HostDrivenTestType
 from _core.constants import FilePermission
 from _core.constants import ConfigConst
+from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.logger import platform_logger
+from _core.testkit.json_parser import JsonParser
 from _core.utils import get_filename_extension
 from _core.utils import is_config_str
 from _core.utils import unique_id
+
+from _core.context.handler import report_not_executed
+from _core.context.center import Context
+from _core.context.upload import Uploader
 
 __all__ = ["TestSetSource", "TestSource", "find_test_descriptors",
            "find_testdict_descriptors", "TestDictSource"]
 
 TestSetSource = namedtuple('TestSetSource', 'set')
 TestSource = namedtuple('TestSource', 'source_file source_string config_file '
-                                      'test_name test_type module_name')
+                                      'test_name test_type module_name module_subsystem')
 
 TEST_TYPE_DICT = {"DEX": DeviceTestType.dex_test,
                   "HAP": DeviceTestType.hap_test,
@@ -47,8 +54,7 @@ TEST_TYPE_DICT = {"DEX": DeviceTestType.dex_test,
                   "JST": DeviceTestType.jsunit_test,
                   "OHJST": DeviceTestType.oh_jsunit_test,
                   "CXX": DeviceTestType.cpp_test,
-                  "BIN": DeviceTestType.lite_cpp_test,
-                  "LTPPosix": DeviceTestType.ltp_posix_test}
+                  "BIN": DeviceTestType.lite_cpp_test}
 EXT_TYPE_DICT = {".dex": DeviceTestType.dex_test,
                  ".hap": DeviceTestType.hap_test,
                  ".apk": DeviceTestType.hap_test,
@@ -61,6 +67,7 @@ PYD_SUFFIX = ".pyd"
 MODULE_CONFIG_SUFFIX = ".json"
 MODULE_INFO_SUFFIX = ".moduleInfo"
 MAX_DIR_DEPTH = 6
+NO_MODULE_SUBSYSTEM = "zzzzzzzz"
 LOG = platform_logger("TestSource")
 
 
@@ -112,7 +119,9 @@ def _get_testcases_dirs(config):
 
 
 def _append_subfolders(testcases_path, testcases_dirs):
+    ignore_folders = ConfigConst.ignore_testcases_path.split("|")
     for root, dirs, _ in os.walk(testcases_path):
+        dirs[:] = [d for d in dirs if d not in ignore_folders]
         for sub_dir in dirs:
             testcases_dirs.append(os.path.abspath(os.path.join(root, sub_dir)))
 
@@ -134,7 +143,7 @@ def find_testdict_descriptors(config):
                 if desc is not None:
                     test_descriptors.append(desc)
     if not test_descriptors:
-        raise ParamError("test source is none", error_no="00110")
+        raise ParamError(ErrorMessage.Common.Code_0101023)
     return test_descriptors
 
 
@@ -222,10 +231,15 @@ def _append_module_test_source(testcases_path, test_sources):
     if not os.path.isdir(testcases_path):
         return
     for item in os.listdir(testcases_path):
+        if not item.endswith(MODULE_CONFIG_SUFFIX):
+            continue
         item_path = os.path.join(testcases_path, item)
-        if os.path.isfile(item_path) and item_path.endswith(
-                MODULE_CONFIG_SUFFIX):
-            test_sources.append(item_path)
+        if os.path.isfile(item_path):
+            name = item[:-5]
+            if len(name) != len(name.strip()):
+                LOG.warning(f"test source '{item}' contains spaces at the beginning or end")
+            else:
+                test_sources.append(item_path)
 
 
 def _get_test_file(config, testcases_dirs):
@@ -233,15 +247,14 @@ def _get_test_file(config, testcases_dirs):
         if os.path.exists(config.testfile):
             return config.testfile
         else:
-            raise ParamError("test file '%s' not exists" % config.testfile,
-                             error_no="00110")
+            raise ParamError(ErrorMessage.Common.Code_0101024.format(config.testfile))
 
     for testcases_dir in testcases_dirs:
         test_file = os.path.join(testcases_dir, config.testfile)
         if os.path.exists(test_file):
             return test_file
 
-    raise ParamError("test file '%s' not exists" % config.testfile)
+    raise ParamError(ErrorMessage.Common.Code_0101024.format(config.testfile))
 
 
 def _normalize_test_sources(testcases_dirs, test_sources, config):
@@ -259,7 +272,7 @@ def _normalize_test_sources(testcases_dirs, test_sources, config):
         if not append_result:
             norm_test_sources.append(test_source)
     if not norm_test_sources:
-        raise ParamError("test source not found")
+        raise ParamError(ErrorMessage.Common.Code_0101023)
     return norm_test_sources
 
 
@@ -302,21 +315,24 @@ def _make_test_descriptor(file_path, test_type_key):
     # get params
     filename, _ = get_filename_extension(file_path)
     uid = unique_id("TestSource", filename)
-    test_type = TestDictSource.test_type[test_type_key]
+    test_type = TestDictSource.test_type.get(test_type_key)
     config_file = _get_config_file(
         os.path.join(os.path.dirname(file_path), filename))
+
+    module_info = ""
+    if config_file:
+        module_info = _get_module_info(config_file)
 
     module_name = _parse_module_name(config_file, filename)
     # make test descriptor
     desc = Descriptor(uuid=uid, name=filename,
                       source=TestSource(file_path, "", config_file, filename,
-                                        test_type, module_name))
+                                        test_type, module_name, module_info))
     return desc
 
 
 def _get_test_driver(test_source):
     try:
-        from _core.testkit.json_parser import JsonParser
         json_config = JsonParser(test_source)
         return json_config.get_driver_type()
     except ParamError as error:
@@ -344,31 +360,45 @@ def _make_test_descriptors_from_testsources(test_sources, config):
             if getattr(config, ConfigConst.testcase, "") and not \
                     getattr(config, ConfigConst.testlist):
                 LOG.debug("Can't find the json file of config")
-                from xdevice import Scheduler
-                if Scheduler.device_labels:
+                if Context.session().device_labels:
                     config_file, test_type = _generate_config_file(
-                        Scheduler.device_labels,
+                        Context.session().device_labels,
                         os.path.join(os.path.dirname(test_source), filename),
                         ext, test_type)
-                    setattr(Scheduler, "tmp_json", config_file)
+                    setattr(Uploader, "tmp_json", config_file)
                     LOG.debug("Generate temp json success: %s" % config_file)
+        module_info = NO_MODULE_SUBSYSTEM
+        if config.scheduler == SchedulerType.module and config_file:
+            module_info = _get_module_info(config_file)
         desc = _create_descriptor(config_file, filename, test_source,
-                                  test_type, config)
+                                  test_type, config, module_info)
         if desc:
             test_descriptors.append(desc)
 
     return test_descriptors
 
 
-def _create_descriptor(config_file, filename, test_source, test_type, config):
-    from xdevice import Scheduler
+def _get_module_info(config_file):
+    module_info_path = config_file.replace(MODULE_CONFIG_SUFFIX, MODULE_INFO_SUFFIX)
+    if not os.path.exists(module_info_path):
+        return NO_MODULE_SUBSYSTEM
+    try:
+        from _core.testkit.json_parser import JsonParser
+        json_config = JsonParser(module_info_path)
+        return json_config.get_module_subsystem()
+    except ParamError as error:
+        LOG.warning(error, error_no=error.error_no)
+        return NO_MODULE_SUBSYSTEM
+
+
+def _create_descriptor(config_file, filename, test_source, test_type, config, module_info):
     from _core.executor.request import Descriptor
 
     error_message = ""
     if not test_type:
         error_message = "no driver to execute '%s'" % test_source
         LOG.error(error_message, error_no="00112")
-        if Scheduler.mode != ModeType.decc:
+        if Context.session().mode != ModeType.decc:
             return None
 
     # create Descriptor
@@ -376,28 +406,26 @@ def _create_descriptor(config_file, filename, test_source, test_type, config):
     module_name = _parse_module_name(config_file, filename)
     desc = Descriptor(uuid=uid, name=filename,
                       source=TestSource(test_source, "", config_file,
-                                        filename, test_type, module_name))
+                                        filename, test_type, module_name, module_info))
     if not os.path.isfile(test_source):
         if is_config_str(test_source):
             desc = Descriptor(uuid=uid, name=filename,
                               source=TestSource("", test_source, config_file,
                                                 filename, test_type,
-                                                module_name))
+                                                module_name, module_info))
         else:
             if config.testcase and not config.testlist:
                 error_message = "test case '%s' or '%s' not exists" % (
-                        "%s%s" % (test_source, PY_SUFFIX), "%s%s" % (
-                            test_source, PYD_SUFFIX))
+                    "%s%s" % (test_source, PY_SUFFIX), "%s%s" % (
+                        test_source, PYD_SUFFIX))
                 error_no = "00103"
             else:
-                error_message = "test source '%s' or '%s' not exists" % (
-                    test_source, "%s%s" % (test_source, MODULE_CONFIG_SUFFIX))
+                error_message = "{}".format(test_source)
                 error_no = "00102"
             desc.error = ParamError(error_message, error_no=error_no)
 
-    if Scheduler.mode == ModeType.decc and error_message:
-        Scheduler.report_not_executed(config.report_path, [("", desc)],
-                                      error_message)
+    if Context.session().mode == ModeType.decc and error_message:
+        report_not_executed(config.report_path, [("", desc)], error_message)
         return None
 
     return desc
@@ -457,7 +485,7 @@ def _get_test_type(config_file, test_driver, ext):
         return _get_test_driver(config_file)
     if ext in [".py", ".js", ".dex", ".hap", ".bin"] \
             and ext in TestDictSource.exe_type.keys():
-        test_type = TestDictSource.exe_type[ext]
+        test_type = TestDictSource.exe_type.get(ext)
     elif ext in [".apk"] and ext in TestDictSource.exe_type.keys():
         test_type = DeviceTestType.hap_test
     else:
@@ -478,7 +506,7 @@ def _generate_config_file(device_labels, filename, ext, test_type):
     if test_type not in [HostDrivenTestType.device_test]:
         test_type = HostDrivenTestType.device_test
     top_dict = {"environment": [], "driver": {"type": test_type,
-                "py_file": "%s%s" % (filename, ext)}}
+                                              "py_file": "%s%s" % (filename, ext)}}
     for label in device_labels:
         device_json_list = top_dict.get("environment")
         device_json_list.append({"type": "device", "label": label})
@@ -501,6 +529,7 @@ def parse_source_from_data(content):
         case_dict.update({name: item})
         source_list.append(name)
     return source_list, case_dict
+
 
 class TestDictSource:
     exe_type = copy.deepcopy(EXT_TYPE_DICT)

@@ -33,20 +33,21 @@ from xdevice import ParamError
 from xdevice import ITestKit
 from xdevice import get_config_value
 from xdevice import get_file_absolute_path
-from xdevice import UserConfigManager
 from xdevice import ConfigConst
 from xdevice import get_local_ip
 from xdevice import FilePermission
 from xdevice import DeviceTestType
 from xdevice import DeviceLabelType
-from ohos.exception import LiteDeviceConnectError
-from ohos.exception import LiteDeviceError
-from ohos.exception import LiteDeviceMountError
+from xdevice import JsonParser
+from ohos.config.config_manager import OHOSUserConfigManager
 from ohos.constants import ComType
 from ohos.constants import CKit
 from ohos.constants import DeviceLiteKernel
+from ohos.error import ErrorMessage
+from ohos.exception import LiteDeviceConnectError
+from ohos.exception import LiteDeviceError
+from ohos.exception import LiteDeviceMountError
 from ohos.utils import parse_strings_key_value
-
 
 __all__ = ["DeployKit", "MountKit", "RootFsKit", "QueryKit", "LiteShellKit",
            "LiteAppInstallKit", "DeployToolKit"]
@@ -72,9 +73,7 @@ class DeployKit(ITestKit):
         self.burn_command = burn_command.replace(" ", "").split(",")
         self.paths = get_config_value('paths', config)
         if self.timeout == "0" or not self.burn_file:
-            msg = "The config for deploy kit is invalid with timeout:{}, " \
-                  "burn_file:{}".format(self.timeout, self.burn_file)
-            raise ParamError(msg, error_no="00108")
+            raise ParamError(ErrorMessage.Config.Code_0302007.format(self.timeout, self.burn_file))
 
     def _reset(self, device):
         cmd_com = device.device.com_dict.get(ComType.cmd_com)
@@ -89,10 +88,7 @@ class DeployKit(ITestKit):
                 "The exception {} happened in deploy kit running".format(
                     error), error_no=getattr(error, "error_no",
                                              "00000"))
-            raise LiteDeviceError("%s port set_up wifiiot failed" %
-                                  cmd_com.serial_port,
-                                  error_no=getattr(error, "error_no",
-                                                   "00000"))
+            raise LiteDeviceError(ErrorMessage.Device.Code_0303019.format(cmd_com.serial_port))
         finally:
             if cmd_com:
                 cmd_com.close()
@@ -104,13 +100,11 @@ class DeployKit(ITestKit):
         patch_file = get_file_absolute_path(self.burn_file, self.paths)
         deploy_serial_port = device.device.com_dict.get(
             ComType.deploy_com).serial_port
-        deploy_baudrate = device.device.com_dict.\
+        deploy_baudrate = device.device.com_dict. \
             get(ComType.deploy_com).baud_rate
         port_number = re.findall(r'\d+$', deploy_serial_port)
         if not port_number:
-            raise LiteDeviceError("The config of serial port {} to deploy is "
-                                  "invalid".format(deploy_serial_port),
-                                  error_no="00108")
+            raise LiteDeviceError(ErrorMessage.Config.Code_0302036.format(deploy_serial_port))
         new_temp_tool_path = copy_file_as_temp(burn_tool_path, 10)
         cmd = '{} -com:{} -bin:{} -signalbaud:{}' \
             .format(new_temp_tool_path, port_number[0], patch_file,
@@ -124,8 +118,7 @@ class DeployKit(ITestKit):
         os.remove(new_temp_tool_path)
         if 0 != return_code:
             device.device_allocation_state = DeviceAllocationState.unusable
-            raise LiteDeviceError("%s port set_up wifiiot failed" %
-                                  deploy_serial_port, error_no="00402")
+            raise LiteDeviceError(ErrorMessage.Device.Code_0303019.format(deploy_serial_port))
 
     def __setup__(self, device, **kwargs):
         """
@@ -153,6 +146,8 @@ class MountKit(ITestKit):
         self.server = ""
         self.file_name_list = []
         self.remote_info = None
+        self.hcptest = False
+        self.type_kernel = None
 
     def __check_config__(self, config):
         self.remote = get_config_value('server', config, is_list=False)
@@ -160,11 +155,12 @@ class MountKit(ITestKit):
         self.mount_list = get_config_value('mount', config, is_list=True)
         self.server = get_config_value('server', config, is_list=False,
                                        default="NfsServer")
+        self.type_kernel = get_config_value('type_kernel', config, is_list=False)
         if not self.mount_list:
             msg = "The config for mount kit is invalid with mount:{}" \
-                  .format(self.mount_list)
+                .format(self.mount_list)
             LOG.error(msg, error_no="00108")
-            raise TypeError("Load Error[00108]")
+            raise TypeError(ErrorMessage.Config.Code_0302017)
 
     def mount_on_board(self, device=None, remote_info=None, case_type=""):
         """
@@ -184,8 +180,7 @@ class MountKit(ITestKit):
             True or False, represent init Failed or success
         """
         if not remote_info:
-            raise ParamError("failed to get server environment",
-                             error_no="00108")
+            raise ParamError(ErrorMessage.Device.Code_0303011)
 
         linux_host = remote_info.get("ip", "")
         linux_directory = remote_info.get("dir", "")
@@ -200,24 +195,27 @@ class MountKit(ITestKit):
                           "chmod 755 -R /{}/{}".format(
                               "storage", "device_directory")]
         if not linux_host or not linux_directory:
-            raise LiteDeviceMountError(
-                "nfs server miss ip or directory[00108]", error_no="00108")
+            raise LiteDeviceMountError(ErrorMessage.Config.Code_0302023)
 
         commands = []
         if device.label == "ipcamera":
-            env_result, status, _ = device.execute_command_with_timeout(
-                command="uname", timeout=1, retry=2)
-            if status:
-                if env_result.find(DeviceLiteKernel.linux_kernel) != -1 or \
-                        env_result.find("Linux") != -1:
-                    commands = linux_commands
-                    device.__set_device_kernel__(DeviceLiteKernel.linux_kernel)
-                else:
-                    commands = liteos_commands
-                    device.__set_device_kernel__(DeviceLiteKernel.lite_kernel)
+            if self.type_kernel and \
+                    self.type_kernel in [DeviceLiteKernel.linux_kernel, DeviceLiteKernel.lite_kernel]:
+                commands = linux_commands
+                device.__set_device_kernel__(self.type_kernel)
             else:
-                raise LiteDeviceMountError("failed to get device env[00402]",
-                                           error_no="00402")
+                env_result, status, _ = device.execute_command_with_timeout(
+                    command="uname", timeout=1, retry=2)
+                if status:
+                    if env_result.find(DeviceLiteKernel.linux_kernel) != -1 or \
+                            env_result.find("Linux") != -1:
+                        commands = linux_commands
+                        device.__set_device_kernel__(DeviceLiteKernel.linux_kernel)
+                    else:
+                        commands = liteos_commands
+                        device.__set_device_kernel__(DeviceLiteKernel.lite_kernel)
+                else:
+                    raise LiteDeviceMountError(ErrorMessage.Config.Code_0302037)
 
         for mount_file in self.mount_list:
             target = mount_file.get("target", "/test_root")
@@ -225,8 +223,8 @@ class MountKit(ITestKit):
                 LOG.debug("%s is mounted" % target)
                 continue
             mkdir_on_board(device, target)
+            self.mounted_dir.add(target)
 
-            # local nfs server need use alias of dir to mount
             if is_remote.lower() == "false":
                 linux_directory = get_mount_dir(linux_directory)
             for command in commands:
@@ -235,9 +233,8 @@ class MountKit(ITestKit):
                     "device_directory", target).replace("//", "/")
                 timeout = 15 if command.startswith("mount") else 1
                 if command.startswith("mount"):
-                    self.mounted_dir.add(target)
                     for mount_time in range(1, 4):
-                        result, status, _ = device.\
+                        result, status, _ = device. \
                             execute_command_with_timeout(command=command,
                                                          case_type=case_type,
                                                          timeout=timeout)
@@ -249,9 +246,7 @@ class MountKit(ITestKit):
                         LOG.info("Mount failed,try "
                                  "again {} time".format(mount_time))
                         if mount_time == 3:
-                            raise LiteDeviceMountError("Failed to mount the "
-                                                       "device[00402]",
-                                                       error_no="00402")
+                            raise LiteDeviceMountError(ErrorMessage.Device.Code_0303020)
                 else:
                     result, status, _ = device.execute_command_with_timeout(
                         command=command, case_type=case_type, timeout=timeout)
@@ -265,11 +260,11 @@ class MountKit(ITestKit):
 
         request = kwargs.get("request", None)
         if not request:
-            raise ParamError("MountKit setup request is None",
-                             error_no="02401")
+            raise ParamError(ErrorMessage.Config.Code_0302004)
+        self.check_hcp_mode(request)
         device.connect()
 
-        config_manager = UserConfigManager(
+        config_manager = OHOSUserConfigManager(
             config_file=request.get(ConfigConst.configfile, ""),
             env=request.get(ConfigConst.test_environment, ""))
         remote_info = config_manager.get_user_config("testcases/server",
@@ -290,9 +285,8 @@ class MountKit(ITestKit):
         for mount_file in self.mount_list:
             source = mount_file.get("source")
             if not source:
-                raise TypeError("The source of MountKit cant be empty "
-                                "in Test.json!")
-            source = source.replace("$testcases/", "").\
+                raise TypeError(ErrorMessage.Config.Code_0302005)
+            source = source.replace("$testcases/", ""). \
                 replace("$resources/", "")
             file_path = get_file_absolute_path(source, self.paths)
             if os.path.isdir(file_path):
@@ -304,7 +298,7 @@ class MountKit(ITestKit):
             else:
                 file_local_paths.append(file_path)
 
-        config_manager = UserConfigManager(
+        config_manager = OHOSUserConfigManager(
             config_file=request.get(ConfigConst.configfile, ""),
             env=request.get(ConfigConst.test_environment, ""))
         remote_info = config_manager.get_user_config("testcases/server",
@@ -312,24 +306,21 @@ class MountKit(ITestKit):
         self.remote_info = remote_info
 
         if not remote_info:
-            err_msg = "The name of remote device {} does not match". \
-                format(self.remote)
-            LOG.error(err_msg, error_no="00403")
+            err_msg = ErrorMessage.Config.Code_0302022.format(self.remote)
+            LOG.error(err_msg)
             raise TypeError(err_msg)
         is_remote = remote_info.get("remote", "false")
         if (str(get_local_ip()) == linux_host) and (
                 linux_directory == ("/data%s" % testcases_dir)):
-            return
+            return []
         ip = remote_info.get("ip", "")
         port = remote_info.get("port", "")
         remote_dir = remote_info.get("dir", "")
         if not ip or not port or not remote_dir:
             LOG.warning("Nfs server's ip or port or dir is empty")
-            return
+            return []
         for _file in file_local_paths:
             # remote copy
-            LOG.info("Trying to copy the file from {} to nfs server".
-                     format(_file))
             if not is_remote.lower() == "false":
                 try:
                     import paramiko
@@ -339,8 +330,10 @@ class MountKit(ITestKit):
                     sftp = paramiko.SFTPClient.from_transport(client)
                     sftp.put(localpath=_file, remotepath=os.path.join(
                         remote_info.get("dir"), os.path.basename(_file)))
+                    LOG.info("Trying to copy the file from {} to nfs server".
+                             format(_file))
                     client.close()
-                except (OSError, Exception) as exception:
+                except OSError as exception:
                     msg = "copy file to nfs server failed with error {}" \
                         .format(exception)
                     LOG.error(msg, error_no="00403")
@@ -352,6 +345,8 @@ class MountKit(ITestKit):
                                                os.path.basename(_file)))
                     except OSError as _:
                         pass
+                    LOG.info("Trying to copy the file from {} to nfs server".
+                             format(_file))
                     shutil.copy(_file, remote_info.get("dir"))
                     if check_server_file(_file, remote_info.get("dir")):
                         break
@@ -362,7 +357,7 @@ class MountKit(ITestKit):
                         if count == 3:
                             msg = "Copy {} to nfs server " \
                                   "failed {} times".format(
-                                   os.path.basename(_file), count)
+                                os.path.basename(_file), count)
                             LOG.error(msg, error_no="00403")
                             LOG.debug("Nfs server:{}".format(glob.glob(
                                 os.path.join(remote_info.get("dir"), '*.*'))))
@@ -391,14 +386,19 @@ class MountKit(ITestKit):
                         command="umount {}".format(mounted_dir),
                         timeout=2)
                     if result.find("Resource busy") == -1:
-                        device.execute_command_with_timeout(command="rm -r {}".
-                                                            format(mounted_dir)
-                                                            , timeout=1)
+                        device.execute_command_with_timeout(command="rm -r {}".format(mounted_dir), timeout=1)
                     if status:
                         break
                     LOG.info("Umount failed,try "
                              "again {} time".format(mount_time))
                     time.sleep(1)
+
+    def check_hcp_mode(self, request):
+        config_file = request.root.source.config_file
+        json_config = JsonParser(config_file)
+        role = get_config_value('role', json_config.get_driver(), False)
+        if role:
+            self.hcptest = True
 
 
 def copy_file_as_temp(original_file, str_length):
@@ -415,6 +415,7 @@ def copy_file_as_temp(original_file, str_length):
             os.path.splitext(original_file)[0], "".join(random_str),
             os.path.splitext(original_file)[1])
         return shutil.copyfile(original_file, new_temp_tool_path)
+    return None
 
 
 def mkdir_on_board(device, dir_path):
@@ -484,12 +485,10 @@ class RootFsKit(ITestKit):
                                              is_list=False)
         if not self.checksum_command or not self.hash_file_name or \
                 not self.device_label:
-            msg = "The config for rootfs kit is invalid : checksum :{}" \
-                  " hash file name:{} device label:{}" \
-                .format(self.checksum_command, self.hash_file_name,
-                        self.device_label)
-            LOG.error(msg, error_no="00108")
-            return TypeError(msg)
+            err_msg = ErrorMessage.Config.Code_0302008.format(
+                self.checksum_command, self.hash_file_name, self.device_label)
+            LOG.error(err_msg)
+            raise TypeError(err_msg)
 
     def __setup__(self, device, **kwargs):
         del kwargs
@@ -564,10 +563,9 @@ class QueryKit(ITestKit):
         self.properties = get_config_value('properties', config, is_list=False)
 
         if not self.query:
-            msg = "The config for query kit is invalid with query:{}" \
-                  .format(self.query)
-            LOG.error(msg, error_no="00108")
-            raise TypeError(msg)
+            err_msg = ErrorMessage.Config.Code_0302009.format(self.query)
+            LOG.error(err_msg)
+            raise TypeError(err_msg)
 
     def __setup__(self, device, **kwargs):
         LOG.debug("Start query kit setup")
@@ -575,17 +573,13 @@ class QueryKit(ITestKit):
             return
         request = kwargs.get("request", None)
         if not request:
-            raise ParamError("the request of queryKit is None",
-                             error_no="02401")
+            raise ParamError(ErrorMessage.Config.Code_0302010)
         self.mount_kit.__setup__(device, request=request)
-        device.execute_command_with_timeout(command="cd /", timeout=0.2)
         if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-            command = f"chmod +x /storage{self.query} && ./storage{self.query}"
-            output, _, _ = device.execute_command_with_timeout(
-                command=command, timeout=10)
+            command = f"chmod +x /storage{self.query} && /storage{self.query}"
         else:
-            output, _, _ = device.execute_command_with_timeout(
-                command=".{}".format(self.query), timeout=5)
+            command = f"/{self.query}"
+        output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
         LOG.debug(output)
         params = parse_strings_key_value(output)
         device.update_device_props(params)
@@ -611,6 +605,7 @@ class LiteShellKit(ITestKit):
 
     def __setup__(self, device, **kwargs):
         del kwargs
+        device.connect()
         LOG.debug("LiteShellKit setup, device:{}".format(device.device_sn))
         if len(self.command_list) == 0:
             LOG.info("No setup command to run, skipping!")
@@ -632,7 +627,9 @@ def run_command(device, command):
     if command.strip() == "reset":
         device.reboot()
     else:
-        device.execute_shell_command(command)
+        if command.startswith("chr"):
+            command = eval(command)
+        device.execute_command_with_timeout(command, timeout=1)
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.liteinstall)
@@ -699,40 +696,40 @@ class DeployToolKit(ITestKit):
         self.auto_deploy = None
         self.device_label = None
         self.time_out = None
+        self.burn_file = None
         self.paths = None
         self.upgrade_file_path = None
         self.burn_tools = None
 
     def __check_config__(self, config):
         self.config = config
-        self.paths = get_config_value("paths", config)
-        self.burn_file = get_config_value("burn_file", config, is_list=False)
+        self.paths = get_config_value('paths', config)
+        self.burn_file = get_config_value('burn_file', config, is_list=False)
         self.auto_deploy = get_config_value('auto_deploy',
                                             config, is_list=False)
         self.device_label = get_config_value("device_label", config,
                                              is_list=False)
         self.time_out = get_config_value("timeout", config,
                                          is_list=False)
-        self.upgrade_file_path = get_config_value("upgrade_file_path", config, is_list=False)
-        self.burn_tools = get_config_value("burn_tools", config, is_list=False)
+        self.upgrade_file_path = get_config_value("upgrade_file_path", config,
+                                                  is_list=False)
+        self.burn_tools = get_config_value('burn_tools', config, is_list=False)
 
-        if not self.auto_deploy or not self.upgrade_file_path or not self.time_out:
-            msg = "The config for deploy tool kit is" \
-                  "invalid: upgrade_file_path :{} time out:{}".format(
-                self.upgrade_file_path, self.time_out)
-            LOG.error(msg, error_no="00108")
-            return TypeError(msg)
+        if not self.auto_deploy or not self.time_out:
+            err_msg = ErrorMessage.Config.Code_0302011.format(self.device_label, self.time_out)
+            LOG.error(err_msg)
+            raise TypeError(err_msg)
 
     def __setup__(self, device, **kwargs):
-        LOG.info("Upgrade file path:{}".format(self.upgrade_file_path))
+        LOG.info("upgrade_file_path:{}".format(self.upgrade_file_path))
         upgrade_file_name = os.path.basename(self.upgrade_file_path)
         if self.upgrade_file_path.startswith("resource"):
             self.upgrade_file_path = get_file_absolute_path(
                 os.path.join("tools", upgrade_file_name), self.paths)
         sys.path.insert(0, os.path.dirname(self.upgrade_file_path))
-        serial_port = device.device.com_dict.get(ComType.deploy_com).serial_port
-        LOG.debug("Serial port:{}".format(serial_port))
-        baud_rate = device.device.com_dict.get(ComType.deploy_com).baud_rate
+        serial_port = device.device.com_dict.get(
+            ComType.deploy_com).serial_port
+        LOG.debug("serial_port:{}".format(serial_port))
         usb_port = device.device.com_dict.get(ComType.cmd_com).usb_port
         patch_file = get_file_absolute_path(self.burn_file, self.paths)
         upgrade_name = upgrade_file_name.split(".py")[0]
@@ -740,8 +737,8 @@ class DeployToolKit(ITestKit):
             upgrade_name, upgrade_name)
         scope = {}
         exec(import_cmd_str, scope)
-        upgrade_device = scope.get("upgrade_device", "None")
-        upgrade = upgrade_device(serial_port=serial_port, baud_rate=baud_rate,
+        upgrade_device = scope.get("upgrade_device", 'none')
+        upgrade = upgrade_device(serial_port=serial_port, baund_rate=115200,
                                  patch_file=patch_file, usb_port=usb_port)
         upgrade_result = upgrade.burn()
         if upgrade_result:

@@ -16,11 +16,13 @@
 # limitations under the License.
 #
 
-import datetime
 import os
+import time
 
-from _core.constants import ModeType
 from _core.constants import ConfigConst
+from _core.context.handler import report_not_executed
+from _core.context.option_util import get_device_options
+from _core.error import ErrorMessage
 from _core.exception import ParamError
 from _core.executor.source import TestSource
 from _core.logger import platform_logger
@@ -29,7 +31,7 @@ from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.testkit.json_parser import JsonParser
 from _core.utils import get_kit_instances
-from _core.utils import get_cst_time
+from _core.utils import get_repeat_round
 
 __all__ = ["Descriptor", "Task", "Request"]
 LOG = platform_logger("Request")
@@ -40,18 +42,18 @@ class Descriptor:
     The descriptor for a test or suite
     """
 
-    def __init__(self, uuid=None, name=None, source=None, con=False, error=None):
+    def __init__(self, uuid=None, name=None, source=None, container=False, error=None):
         self.unique_id = uuid
         self.display_name = name
         self.tags = {}
         self.source = source
         self.parent = None
         self.children = []
-        self.con = con
+        self.container = container
         self.error = error
 
-    def get_con(self):
-        return self.con
+    def get_container(self):
+        return self.container
 
     def get_unique_id(self):
         return self.unique_id
@@ -73,13 +75,15 @@ class Task:
 
     def init(self, config):
         from xdevice import Variables
-        from xdevice import Scheduler
-        start_time = get_cst_time()
-        LOG.debug("StartTime=%s" % start_time.strftime("%Y-%m-%d %H:%M:%S"))
+        from _core.context.log import RuntimeLogs
+        import uuid
+        start_time = time.localtime(time.time())
+        LOG.debug("StartTime={}".format(time.strftime("%Y-%m-%d %H:%M:%S", start_time)))
 
         self.config.update(config.__dict__)
+        Variables.task_id = uuid.uuid4().hex
         if getattr(config, ConfigConst.report_path, "") == "":
-            Variables.task_name = start_time.strftime('%Y-%m-%d-%H-%M-%S')
+            Variables.task_name = time.strftime('%Y-%m-%d-%H-%M-%S', start_time)
         else:
             Variables.task_name = config.report_path
 
@@ -103,9 +107,9 @@ class Task:
         self.config.exec_dir = Variables.exec_dir
         self.config.report_path = report_path
         self.config.log_path = log_path
-        self.config.start_time = start_time.strftime("%Y-%m-%d %H:%M:%S")
-        Scheduler.start_task_log(self.config.log_path)
-        Scheduler.start_encrypt_log(self.config.log_path)
+        self.config.start_time = time.strftime("%Y-%m-%d %H:%M:%S", start_time)
+        RuntimeLogs.start_task_log(self.config.log_path)
+        RuntimeLogs.start_encrypt_log(self.config.log_path)
         LOG.info("Report path: %s", report_path)
 
     def _get_task_dir(self, task_file):
@@ -113,19 +117,15 @@ class Task:
         exec_task_dir = os.path.abspath(
             os.path.join(Variables.exec_dir, self.TASK_CONFIG_DIR))
         if not os.path.exists(os.path.join(exec_task_dir, task_file)):
+            err_msg = ErrorMessage.Common.Code_0101015.format(task_file)
             if os.path.normcase(Variables.exec_dir) == \
                     os.path.normcase(Variables.top_dir):
-                raise ParamError("task file %s not exists, please add task "
-                                 "file to '%s'" % (task_file, exec_task_dir),
-                                 error_no="00101")
+                raise ParamError(err_msg)
 
             top_task_dir = os.path.abspath(
                 os.path.join(Variables.top_dir, self.TASK_CONFIG_DIR))
             if not os.path.exists(os.path.join(top_task_dir, task_file)):
-                raise ParamError("task file %s not exists, please add task "
-                                 "file to '%s' or '%s'" % (
-                                     task_file, exec_task_dir, top_task_dir),
-                                 error_no="00101")
+                raise ParamError(err_msg)
             else:
                 return top_task_dir
         else:
@@ -134,8 +134,7 @@ class Task:
     def _load_task(self, task_dir, file_name):
         task_file = os.path.join(task_dir, file_name)
         if not os.path.exists(task_file):
-            raise ParamError("task file %s not exists" % task_file,
-                             error_no="00101")
+            raise ParamError(ErrorMessage.Common.Code_0101015.format(task_file))
 
         # add kits to self.config
         json_config = JsonParser(task_file)
@@ -150,10 +149,9 @@ class Task:
         self.root = root
         self._init_driver(root)
         if not self.test_drivers:
-            LOG.error("No test driver to execute", error_no="00106")
+            LOG.error(ErrorMessage.Common.Code_0101016)
 
     def _init_driver(self, test_descriptor):
-        from xdevice import Scheduler
 
         plugin_id = None
         source = test_descriptor.source
@@ -163,25 +161,20 @@ class Task:
                 plugin_id = source.test_type
             else:
                 ignore_test = source.module_name
-                LOG.error("'%s' no test driver specified" % source.test_name,
-                          error_no="00106")
+                LOG.error(ErrorMessage.Common.Code_0101017.format(source.test_name))
 
         drivers = get_plugin(plugin_type=Plugin.DRIVER, plugin_id=plugin_id)
         if plugin_id is not None:
             if len(drivers) == 0:
                 ignore_test = source.module_name
-                error_message = "'%s' can not find test driver '%s'" % (
-                    source.test_name, plugin_id)
-                LOG.error(error_message, error_no="00106")
-                if Scheduler.mode == ModeType.decc:
-                    error_message = "Load Error[00106]"
-                    Scheduler.report_not_executed(self.config.report_path, [
-                        ("", test_descriptor)], error_message)
+                error_message = ErrorMessage.Common.Code_0101018.format(source.test_name, plugin_id)
+                LOG.error(error_message)
+                report_not_executed(self.config.report_path, [("", test_descriptor)], error_message)
             else:
                 check_result = False
                 for driver in drivers:
                     driver_instance = driver.__class__()
-                    device_options = Scheduler.get_device_options(
+                    device_options = get_device_options(
                         self.config.__dict__, source)
                     check_result = driver_instance.__check_environment__(
                         device_options)
@@ -190,8 +183,7 @@ class Task:
                             (driver_instance, test_descriptor))
                         break
                 if check_result is False:
-                    LOG.error("'%s' can not find suitable test driver '%s'" %
-                              (source.test_name, plugin_id), error_no="00106")
+                    LOG.error(ErrorMessage.Common.Code_0101019.format(source.test_name, plugin_id))
         if ignore_test and hasattr(self.config, ConfigConst.component_mapper):
             getattr(self.config, ConfigConst.component_mapper).pop(ignore_test)
 
@@ -203,8 +195,7 @@ class Task:
         for _, _, files in os.walk(report_path):
             for _file in files:
                 if _file.endswith(".xml"):
-                    raise ParamError("xml file exists in '%s'" % report_path,
-                                     error_no="00105")
+                    raise ParamError(ErrorMessage.Common.Code_0101020)
 
 
 class Request:
@@ -256,6 +247,9 @@ class Request:
 
     def get_module_name(self):
         return self._get_source_value("module_name")
+
+    def get_repeat_round(self):
+        return get_repeat_round(self.root.unique_id)
 
     def _get_source(self):
         if not hasattr(self.root, "source"):

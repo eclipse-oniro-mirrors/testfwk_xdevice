@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="favicon.ico">
+  <title id="pageTitle"></title>
+  <link rel="stylesheet" href="css/element-plus@2.3.4_index.css">
+  <script src="vue@3.2.41_global.min.js"></script>
+  <script src="element-plus@2.3.4_index.full.js"></script>
+  <script src="element-plus_icons-vue@2.0.10_index.iife.min.js"></script>
+  <script src="EventEmitter.js"></script>
+  <script src="components/caseTable.js"></script>
+  <script src="components/popoverCheckBox.js"></script>
+  <script src="components/suiteTable.js"></script>
+  <script src="data.js"></script>
+  <style>
+    #app {
+      margin: 0 100px 50px;
+      background-color: #fff;
+    }
+
+    .pager {
+      width: 100%;
+      margin-top: 20px;
+    }
+
+    .div-popover {
+      max-height: 213px;
+      overflow: auto;
+    }
+
+    .span-error,
+    .row-error {
+      white-space: nowrap;
+    }
+
+    .div-error {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+      border-radius: 8px;
+      background-color: #bcbcbc;
+    }
+
+    ::-webkit-scrollbar-track {
+      border-radius: 8px;
+      background-color: #f5f5f5;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      border-radius: 8px;
+      background-color: #bfc3c6;
+    }
+
+    .el-popover.el-popper {
+      min-width: 280px;
+    }
+
+    .table-row-clickable {
+      cursor: pointer;
+    }
+
+    .el-progress-bar__innerText {
+      color: #37383a;
+    }
+
+    .row-others {
+      padding-right: 5px;
+    }
+
+    .el-descriptions__table .el-descriptions__cell {
+      width: calc(100%/6);
+      word-wrap: break-word;
+      word-break: break-all;
+    }
+
+    .div-dialog {
+      border-bottom: 1px solid #ebeef5;
+      border-top: 1px solid #ebeef5;
+    }
+
+    .des-style {
+      max-height: 342px !important;
+      overflow: auto;
+    }
+
+    .div-dialog .el-descriptions__table tr:nth-child(1) .el-descriptions__cell {
+      border-top: none;
+    }
+
+    .div-dialog .el-descriptions__table tr:last-child .el-descriptions__cell {
+      border-bottom: none;
+    }
+
+    .el-dialog__body {
+      padding-top: 10px;
+      padding-bottom: 40px;
+    }
+
+    .el-dialog__headerbtn {
+      top: -2px;
+    }
+
+    .el-descriptions__title {
+      color: #000000;
+    }
+
+    .el-table__body .el-table__cell,
+    .el-table__header-wrapper .el-table__cell {
+      border-left: none;
+      border-right: none;
+    }
+
+    .el-table--border .el-table__inner-wrapper::after,
+    .el-table__border-left-patch,
+    .el-table--border::after,
+    .el-table--border::before {
+      display: none;
+    }
+
+    .details-table .el-table__header .el-table__cell:hover {
+      border-right: 1px dashed transparent;
+      border-right-color: #bcbcbc;
+    }
+
+    .h2-test {
+      margin-top: 0px;
+      text-align: center;
+      color: #000000;
+    }
+
+    .div-others {
+      display: inline-block;
+      width: 90%;
+      line-height: 23px;
+      vertical-align: sub
+    }
+
+    .span-img {
+      width: 5%;
+      display: inline-block;
+    }
+
+    .img {
+      margin-left: 5px;
+      cursor: pointer;
+      height: 16px;
+      width: 16px;
+    }
+
+    .toolbar {
+      display: flex
+    }
+
+    .toolbar .search {
+      width: 300px;
+      margin: 0px 10px 0px 30px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="app">
+    <div class="header" v-if="detailData">
+      <h3>{{ detailData.name }}</h3>
+      <div>
+        <el-descriptions class="custom-descriptions" title="Summary" :column="3" border>
+          <el-descriptions-item label="Test Start">{{
+            detailData.test_start
+            }}</el-descriptions-item>
+          <el-descriptions-item label="Test End">{{
+            detailData.test_end
+            }}</el-descriptions-item>
+          <el-descriptions-item label="Elapsed">{{
+            detailData.execute_time
+            }}</el-descriptions-item>
+          <el-descriptions-item label="Driver">{{
+            detailData.test_type
+            }}</el-descriptions-item>
+          <el-descriptions-item label="Logs" span="2">
+            <div>
+              <el-link v-for="(item, index) in detailData.logs" :key="index" :href="'../' + item" target="_blank"
+                type="primary">
+                {{ index }}
+                <span
+                  v-if="index !== Object.keys(detailData.logs)[Object.keys(detailData.logs).length - 1]">&nbsp;&nbsp;</span>
+              </el-link>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detailData.error" label="Error" span="3">
+            <span style="color: red;">{{ detailData.error
+              }}</span></el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </div>
+    <div class="list" v-if="devicesList && devicesList.length > 0">
+      <h4>Test Devices</h4>
+      <el-table :data="devicesList" style="width: 100%" ref="table" :max-height="maxHeight">
+        <el-table-column type="index" label="#" min-width="3%"></el-table-column>
+        <el-table-column prop="sn" label="SN" min-width="22%" show-overflow-tooltip="">
+          <template #default="scope">
+            <span>{{scope.row.sn ? scope.row.sn : '-'}}</span>
+          </template> </el-table-column>
+        <el-table-column prop="model" label="Model" min-width="14%">
+          <template #default="scope">
+            <span>{{scope.row.model ? scope.row.model : '-'}}</span>
+          </template> </el-table-column>
+        <el-table-column prop="type" label="Type" min-width="14%">
+          <template #default="scope">
+            <span>{{scope.row.type ? scope.row.type : '-'}}</span>
+          </template> </el-table-column>
+        <el-table-column prop="platform" label="Platform" min-width="14%">
+          <template #default="scope">
+            <span>{{scope.row.platform ? scope.row.platform : '-'}}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="version" label="Version" min-width="16%">
+          <template #default="scope">
+            <span>{{scope.row.version ? scope.row.version : '-'}}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="others" label="Others" min-width="17%">
+          <template #default="scope">
+            <div v-if="scope.row.others && Object.keys(scope.row.others).length !== 0">
+              <span class="div-others div-error">{{scope.row.others}}</span>
+              <el-tooltip class="box-item" effect="dark" content="查看" placement="top">
+                <span class="span-img"><img class="img" src="../static/view.svg" alt=""
+                    @click="changeShowDetails(scope.row)"></span>
+
+              </el-tooltip>
+              <el-tooltip class="box-item" effect="dark" content="复制" placement="top">
+                <span class="span-img">
+                  <img class="img" src="../static/copy.svg" alt="" @click="copyOldData(scope.row.others)"></span>
+
+              </el-tooltip>
+            </div>
+            <span v-else>-</span>
+            <el-dialog v-model="scope.row.showDetails" width="60%" append-to-body>
+              <div class="div-dialog">
+                <el-descriptions class="des-style" :column="2" border>
+                  <el-descriptions-item v-for="(item,index) in scope.row.others" :key="index" :label="index">{{
+                    item
+                    }}</el-descriptions-item>
+                </el-descriptions>
+              </div>
+            </el-dialog>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <h4>Test Details</h4>
+    <div class="toolbar">
+      <el-switch active-text="Detail" inactive-text="Overview" v-model="isDetail" @change="changeSwitch"></el-switch>
+      <el-input class="search" v-model="keyword" clearable
+        :placeholder="isDetail? 'input case name':'input suite name'"></el-input>
+      <el-button type="primary" @click="handleSerarch">Search</el-button>
+    </div>
+    <div class="list">
+      <case-table ref="caseTableRef" v-if="isDetail&&caseList.length>0" :list="caseList" :keyword="keyword"
+        :keyname="keyname"></case-table>
+      <suite-table ref="suiteTableRef" v-if="!isDetail&&suitesList.length>0" :list="suitesList" :keyword="keyword"
+        @view-detail="handleViewDetail"></suite-table>
+    </div>
+
+  </div>
+  <script>
+    const { createApp, ref, reactive } = Vue
+    const app = createApp({
+      setup() {
+        const detailData = ref();
+        const isDetail = ref(false);
+        const caseList = ref([]);
+        const suitesList = ref([]);
+        const devicesList = ref([]);
+        const maxHeight = ref('0px');
+        const keyword = ref('')
+        const keyname = ref('')
+        const caseTableRef = ref(null);
+        const suiteTableRef = ref(null);
+        return {
+          detailData,
+          isDetail,
+          caseList,
+          suitesList,
+          devicesList,
+          maxHeight,
+          keyword,
+          keyname,
+          caseTableRef,
+          suiteTableRef
+        }
+      },
+      mounted() {
+        this.initData();
+        document.getElementById("pageTitle").innerHTML = this.detailData.name;
+        setTimeout(() => {
+          let headHeight = 0;
+          let firstRowHeight = 0;
+          let secondRowHeight = 0;
+          if (this.devicesList && this.devicesList.length > 0) {
+            if (this.devicesList.length > 1) {
+              secondRowHeight = this.$refs.table.$el.querySelector('.el-table__body-wrapper tbody tr:nth-child(2)').clientHeight;
+            }
+            firstRowHeight = this.$refs.table.$el.querySelector('.el-table__body-wrapper tbody tr:first-child').clientHeight;
+            headHeight = this.$refs.table.$el.querySelector('.el-table__header-wrapper thead tr:first-child').clientHeight;
+          }
+          const maxTableHeight = headHeight + firstRowHeight + secondRowHeight;
+          this.maxHeight = maxTableHeight + 'px';
+        }, 0);
+      },
+      methods: {
+        changeSwitch() {
+          if (!this.isDetail) {
+            this.keyname = ''
+          }
+        },
+        initData() {
+          const moduleData = window.reportData.modules;
+          const params = new URLSearchParams(window.location.search);
+          const caseName = params.get('name');
+          const round = params.get('round');
+          this.detailData = moduleData.find((item) => item.name == caseName && item.round == round);
+          if (!this.detailData) {
+            ElNotification({
+              title: "Error",
+              message: "no detail data",
+              type: "error",
+            });
+            return;
+          }
+          this.devicesList = this.detailData.devices;
+          this.detailData.suites.forEach((item) => {
+            let { name, blocked, failed, ignored, passed, time, tests, passingrate } = item;
+            let obj = {
+              name,
+              blocked: new Number(blocked),
+              failed: new Number(failed),
+              ignored: new Number(ignored),
+              passed: new Number(passed),
+              time: new Number(time),
+              tests: new Number(tests),
+              passingrate: parseFloat(passingrate.replace('%', ''))
+            };
+            this.suitesList.push(obj);
+            item.cases.forEach((c) => {
+              this.caseList.push([item.name, c[0], c[2], c[3], c[4]]);
+            });
+          });
+          this.caseList.forEach((item) => {
+            item.time = new Number(item.time);
+          });
+        },
+        handleViewDetail(row) {
+          this.keyword = '';
+          this.keyname = row.name;
+          this.$nextTick(() => {
+            this.isDetail = true;
+          });
+        },
+        changeShowDetails(row) {
+          row.showDetails = true;
+        },
+        copyOldData(value) {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(JSON.stringify(value)).then(() => {
+              ElementPlus.ElMessage({
+                message: '复制成功',
+                type: 'success',
+              })
+            }).catch(() => {
+              ElementPlus.ElMessage.error('复制失败')
+            })
+          } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = JSON.stringify(value);
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+              const successful = document.execCommand('copy');
+              successful ? ElementPlus.ElMessage({
+                message: '复制成功',
+                type: 'success',
+              }) : ElementPlus.ElMessage.error('复制失败')
+            } catch (err) {
+              ElementPlus.ElMessage.error('复制失败')
+            }
+            document.body.removeChild(textarea)
+          }
+        },
+        handleSerarch() {
+          if (this.isDetail) {
+            this.caseTableRef.handleSerarch();
+          } else {
+            this.suiteTableRef.handleSerarch();
+          }
+        }
+      }
+    })
+    app.component(popoverCheckBox.name, popoverCheckBox.component);
+    app.component(suiteTable.name, suiteTable.component);
+    app.component(caseTable.name, caseTable.component);
+    app.component("ArrowDown", ElementPlusIconsVue.ArrowDown)
+    app.use(ElementPlus)
+    app.mount('#app')
+  </script>
+</body>
+
+</html>
