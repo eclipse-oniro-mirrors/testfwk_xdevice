@@ -28,14 +28,14 @@ LOG = platform_logger("Main")
 notice_zh = '''
 由于测试报告模板缺失导致运行失败! 请按如下指引进行修复：
 1.下载已归档的报告模板文件
-  下载链接：https://gitee.com/openharmony-sig/compatibility/test_suite/resource/xdevice/template
+  下载链接：https://gitee.com/openharmony-sig/compatibility/tree/master/test_suite/resource/xdevice/template
 2.删除“{resource_path}”路径下的template文件夹
 3.复制在第1步下载到本地的报告模板template文件夹到“{resource_path}”路径下
 '''
 notice_en = '''
 Run failed due to missing the report template! Please follow the following instructions to fix the issue.
 1.Download archived report template files
-  Download Link: https://gitee.com/openharmony-sig/compatibility/test_suite/resource/xdevice/template
+  Download Link: https://gitee.com/openharmony-sig/compatibility/tree/master/test_suite/resource/xdevice/template
 2.Remove the template folder in the path '{resource_path}'
 3.Copy the template folder downloaded locally in step 1 to the path '{resource_path}'
 '''
