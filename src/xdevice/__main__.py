@@ -101,7 +101,7 @@ def download_template_resource():
                 f.write(response.read())
         except Exception as e:
             LOG.error(f"get report template resource error, {e}")
-    LOG.info("Finish download report template...")
+            break
     # check report template
     if not check_report_template():
         LOG.error("------" * 5)
