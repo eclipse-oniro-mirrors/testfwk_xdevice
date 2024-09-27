@@ -29,16 +29,16 @@ LOG = platform_logger("Main")
 notice_zh = '''
 由于测试报告模板缺失导致运行失败! 请按如下指引进行修复：
 1.下载已归档的报告模板文件
-  下载链接：https://gitee.com/openharmony-sig/compatibility/tree/master/test_suite/resource/xdevice/template
+  下载链接：https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
 2.删除“{resource_path}”路径下的template文件夹
-3.复制在第1步下载到本地的报告模板template文件夹到“{resource_path}”路径下
+3.解压template.zip到“{resource_path}”路径下
 '''
 notice_en = '''
 Run failed due to missing the report template! Please follow the following instructions to fix the issue.
 1.Download archived report template files
-  Download Link: https://gitee.com/openharmony-sig/compatibility/tree/master/test_suite/resource/xdevice/template
+  Download Link: https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
 2.Remove the template folder in the path '{resource_path}'
-3.Copy the template folder downloaded locally in step 1 to the path '{resource_path}'
+3.unzip the template.zip to the path '{resource_path}'
 '''
 
 
@@ -63,7 +63,8 @@ def check_report_template():
 
 
 def download_template_resource():
-    LOG.info("Start download report template...")
+    LOG.info("There is no report template in target path. "
+             "Start download report template...")
     sources = [
         {
             "file": "static/css/element-plus@2.3.4_index.css",
