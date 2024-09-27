@@ -339,8 +339,7 @@ class Device(IDevice):
         return result
 
     def _get_device_platform(self):
-        software_version = self.get_property_value(self.device_params_command.get(DeviceProperties.software_version))
-        self.test_platform = "OpenHarmony" if "OpenHarmony" in software_version else "HarmonyOS"
+        self.test_platform = "OpenHarmony"
         return self.test_platform
 
     def get_device_type(self):
