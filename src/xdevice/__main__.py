@@ -56,6 +56,7 @@ def check_report_template():
         try:
             response = request.urlopen(url, timeout=5)
             with open(to_path, 'wb') as f:
+                os.chmod(to_path, 0o600)
                 f.write(response.read())
         except Exception as e:
             LOG.error(f"get report template resource error, {e}")
