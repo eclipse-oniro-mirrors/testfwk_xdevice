@@ -31,15 +31,13 @@ notice_zh = '''
 由于测试报告模板缺失导致运行失败! 请按如下指引进行修复：
 1.下载已归档的报告模板文件
   下载链接：https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
-2.删除“{resource_path}”路径下的template文件夹
-3.解压template.zip到“{resource_path}”路径下
+2.解压template.zip到“{resource_path}”路径下
 '''
 notice_en = '''
 Run failed due to missing the report template! Please follow the following instructions to fix the issue.
 1.Download archived report template files
   Download Link: https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
-2.Remove the template folder in the path '{resource_path}'
-3.Unzip the template.zip to the path '{resource_path}'
+2.Unzip the template.zip to the path '{resource_path}'
 '''
 
 
