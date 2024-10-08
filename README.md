@@ -29,9 +29,6 @@ xdevice
 │     ├── user_config.xml             # XDevice environment configuration
 ├── src                               # Source code
 │     ├── xdevice
-├── template                          # template files
-│     ├── report                      # template files for test report
-│     ├── build_report_template.py    # build report template
 ├── plugins                           # XDevice plugins
 │     ├── ohos                        # OpenHarmony plugins
 |          ├── src                    # OpenHarmony plugins source code

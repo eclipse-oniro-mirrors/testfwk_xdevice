@@ -29,9 +29,6 @@ xdevice
 │     ├── user_config.xml             # xdevice环境配置
 ├── src                               # 组件源码目录
 │     ├── xdevice
-├── template                          # 模板文件
-│     ├── report                      # 测试报告模板
-│     ├── build_report_template.py    # 测试报告模板构建脚本
 ├── plugins                           # xdevice扩展模块
 |     |—— ohos                        # openharmony测试驱动插件
 │           ├── src                   # 扩展模块源码
