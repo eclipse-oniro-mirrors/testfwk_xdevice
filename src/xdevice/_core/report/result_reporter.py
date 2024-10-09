@@ -49,7 +49,7 @@ from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ExecInfo
 from _core.report.reporter_helper import ReportConstant
 from _core.report.repeater_helper import RepeatHelper
-from xdevice import Variables
+from _core.variables import Variables
 from _core.context.center import Context
 from _core.context.handler import get_case_result
 from _core.context.upload import Uploader
@@ -125,11 +125,11 @@ class ResultReporter(IReporter):
         LOG.info("")
 
         if self._check_params(report_path, **kwargs):
-            # generate vision reports
-            self._generate_test_report()
-
             # generate data report
             self._generate_data_report()
+
+            # generate vision reports
+            self._generate_test_report()
 
             # generate task info record
             self._generate_task_record()
@@ -172,7 +172,19 @@ class ResultReporter(IReporter):
 
     def _generate_test_report(self):
         report_template = os.path.join(Variables.res_dir, "template")
+        missing_files = []
+        for source in ReportConstant.new_template_sources:
+            file = source.get("file")
+            to_path = os.path.join(report_template, file)
+            if not os.path.exists(to_path):
+                missing_files.append(to_path)
+        # 若新报告模板文件缺失，则使用旧报告模板生成测试报告
+        if len(missing_files) > 0:
+            self._generate_vision_reports()
+            return
+
         copy_folder(report_template, self.report_path)
+        os.remove(os.path.join(self.report_path, "report.html"))
         content = json.dumps(self._get_summary_data(), separators=(",", ":"))
         data_js = os.path.join(self.report_path, "static", "data.js")
         data_fd = os.open(data_js, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
@@ -456,6 +468,7 @@ class ResultReporter(IReporter):
             if data_report.endswith(ReportConstant.summary_data_report):
                 continue
             root = self.data_helper.parse_data_report(data_report)
+            self._parse_devices(root)
             if module_name == ReportConstant.empty_name:
                 module_name = self._get_module_name(data_report, root)
             total = int(root.get(ReportConstant.tests, 0))
@@ -762,3 +775,93 @@ class ResultReporter(IReporter):
         if modules_zero:
             LOG.info("The total tests of %s module is 0", ",".join(
                 modules_zero))
+
+    # ******************** 使用旧报告模板的代码 BEGIN ********************
+    def _generate_vision_reports(self):
+        from _core.report.reporter_helper import VisionHelper
+        vision_helper = VisionHelper()
+        vision_helper.report_path = self.report_path
+        if not self._check_mode(ModeType.decc) and not \
+                self.summary_data_report_exist:
+            LOG.error("Summary data report not exists")
+            return
+
+        if check_pub_key_exist() or self._check_mode(ModeType.decc):
+            from xdevice import SuiteReporter
+            SuiteReporter.clear_report_result()
+
+        # parse data
+        if self.summary_data_str:
+            # only in decc mode and pub key, self.summary_data_str is not empty
+            summary_element_tree = self.data_helper.parse_data_report(
+                self.summary_data_str)
+        else:
+            summary_element_tree = self.data_helper.parse_data_report(
+                self.summary_data_path)
+        parsed_data = vision_helper.parse_element_data(
+            summary_element_tree, self.report_path, self.task_info)
+        self.parsed_data = parsed_data
+        self.exec_info, summary, _ = parsed_data
+
+        if self._check_mode(ModeType.decc):
+            return
+
+        LOG.info("Summary result: modules: %s, run modules: %s, total: "
+                 "%s, passed: %s, failed: %s, blocked: %s, ignored: %s, "
+                 "unavailable: %s", summary.modules, summary.run_modules,
+                 summary.result.total, summary.result.passed,
+                 summary.result.failed, summary.result.blocked,
+                 summary.result.ignored, summary.result.unavailable)
+        LOG.info("Log path: %s", self.exec_info.log_path)
+
+        if summary.result.failed != 0 or summary.result.blocked != 0 or\
+                summary.result.unavailable != 0:
+            from xdevice import Scheduler
+            Scheduler.is_need_auto_retry = True
+
+        # generate summary vision report
+        report_generate_flag = self._generate_vision_report(
+            vision_helper, parsed_data, ReportConstant.summary_title,
+            ReportConstant.summary_vision_report)
+
+        # generate details vision report
+        if report_generate_flag and summary.result.total > 0:
+            self._generate_vision_report(
+                vision_helper, parsed_data, ReportConstant.details_title,
+                ReportConstant.details_vision_report)
+
+        # generate failures vision report
+        if summary.result.total != (
+                summary.result.passed + summary.result.ignored) or \
+                summary.result.unavailable > 0:
+            self._generate_vision_report(
+                vision_helper, parsed_data, ReportConstant.failures_title,
+                ReportConstant.failures_vision_report)
+
+        # generate passes vision report
+        if summary.result.passed != 0:
+            self._generate_vision_report(
+                vision_helper, parsed_data, ReportConstant.passes_title,
+                ReportConstant.passes_vision_report)
+
+        # generate ignores vision report
+        if summary.result.ignored != 0:
+            self._generate_vision_report(
+                vision_helper, parsed_data, ReportConstant.ignores_title,
+                ReportConstant.ignores_vision_report)
+
+    def _generate_vision_report(self, vision_helper, parsed_data, title, render_target):
+        # render data
+        report_context = vision_helper.render_data(
+            title, parsed_data,
+            render_target=render_target, devices=self.summary.get_devices())
+
+        # generate report
+        if report_context:
+            report_path = os.path.join(self.report_path, render_target)
+            vision_helper.generate_report(report_path, report_context)
+            return True
+        else:
+            LOG.error("Failed to generate %s", render_target)
+            return False
+    # ******************** 使用旧报告模板的代码 END ********************

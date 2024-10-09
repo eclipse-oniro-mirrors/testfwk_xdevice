@@ -15,6 +15,9 @@
 -->
 <user_config>
     <environment>
+        <device type="usb-hdc" label="ohos">
+            <info ip="" port="" sn="" alias="" />
+        </device>
         <device type="com" label="wifiiot">
             <serial>
                 <com></com>
@@ -63,5 +66,5 @@
             <url></url>
         </web_resource>>
     </resource>
-    <loglevel>INFO</loglevel>
+    <loglevel>DEBUG</loglevel>
 </user_config>

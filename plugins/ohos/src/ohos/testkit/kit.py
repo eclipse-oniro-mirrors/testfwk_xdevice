@@ -19,7 +19,6 @@
 import json
 import os
 import re
-import requests
 import stat
 import subprocess
 import time
@@ -318,6 +317,7 @@ class PushBase(ITestKit):
             os.makedirs(save_path)
         cli = None
         try:
+            import requests
             cli = requests.get(url, timeout=5, verify=False)
             if cli.status_code == 200:
                 file_fd = os.open(save_file, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
@@ -355,6 +355,7 @@ class PushBase(ITestKit):
         }
         LOG.debug(f"query resource's params {params}")
         try:
+            import requests
             cli = requests.post(query_url, json=params, timeout=5, verify=False)
             rsp_code = cli.status_code
             rsp_body = cli.content.decode()
