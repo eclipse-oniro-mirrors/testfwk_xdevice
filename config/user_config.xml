@@ -66,5 +66,10 @@
             <url></url>
         </web_resource>>
     </resource>
+    <devicelog>
+        <enable>ON</enable>
+        <loglevel>DEBUG</loglevel>
+        <dir />
+    </devicelog>
     <loglevel>DEBUG</loglevel>
 </user_config>

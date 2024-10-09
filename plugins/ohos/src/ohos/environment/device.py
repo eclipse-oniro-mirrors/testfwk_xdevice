@@ -528,7 +528,7 @@ class Device(IDevice):
     def is_file_exist(self, file_path):
         file_path = check_path_legal(file_path)
         output = self.execute_shell_command("ls {}".format(file_path))
-        if output and "No such file or directory" not in output and "Permission denied" not in output:
+        if output and "No such file or directory" not in output:
             return True
         return False
 
@@ -1398,13 +1398,8 @@ class DeviceLogCollector:
         Stops all hdc log subprocesses.
         """
         if proc:
+            self.device.log.debug("Stop catch device hilog.")
             stop_standing_subprocess(proc)
-            self.device.log.debug("Stop catch device hilog.")
-            self.device_hilog_proc = None
-        elif self.device_hilog_proc:
-            stop_standing_subprocess(self.device_hilog_proc)
-            self.device.log.debug("Stop catch device hilog.")
-            self.device_hilog_proc = None
         if self.hdc_module_name:
             self.pull_hdc_log(self.hdc_module_name)
             self.hdc_module_name = None
@@ -1568,8 +1563,8 @@ class DeviceLogCollector:
     def get_abnormal_hilog(self, local_hilog_path):
         warnings.warn('this function is no longer supported', DeprecationWarning)
 
-    def get_period_log(self, remotes: dict, local_path: str, begin_time: float = None):
-        """在目录下查找一段时间内有更改的文件，并拷贝到一个临时目录，然后按文件夹，将拉文件到本地，最后删除这个临时目录
+    def get_period_log(self, remotes: dict, local_path: str, begin_time: float = None, find_cmd: str = None):
+        """在目录下查找一段时间内有更改的文件，并将文件拉到本地
         remotes: dict, {查找目录: 使用子文件夹存放文件（通常不用子文件夹）}
         local_path: str, pull to local path
         begin_time: float, the beginning time
@@ -1584,29 +1579,29 @@ class DeviceLogCollector:
             LOG.warning('当前日志打印的时间先与开始抓取日志的时间')
             return
         if minutes > 0:
-            unites = '%dm' % minutes
+            units = '%dm' % minutes
         else:
-            unites = '%ds' % seconds
+            units = '%ds' % seconds
 
-        remote_tmp = '/data/local/tmp/' + os.path.basename(local_path)
         for remote_dir, on_folder in remotes.items():
-            if not self.device.is_file_exist(remote_dir):
-                continue
-            tmp = remote_tmp + '/' + on_folder if on_folder else remote_tmp
-            # 查找一段时间内有更改的文件，并拷贝到一个临时目录
-            cmd = 'cd %s && find ./* -type f -mtime -%s -exec mkdir -p %s \\; ' \
-                  '-exec cp {} %s \\;' % (remote_dir, unites, tmp, tmp)
+            find = find_cmd if find_cmd else 'find {}'.format(remote_dir)
+            cmd = '{} -type f -mtime -{}'.format(find, units)
             out = self.device.execute_shell_command(cmd)
-            if out:
-                LOG.debug(out)
-        if not self.device.is_file_exist(remote_tmp):
-            return
-        os.makedirs(local_path, exist_ok=True)
-        os.chmod(local_path, FilePermission.mode_755)
-        # 将这个临时目录拉到本地
-        self.device.pull_file(remote_tmp, os.path.dirname(local_path), retry=0)
-        # 删除这个临时目录
-        self.device.execute_shell_command('rm -r {}'.format(remote_tmp))
+            if 'No such file or directory' in out:
+                continue
+            LOG.debug(out)
+            log_files = [f for f in out.strip().replace('\r', '').split('\n') if f and f.startswith(remote_dir)]
+            if not log_files:
+                continue
+            local_dir = os.path.join(local_path, on_folder) if on_folder else local_path
+            os.makedirs(local_dir, exist_ok=True)
+            os.chmod(local_dir, FilePermission.mode_755)
+            for log_file in log_files:
+                # 避免将整个文件夹拉下来和重复拉取文件
+                if log_file == remote_dir and self.device.is_directory(log_file) \
+                        or os.path.exists(log_file) and os.path.isfile(log_file):
+                    continue
+                self.device.pull_file(log_file, local_dir, retry=0)
 
     def start_catch_log(self, request, **kwargs):
         hilog_size = kwargs.get("hilog_size", "10M")

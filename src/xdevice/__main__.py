@@ -19,6 +19,7 @@ import os
 import sys
 from urllib import request
 from xdevice import Console
+from xdevice import FilePermission
 from xdevice import platform_logger
 from xdevice import ReportConstant
 from xdevice import VERSION
@@ -53,8 +54,8 @@ def check_report_template():
         LOG.info(f"get report template resource {file} from {url}")
         try:
             response = request.urlopen(url, timeout=5)
-            with open(to_path, 'wb') as f:
-                os.chmod(to_path, 0o600)
+            to_path_fd = os.open(to_path, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
+            with os.fdopen(to_path_fd, "wb") as f:
                 f.write(response.read())
         except Exception as e:
             LOG.error(f"get report template resource error, {e}")

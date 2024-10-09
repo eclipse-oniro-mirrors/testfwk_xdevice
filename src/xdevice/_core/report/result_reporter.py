@@ -184,7 +184,9 @@ class ResultReporter(IReporter):
             return
 
         copy_folder(report_template, self.report_path)
-        os.remove(os.path.join(self.report_path, "report.html"))
+        temp_file_report_html = os.path.join(self.report_path, "report.html")
+        if os.path.exists(temp_file_report_html):
+            os.remove(temp_file_report_html)
         content = json.dumps(self._get_summary_data(), separators=(",", ":"))
         data_js = os.path.join(self.report_path, "static", "data.js")
         data_fd = os.open(data_js, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)

@@ -333,9 +333,9 @@ class FrameworkLog:
 
     @classmethod
     def _update_msg(cls, additional_output, msg):
-        msg = "[%s]" % msg if msg else msg
+        msg = "[{}]".format(msg) if msg else msg
         if msg and additional_output:
-            msg = "%s [%s]" % (msg, additional_output)
+            msg = "{} [{}]".format(msg, additional_output)
         return msg
 
     def _get_additional_output(self, error_number=None, **kwargs):

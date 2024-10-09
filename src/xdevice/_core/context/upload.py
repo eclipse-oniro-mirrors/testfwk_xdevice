@@ -229,10 +229,12 @@ class Uploader:
             for ele_testsuite in testsuites_element:
                 if len(ele_testsuite) == 0:
                     LOG.error(f"No testcase in result file: {result_file}")
-
-                ele_testcase = ele_testsuite[0]
+                    ele_testcase = ele_testsuite
+                    case_result, error = CaseResult.blocked, ele_testsuite.get(ReportConstant.message, "")
+                else:
+                    ele_testcase = ele_testsuite[0]
+                    case_result, error = get_case_result(ele_testcase)
                 case_id = ele_testcase.get(ReportConstant.name, "")
-                case_result, error = get_case_result(ele_testcase)
                 if error and len(error) > MAX_VISIBLE_LENGTH:
                     error = "{}...".format(error[:MAX_VISIBLE_LENGTH])
                 report = Uploader._get_report_path(
