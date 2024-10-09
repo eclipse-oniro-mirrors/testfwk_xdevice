@@ -99,13 +99,12 @@ def stop_standing_subprocess(process):
         process: Subprocess to terminate.
     """
     try:
-        sys_type = platform.system()
-        signal_value = signal.SIGINT if sys_type == "Windows" \
-            else signal.SIGTERM
-        os.kill(process.pid, signal_value)
-    except (PermissionError, AttributeError, FileNotFoundError,  # pylint:disable=undefined-variable
-            SystemError) as error:
-        LOG.error("Stop standing subprocess error '%s'" % error)
+        if isinstance(process, subprocess.Popen):
+            process.kill()
+        else:
+            LOG.warning(f'{process} is not a subprocess.Popen')
+    except Exception as e:
+        LOG.error(f'Stop standing subprocess error, {e}')
 
 
 def get_decode(stream):
