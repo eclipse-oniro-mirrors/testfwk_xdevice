@@ -21,14 +21,14 @@ import re
 import stat
 import uuid
 from abc import ABC
-
 from abc import abstractmethod
 
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.constants import TestType
-from _core.executor.bean import SuiteResult
 from _core.executor.bean import CaseResult
+from _core.executor.bean import SuiteResult
+from _core.executor.bean import SuitesResult
 from _core.interface import LifeCycle
 from _core.interface import IListener
 from _core.report.suite_reporter import SuiteReporter
@@ -205,8 +205,9 @@ class ReportEventListener(AbsReportListener, ABC):
         if not kwargs.get("suite_report", False):
             result_dir = os.path.join(self.report_path, "result")
             os.makedirs(result_dir, exist_ok=True)
-            message = ""
-            if test_result:
+            message = kwargs.get("message", "")
+            # 有的场景传SuiteResult对象进来，导致报错，需要增加实例判断
+            if isinstance(test_result, SuitesResult):
                 message = test_result.stacktrace
                 suites_name = test_result.suites_name
             else:
