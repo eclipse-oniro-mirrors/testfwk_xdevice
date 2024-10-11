@@ -65,6 +65,9 @@ class OHJSUnitTestParser(IParser):
         self.result_data = ""
         self.listener_result_info_tuple = None
 
+        # message from test output, the 'TestFinished-ResultMsg'
+        self.__test_finish_result_msg = ""
+
     def get_suite_name(self):
         return self.suites_name
 
@@ -257,7 +260,8 @@ class OHJSUnitTestParser(IParser):
             if self._is_target_listener(listener):
                 self._cal_result(listener)
             suite = copy.copy(suite_result)
-            listener.__ended__(LifeCycle.TestSuites, suite, suites_name=self.suites_name)
+            listener.__ended__(LifeCycle.TestSuites, suite, suites_name=self.suites_name,
+                               message=self.__test_finish_result_msg)
 
     def _cal_result(self, report_listener):
         result_len = len(report_listener.result)  # List[Tuple]
@@ -302,7 +306,7 @@ class OHJSUnitTestParser(IParser):
                     test_result = self.state_machine.test(reset=True)
                     test_result.test_class = test_des.class_name
                     test_result.test_name = test_des.test_name
-                    test_result.stacktrace = "error_msg: mark blocked"
+                    test_result.stacktrace = self.__test_finish_result_msg or "error_msg: mark blocked"
                     test_result.num_tests = 1
                     test_result.run_time = 0
                     test_result.current = \
@@ -337,7 +341,7 @@ class OHJSUnitTestParser(IParser):
                 test_result = self.state_machine.test(reset=True)
                 test_result.test_class = test.class_name
                 test_result.test_name = test.test_name
-                test_result.stacktrace = "error_msg: mark blocked"
+                test_result.stacktrace = self.__test_finish_result_msg or "error_msg: mark blocked"
                 test_result.num_tests = 1
                 test_result.run_time = 0
                 test_result.current = self.state_machine.running_test_index + 1
@@ -361,6 +365,7 @@ class OHJSUnitTestParser(IParser):
 
     def _handle_result_msg(self, line):
         if OHJSUnitItemConstants.APP_DIED.value in line:
+            self.__test_finish_result_msg = line.replace(OHJSUnitPrefixes.TEST_FINISHED_RESULT_MSG.value, '')
             test_result = self.state_machine.test()
             suite = self.state_machine.suite()
             if not test_result.is_completed:
@@ -432,6 +437,9 @@ class OHJSWorkParser(IParser):
         self.all_result_dict = dict()
         self.temp_class = None
         self.temp_test = None
+
+        # message from test output, the 'TestFinished-ResultMsg'
+        self.__test_finish_result_msg = ""
 
     def __process__(self, lines):
         for line in lines:
@@ -565,6 +573,7 @@ class OHJSWorkParser(IParser):
 
     def _handle_result_msg(self, line):
         if OHJSUnitItemConstants.APP_DIED.value in line:
+            self.__test_finish_result_msg = line.replace(OHJSUnitPrefixes.TEST_FINISHED_RESULT_MSG.value, '')
             test_result = self.state_machine.test()
             suite = self.state_machine.suite()
             if not test_result.is_completed:
@@ -642,7 +651,8 @@ class OHJSWorkParser(IParser):
             if not suite_result.is_completed:
                 self.handle_suite_end()
             self.state_machine.pop_last_suite()
-        target_listener.__ended__(LifeCycle.TestSuites, suite_result, suites_name=self.suites_name)
+        target_listener.__ended__(LifeCycle.TestSuites, suite_result, suites_name=self.suites_name,
+                                  message=self.__test_finish_result_msg)
 
     def handle_suite_result(self, target_listener):
         for suite_name, test_info_list in self.all_result_dict.items():
@@ -678,7 +688,7 @@ class OHJSWorkParser(IParser):
                     test_result = self.state_machine.test(reset=True)
                     test_result.test_class = suite_name
                     test_result.test_name = case_name
-                    test_result.stacktrace = "error_msg: mark blocked"
+                    test_result.stacktrace = self.__test_finish_result_msg or "error_msg: mark blocked"
                     test_result.num_tests = 1
                     test_result.run_time = 0
                     test_result.current = \
@@ -713,4 +723,3 @@ class OHJSWorkParser(IParser):
             return ResultCode.PASSED.value
         else:
             return ResultCode.FAILED.value
-
