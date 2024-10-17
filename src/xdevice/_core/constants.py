@@ -48,6 +48,7 @@ class ProductForm(object):
     television = "tv"
     watch = "watch"
     tablet = 'tablet'
+    wearable = 'wearable'
     _2in1 = '2in1'
 
 
