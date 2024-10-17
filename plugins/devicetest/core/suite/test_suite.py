@@ -115,7 +115,7 @@ class TestSuite:
         report_path = os.path.join("details", self._round_folder, self.suite_name, self.suite_name + ".html")
         start_time = get_cst_time()
         # 记录录屏和截图属性
-        self._get_screenrecorder_and_screenshot()
+        # self._get_screenrecorder_and_screenshot()
         # 开始收集测试套（setup和teardown）的运行日志
         suite_log_buffer_hdl = add_log_caching_handler()
         try:
@@ -138,7 +138,7 @@ class TestSuite:
                 self._case_log_buffer_hdl = add_log_caching_handler()
                 total_case_num = len(self.case_list)
                 for index, case in enumerate(self.case_list, 1):
-                    self._reset_screenrecorder_and_screenshot()
+                    # self._reset_screenrecorder_and_screenshot()
                     self.log.info("[{} / {}] Executing suite case: {}".format(index, total_case_num, case[1]))
                     self.run_one_test_case(case)
                 # 停止收集测试套子用例的运行日志
