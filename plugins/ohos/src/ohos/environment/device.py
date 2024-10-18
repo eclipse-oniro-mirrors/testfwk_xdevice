@@ -212,6 +212,7 @@ class Device(IDevice):
         'car': ProductForm.car,
         'tv': ProductForm.television,
         'watch': ProductForm.watch,
+        'wearable': ProductForm.wearable,
         'tablet': ProductForm.tablet,
         '2in1': ProductForm._2in1,
         'nosdcard': ProductForm.phone

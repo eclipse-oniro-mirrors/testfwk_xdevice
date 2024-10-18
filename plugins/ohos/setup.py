@@ -48,11 +48,11 @@ setup(
             'cpp_driver=ohos.drivers.cpp_driver',
             'cpp_driver_lite=ohos.drivers.cpp_driver_lite',
             'jsunit_driver=ohos.drivers.jsunit_driver',
+            'ltp_posix_driver=ohos.drivers.ltp_posix_driver',
             'oh_jsunit_driver=ohos.drivers.oh_jsunit_driver',
             'oh_kernel_driver=ohos.drivers.oh_kernel_driver',
             'oh_yara_driver=ohos.drivers.oh_yara_driver',
             'c_driver_lite=ohos.drivers.c_driver_lite',
-
         ],
         'listener': [
             'listener=ohos.executor.listener',
