@@ -578,7 +578,7 @@ class QueryKit(ITestKit):
         if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
             command = f"chmod +x /storage{self.query} && /storage{self.query}"
         else:
-            command = f"/{self.query}"
+            command = f"{self.query}"
         output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
         LOG.debug(output)
         params = parse_strings_key_value(output)
