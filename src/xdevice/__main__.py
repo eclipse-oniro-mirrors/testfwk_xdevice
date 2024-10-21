@@ -29,13 +29,13 @@ sys.path.append(srcpath)
 
 LOG = platform_logger("Main")
 notice_zh = '''
-由于测试报告模板缺失导致运行失败! 请按如下指引进行修复：
+若想使用新报告模板，请按如下指引进行修复：
 1.下载已归档的报告模板文件
   下载链接：https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
 2.解压template.zip到“{resource_path}”路径下
 '''
 notice_en = '''
-Run failed due to missing the report template! Please follow the following instructions to fix the issue.
+If you want to use the new report template. Please follow the following instructions to fix the issue.
 1.Download archived report template files
   Download Link: https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
 2.Unzip the template.zip to the path '{resource_path}'
@@ -58,7 +58,8 @@ def check_report_template():
             with os.fdopen(to_path_fd, "wb") as f:
                 f.write(response.read())
         except Exception as e:
-            LOG.error(f"get report template resource error, {e}")
+            LOG.warning(f"get report template resource error, {e}")
+            LOG.warning("Download report template failed, using the default report template.")
             if not os.path.exists(to_path):
                 missing_files.append(to_path)
             break
@@ -68,7 +69,6 @@ def check_report_template():
     LOG.warning(notice_zh.format(resource_path=resource_path))
     LOG.warning(notice_en.format(resource_path=resource_path))
     LOG.warning("------" * 5)
-    LOG.warning("Download report template failed, using the default report template.")
 
 
 def main_process(command=None):
