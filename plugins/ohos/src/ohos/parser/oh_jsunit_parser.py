@@ -572,7 +572,7 @@ class OHJSWorkParser(IParser):
                 self.parse_key(line, len(OHJSUnitPrefixes.STATUS.value))
 
     def _handle_result_msg(self, line):
-        if OHJSUnitItemConstants.APP_DIED.value in line:
+        if OHJSUnitItemConstants.APP_DIED.value in line and not self.state_machine.is_suite_empty():
             self.__test_finish_result_msg = line.replace(OHJSUnitPrefixes.TEST_FINISHED_RESULT_MSG.value, '')
             test_result = self.state_machine.test()
             suite = self.state_machine.suite()
