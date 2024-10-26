@@ -276,9 +276,11 @@ class SuiteReporter:
             ReportConstant.result: "",
             ReportConstant.level: 1,
             ReportConstant.message: case_stacktrace,
-            ReportConstant.report: case_result.report,
-            ReportConstant.result_content: getattr(case_result, ReportConstant.result_content, "")
+            ReportConstant.report: case_result.report
         }
+        result_content = getattr(case_result, ReportConstant.result_content, "")
+        if result_content:
+            test_case_attributes.update({ReportConstant.result_content: result_content})
         return test_case_element, test_case_attributes
 
     @classmethod

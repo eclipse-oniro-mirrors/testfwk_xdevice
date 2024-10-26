@@ -272,7 +272,7 @@ class PlusReportListener(ReportEventListener, ABC):
         test.stacktrace = test_result.stacktrace
         test.code = test_result.code
         test.report = test_result.report
-        if hasattr(test_result, "result_content"):
+        if getattr(test_result, "result_content", ""):
             test.result_content = test_result.result_content
         if hasattr(self, "report_plus") and self.report_plus:
             self._update_result(test_result)
