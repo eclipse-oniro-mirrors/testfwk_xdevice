@@ -311,6 +311,11 @@ class OHJSUnitTestDriver(IDriver):
         test_run = test_tracker.get_current_run_results()
         return test_run
 
+    def _refresh(self, listener_list):
+        for listener in listener_list:
+            count = getattr(listener, "cycle", 0) + 1
+            setattr(listener, "cycle", count)
+
     def _run_with_rerun(self, listener, expected_tests):
         LOG.debug("Ready to run with rerun, expect run: %s"
                   % len(expected_tests))
@@ -336,6 +341,7 @@ class OHJSUnitTestDriver(IDriver):
             tests.append("%s#%s" % (test.class_name, test.test_name))
         self.runner.add_arg("class", ",".join(tests))
         LOG.debug("Ready to rerun twice, expect run: %s" % len(expected_tests))
+        self._refresh(listener)
         test_run = self._run_tests(listener)
         self.runner.retry_times -= 1
         LOG.debug("Rerun twice, has run: %s" % len(test_run))
@@ -357,6 +363,7 @@ class OHJSUnitTestDriver(IDriver):
             tests.append("%s#%s" % (test.class_name, test.test_name))
         self.runner.add_arg("class", ",".join(tests))
         LOG.debug("Ready to rerun third, expect run: %s" % len(expected_tests))
+        self._refresh(listener)
         self._run_tests(listener)
         LOG.debug("Rerun third success")
         self.runner.notify_finished()
