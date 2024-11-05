@@ -1001,7 +1001,7 @@ class HdcHelper:
                 return str(reply, encoding=encoding)
             except (ValueError, TypeError) as _:
                 continue
-        return encoding
+        return ""
 
     @staticmethod
     def socket(host=None, port=None, timeout=None):
