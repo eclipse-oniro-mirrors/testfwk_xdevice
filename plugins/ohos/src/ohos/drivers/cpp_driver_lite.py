@@ -135,6 +135,8 @@ class CppTestDriver(IDriver):
                 file_name.flush()
             LOG.info("-------------finally-----------------")
             self._after_command(kits, request)
+        self.result = check_result_report(
+            request.config.report_path, self.result, self.error_message, request=request)
 
     def _get_execute_command(self, bin_file):
         if self.config.device.get("device_kernel") == \

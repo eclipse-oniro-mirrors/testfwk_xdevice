@@ -52,8 +52,23 @@ from ohos.utils import parse_strings_key_value
 __all__ = ["DeployKit", "MountKit", "RootFsKit", "QueryKit", "LiteShellKit",
            "LiteAppInstallKit", "DeployToolKit"]
 LOG = platform_logger("KitLite")
-RESET_CMD = "0xEF, 0xBE, 0xAD, 0xDE, 0x0C, 0x00, 0x87, 0x78, 0x00, 0x00, " \
-            "0x61, 0x94"
+RESET_CMD = "0xEF, 0xBE, 0xAD, 0xDE, 0x0C, 0x00, 0x87, 0x78, 0x00, 0x00, 0x61, 0x94"
+
+
+def execute_query(device, query):
+    if not query:
+        LOG.debug("query bin is none")
+        return
+    LOG.debug("execute query bin begins")
+    if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
+        command = f"chmod +x /storage{query} && /storage{query}"
+    else:
+        command = f".{query}"
+    output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
+    LOG.debug(output)
+    params = parse_strings_key_value(output)
+    device.update_device_props(params)
+    LOG.debug("execute query bin ends")
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.deploy)
@@ -251,6 +266,7 @@ class MountKit(ITestKit):
                     result, status, _ = device.execute_command_with_timeout(
                         command=command, case_type=case_type, timeout=timeout)
         LOG.info('Prepare environment success')
+        execute_query(device, '/test_root/tools/querySmall.bin')
 
     def __setup__(self, device, **kwargs):
         """
@@ -282,12 +298,20 @@ class MountKit(ITestKit):
     def copy_to_server(self, linux_directory, linux_host, request,
                        testcases_dir):
         file_local_paths = []
+        # find querySmall.bin
+        query_small_src = "resource/tools/querySmall.bin"
+        try:
+            file_path = get_file_absolute_path(query_small_src, self.paths)
+            file_local_paths.append(file_path)
+            self.mount_list.append({"source": query_small_src, "target": "/test_root/tools"})
+        except ParamError:
+            LOG.debug("query bin is not found")
+
         for mount_file in self.mount_list:
             source = mount_file.get("source")
             if not source:
                 raise TypeError(ErrorMessage.Config.Code_0302005)
-            source = source.replace("$testcases/", ""). \
-                replace("$resources/", "")
+            source = source.replace("$testcases/", "").replace("$resources/", "")
             file_path = get_file_absolute_path(source, self.paths)
             if os.path.isdir(file_path):
                 for root, _, files in os.walk(file_path):
@@ -355,8 +379,7 @@ class MountKit(ITestKit):
                             "Trying to copy the file from {} to nfs "
                             "server {} times".format(_file, count))
                         if count == 3:
-                            msg = "Copy {} to nfs server " \
-                                  "failed {} times".format(
+                            msg = "Copy {} to nfs server failed {} times".format(
                                 os.path.basename(_file), count)
                             LOG.error(msg, error_no="00403")
                             LOG.debug("Nfs server:{}".format(glob.glob(
@@ -575,14 +598,7 @@ class QueryKit(ITestKit):
         if not request:
             raise ParamError(ErrorMessage.Config.Code_0302010)
         self.mount_kit.__setup__(device, request=request)
-        if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-            command = f"chmod +x /storage{self.query} && /storage{self.query}"
-        else:
-            command = f".{self.query}"
-        output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
-        LOG.debug(output)
-        params = parse_strings_key_value(output)
-        device.update_device_props(params)
+        execute_query(device, self.query)
 
     def __teardown__(self, device):
         if device.label != DeviceLabelType.ipcamera:
@@ -679,14 +695,6 @@ class LiteAppInstallKit(ITestKit):
                 and self.bundle_name:
             device.execute_command_with_timeout(
                 "./bin/bm uninstall -n %s" % self.bundle_name, timeout=90)
-
-
-def process_product_info(message, product_info):
-    if "The" in message:
-        message = message[message.index("The"):]
-        items = message[len("The "):].split(" is ")
-        product_info.setdefault(items[0].strip(),
-                                items[1].strip().strip("[").strip("]"))
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.deploytool)
