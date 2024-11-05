@@ -180,6 +180,8 @@ class StackReportListener(UniversalReportListener):
                     if suite_item.index != suite_index:
                         continue
                     self.suites.pop(suite.index)
+                    if result_list and result_list[-1].is_completed is not True:
+                        result_list.pop(-1)
                     result_list.extend(results_of_same_suite)
                     break
             else:
