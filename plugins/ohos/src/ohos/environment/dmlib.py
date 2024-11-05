@@ -58,6 +58,7 @@ ID_LIST = b'LIST'
 ID_DENT = b'DENT'
 
 DEFAULT_ENCODING = "utf-8"
+COMPATIBLE_ENCODING = "ISO-8850-1"
 SYNC_DATA_MAX = 64 * 1024
 REMOTE_PATH_MAX_LENGTH = 1024
 SOCK_DATA_MAX = 256
@@ -995,10 +996,12 @@ class HdcHelper:
         """
         Converts an HDC reply to a string.
         """
-        try:
-            return str(reply, encoding=DEFAULT_ENCODING)
-        except (ValueError, TypeError) as _:
-            return ""
+        for encoding in [DEFAULT_ENCODING, COMPATIBLE_ENCODING]:
+            try:
+                return str(reply, encoding=encoding)
+            except (ValueError, TypeError) as _:
+                continue
+        return encoding
 
     @staticmethod
     def socket(host=None, port=None, timeout=None):
