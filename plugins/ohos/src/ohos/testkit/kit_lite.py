@@ -299,9 +299,11 @@ class MountKit(ITestKit):
                        testcases_dir):
         file_local_paths = []
         # find querySmall.bin
+        query_small_src = "resource/tools/querySmall.bin"
         try:
-            file_path = get_file_absolute_path("resource/tools/querySmall.bin", self.paths)
+            file_path = get_file_absolute_path(query_small_src, self.paths)
             file_local_paths.append(file_path)
+            self.mount_list.append({"source": query_small_src, "target": "/test_root/tools"})
         except ParamError:
             LOG.debug("query bin is not found")
 

@@ -68,8 +68,8 @@
     </resource>
     <devicelog>
         <enable>ON</enable>
-        <loglevel>DEBUG</loglevel>
+        <loglevel>INFO</loglevel>
         <dir />
     </devicelog>
-    <loglevel>DEBUG</loglevel>
+    <loglevel>INFO</loglevel>
 </user_config>
