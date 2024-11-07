@@ -53,6 +53,8 @@ setup(
             'oh_kernel_driver=ohos.drivers.oh_kernel_driver',
             'oh_yara_driver=ohos.drivers.oh_yara_driver',
             'c_driver_lite=ohos.drivers.c_driver_lite',
+            'opensource_driver_lite=ohos.drivers.opensource_driver_lite',
+            'build_only_driver_lite=ohos.drivers.build_only_driver_lite'
         ],
         'listener': [
             'listener=ohos.executor.listener',
