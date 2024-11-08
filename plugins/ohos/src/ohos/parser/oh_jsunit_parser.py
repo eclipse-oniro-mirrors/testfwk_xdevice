@@ -226,6 +226,7 @@ class OHJSUnitTestParser(IParser):
             return
         if test_info.run_time == 0 or test_info.run_time < self.test_time:
             test_info.run_time = self.test_time
+        test_info.is_completed = True
         for listener in self.get_listeners():
             result = copy.copy(test_info)
             result.code = test_info.code
@@ -234,7 +235,6 @@ class OHJSUnitTestParser(IParser):
                 continue
             if self.runner.retry_times > 1 and result.code == ResultCode.FAILED.value:
                 listener.tests.pop(test_info.index)
-        test_info.is_completed = True
         self.clear_current_test_info()
 
     def handle_suite_end(self):

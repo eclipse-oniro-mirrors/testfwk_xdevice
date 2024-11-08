@@ -200,6 +200,7 @@ class ReportEventListener(AbsReportListener, ABC):
         test.stacktrace = test_result.stacktrace
         test.code = test_result.code
         test.report = test_result.report
+        test.is_completed = test_result.is_completed
 
     def _handle_test_suites_end(self, test_result, kwargs):
         if not kwargs.get("suite_report", False):

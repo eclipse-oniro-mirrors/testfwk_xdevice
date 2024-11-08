@@ -176,12 +176,18 @@ class StackReportListener(UniversalReportListener):
                 self._suite_name_mapping.update({suite.suite_name: suite.index})
             if self.cycle > 0:
                 suite_index = self._suite_name_mapping.get(suite.suite_name, "")
-                for suite_item, result_list in self.result:
-                    if suite_item.index != suite_index:
-                        continue
-                    self.suites.pop(suite.index)
-                    result_list.extend(results_of_same_suite)
-                    break
+                if suite_index not in self.suite_distributions.keys():
+                    for suite_item, result_list in self.result:
+                        if suite_item.index != suite_index:
+                            continue
+                        self.suites.pop(suite.index)
+                        if result_list and result_list[-1].is_completed is not True:
+                            result_list.pop(-1)
+                        result_list.extend(results_of_same_suite)
+                        break
+                else:
+                    self.suite_distributions.update({suite.index: len(self.result)})
+                    self.result.append((self.suites.get(suite.index), results_of_same_suite))
             else:
                 self.suite_distributions.update({suite.index:  len(self.result)})
                 self.result.append((self.suites.get(suite.index), results_of_same_suite))
