@@ -59,6 +59,9 @@ def execute_query(device, query):
     if not query:
         LOG.debug("query bin is none")
         return
+    if device.device_props:
+        LOG.debug("query bin has been executed")
+        return
     LOG.debug("execute query bin begins")
     if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
         command = f"chmod +x /storage{query} && /storage{query}"
@@ -236,6 +239,9 @@ class MountKit(ITestKit):
             target = mount_file.get("target", "/test_root")
             if target in self.mounted_dir:
                 LOG.debug("%s is mounted" % target)
+                continue
+            if target == "/test_root/tools" and device.device_props:
+                LOG.debug("query bin has been executed, '/test_root/tools' no need to mount again")
                 continue
             mkdir_on_board(device, target)
             self.mounted_dir.add(target)
