@@ -240,11 +240,12 @@ class MountKit(ITestKit):
             mkdir_on_board(device, target)
             self.mounted_dir.add(target)
 
+            temp_linux_directory = linux_directory
             if is_remote.lower() == "false":
-                linux_directory = get_mount_dir(linux_directory)
+                temp_linux_directory = get_mount_dir(linux_directory)
             for command in commands:
                 command = command.replace("nfs_ip", linux_host). \
-                    replace("nfs_directory", linux_directory).replace(
+                    replace("nfs_directory", temp_linux_directory).replace(
                     "device_directory", target).replace("//", "/")
                 timeout = 15 if command.startswith("mount") else 1
                 if command.startswith("mount"):
