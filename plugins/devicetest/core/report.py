@@ -17,7 +17,6 @@
 #
 
 import os
-from ast import literal_eval
 from xml.dom import minidom
 from xml.etree import ElementTree
 
@@ -125,7 +124,7 @@ class ReportHandler:
             # 用例测试结果的拓展内容
             result_content = result_info.get('result_content')
             if result_content:
-                testcase.set("result_content", literal_eval(str(result_content)))
+                testcase.set("result_content", f"<![CDATA[{result_content}]]>")
 
             testsuite = ElementTree.Element('testsuite')
             testsuite.set("modulename", test_name)

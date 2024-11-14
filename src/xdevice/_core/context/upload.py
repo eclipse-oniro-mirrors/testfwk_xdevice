@@ -31,6 +31,7 @@ from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ReportConstant
 from _core.utils import check_mode
 from _core.utils import get_filename_extension
+from _core.utils import parse_xml_cdata
 
 LOG = platform_logger("Upload")
 
@@ -111,7 +112,7 @@ class Uploader:
             case_id, result, error, start, end, report_path, result_content = upload_param
             case = {"caseid": case_id, "result": result, "error": error,
                     "start": start, "end": end, "report": report_path,
-                    "result_content": result_content}
+                    "result_content": parse_xml_cdata(result_content)}
             LOG.info("Case info: %s", case)
             upload_suite.append(case)
 
