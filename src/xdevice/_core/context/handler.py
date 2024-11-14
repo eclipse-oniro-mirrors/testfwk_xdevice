@@ -16,10 +16,10 @@
 # limitations under the License.
 #
 
+import json
 import os
 import shutil
 import time
-from ast import literal_eval
 from xml.etree import ElementTree
 
 from _core.constants import CaseResult
@@ -58,7 +58,7 @@ def update_report_xml(report_xml, props):
         return
     for k, v in props.items():
         if k == ReportConstant.devices:
-            v = literal_eval(str(v))
+            v = f"<![CDATA[{json.dumps(v, separators=(',', ':'))}]]>"
         root.set(k, v)
     result_fd = os.open(report_xml, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
     with os.fdopen(result_fd, mode="w", encoding="utf-8") as result_file:

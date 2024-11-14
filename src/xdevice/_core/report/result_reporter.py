@@ -25,7 +25,6 @@ import re
 import shutil
 import time
 import stat
-from ast import literal_eval
 from importlib import util
 from xml.etree import ElementTree
 
@@ -42,6 +41,7 @@ from _core.utils import calculate_elapsed_time
 from _core.utils import calculate_percent
 from _core.utils import copy_folder
 from _core.utils import get_filename_extension
+from _core.utils import parse_xml_cdata
 from _core.utils import show_current_environment
 from _core.report.encrypt import check_pub_key_exist
 from _core.report.encrypt import do_rsa_encrypt
@@ -376,8 +376,9 @@ class ResultReporter(IReporter):
         if devices_str == "":
             return []
         try:
-            devices = literal_eval(devices_str)
-        except SyntaxError:
+            devices = json.loads(parse_xml_cdata(devices_str))
+        except Exception as e:
+            LOG.warning(f"parse devices from xml failed, {e}")
             return []
         # 汇总测试设备信息
         for device in devices:
