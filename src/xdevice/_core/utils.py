@@ -808,3 +808,16 @@ def copy_folder(src, dst):
         if os.path.isdir(fr_path):
             os.makedirs(to_path)
             copy_folder(fr_path, to_path)
+
+
+def parse_xml_cdata(content: str) -> str:
+    """
+    提取CDATA标签里面的内容
+    :param content: 内容
+    :return: 返回content或者移除CDATA的内容
+    """
+    if content and '<![CDATA[' in content:
+        ret = re.search(r'<!\[CDATA\[(.*)]]', content)
+        if ret is not None:
+            return ret.group(1)
+    return content

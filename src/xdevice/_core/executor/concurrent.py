@@ -17,11 +17,11 @@
 #
 
 import copy
+import json
 import os
 import shutil
 import threading
 import time
-from ast import literal_eval
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait
 from xml.etree import ElementTree
@@ -165,7 +165,7 @@ class DriversThread(threading.Thread):
             LOG.error(f"parse result xml error! xml file {result_xml}")
             LOG.error(f"error message: {e}")
             return
-        root.set("devices", literal_eval(str(desc)))
+        root.set("devices", f"<![CDATA[{json.dumps(desc, separators=(',', ':'))}]]>")
         result_fd = os.open(result_xml, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, FilePermission.mode_644)
         with os.fdopen(result_fd, mode="w", encoding="utf-8") as result_file:
             result_file.write(ElementTree.tostring(root).decode())
