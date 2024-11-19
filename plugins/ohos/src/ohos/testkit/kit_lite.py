@@ -149,33 +149,35 @@ def execute_query(device, query, request):
         LOG.debug("query bin has been executed")
         return
     LOG.debug("execute query bin begins")
-    commands = []
+    content = ""
     if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
         # query_pth, /storage/test_tool/tools/querySmall.bin
         query_pth = f"/storage{query}"
         query_dir = os.path.dirname(query_pth)
         query_result = f"{query_dir}/query_result.txt"
-        commands.append(f"chmod +x {query_pth}")
-        commands.append(f"{query_pth} > {query_result}")
+        commands = [
+            f"chmod +x {query_pth}",
+            f"{query_pth} > {query_result}",
+            f"cat {query_result}"
+        ]
+        for cmd in commands:
+            device.execute_command_with_timeout(command=cmd, timeout=10)
+        nfs_config = get_nfs_server(request)
+        src = os.path.join(nfs_config.get("dir"), "query_result.txt")
+        dst = os.path.join(request.config.report_path, "log", "query_result.txt")
+        get_file_from_nfs(nfs_config, src, dst)
+        if os.path.exists(dst):
+            with open(dst, encoding="utf-8") as query_result_f:
+                content = query_result_f.read()
+            os.remove(dst)
     else:
         # query, /test_tool/tools/querySmall.bin
-        query_dir = os.path.dirname(query)
-        query_result = f"{query_dir}/query_result.txt"
-        commands.append(f".{query} > {query_result}")
-    commands.append(f"cat {query_result}")
-    for cmd in commands:
-        device.execute_command_with_timeout(command=cmd, timeout=10)
-
-    nfs_config = get_nfs_server(request)
-    src = os.path.join(nfs_config.get("dir"), "query_result.txt")
-    dst = os.path.join(request.config.report_path, "log", "query_result.txt")
-    get_file_from_nfs(nfs_config, src, dst)
-    if os.path.exists(dst):
-        with open(dst, encoding="utf-8") as query_result_f:
-            content = query_result_f.read()
-        params = parse_strings_key_value(content)
-        device.update_device_props(params)
-        os.remove(dst)
+        command = f".{query}"
+        output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
+        LOG.debug(output)
+        content = output
+    params = parse_strings_key_value(content)
+    device.update_device_props(params)
     LOG.debug("execute query bin ends")
 
 
