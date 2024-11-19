@@ -74,7 +74,7 @@ def copy_file_to_nfs(nfs_config, src):
             sftp = paramiko.SFTPClient.from_transport(client)
             sftp.put(localpath=src, remotepath=dst_file)
         except OSError as e:
-            LOG.error(f"Copy file to nfs server failed, {e}")
+            LOG.info(f"Copy file to nfs server failed, {e}")
         finally:
             if client is not None:
                 client.close()
@@ -85,18 +85,18 @@ def copy_file_to_nfs(nfs_config, src):
             try:
                 os.remove(dst_file)
             except (FileNotFoundError, IOError, PermissionError) as e:
-                LOG.error(f"Remove file on nfs server failed, {e}")
+                LOG.info(f"Remove file on nfs server failed, {e}")
 
             try:
                 shutil.copy(src, nfs_dir)
             except (FileNotFoundError, IOError, PermissionError) as e:
-                LOG.error(f"Copy file to nfs server failed, {e}")
+                LOG.info(f"Copy file to nfs server failed, {e}")
 
             if check_server_file(src, nfs_dir):
                 break
             LOG.info(f"Trying to copy the file from {src} to nfs server {count} times")
             if count == 3:
-                LOG.error("Copy file to nfs server failed after retry")
+                LOG.info("Copy file to nfs server failed after retry")
                 LOG.debug("Nfs server: {}".format(glob.glob(os.path.join(nfs_dir, '*.*'))))
 
 
