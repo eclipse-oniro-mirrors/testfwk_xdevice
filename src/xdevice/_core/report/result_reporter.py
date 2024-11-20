@@ -40,6 +40,7 @@ from _core.exception import ParamError
 from _core.utils import calculate_elapsed_time
 from _core.utils import copy_folder
 from _core.utils import get_filename_extension
+from _core.utils import parse_xml_cdata
 from _core.report.encrypt import check_pub_key_exist
 from _core.report.encrypt import do_rsa_encrypt
 from _core.report.encrypt import get_file_summary
@@ -329,8 +330,9 @@ class ResultReporter(IReporter):
         if devices_str == "":
             return []
         try:
-            devices = literal_eval(devices_str)
-        except SyntaxError:
+            devices = json.loads(parse_xml_cdata(devices_str))
+        except Exception as e:
+            LOG.warning(f"parse devices from xml failed, {e}")
             return []
         for device in devices:
             device_sn = device.get(DeviceProperties.sn, "")

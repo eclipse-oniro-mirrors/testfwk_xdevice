@@ -51,8 +51,134 @@ from ohos.utils import parse_strings_key_value
 __all__ = ["DeployKit", "MountKit", "RootFsKit", "QueryKit", "LiteShellKit",
            "LiteAppInstallKit", "DeployToolKit"]
 LOG = platform_logger("KitLite")
-RESET_CMD = "0xEF, 0xBE, 0xAD, 0xDE, 0x0C, 0x00, 0x87, 0x78, 0x00, 0x00, " \
-            "0x61, 0x94"
+RESET_CMD = "0xEF, 0xBE, 0xAD, 0xDE, 0x0C, 0x00, 0x87, 0x78, 0x00, 0x00, 0x61, 0x94"
+
+
+def copy_file_to_nfs(nfs_config, src):
+    ip = nfs_config.get("ip")
+    port = nfs_config.get("port")
+    nfs_dir = nfs_config.get("dir")
+    username = nfs_config.get("username")
+    password = nfs_config.get("password")
+    is_remote = nfs_config.get("remote", "false")
+
+    dst_file = os.path.join(nfs_dir, os.path.basename(src))
+    if is_remote.lower() == "true":
+        # copy to remote
+        client = None
+        try:
+            LOG.info(f"Trying to copy the file from {src} to nfs server")
+            import paramiko
+            client = paramiko.Transport(ip, int(port))
+            client.connect(username=username, password=password)
+            sftp = paramiko.SFTPClient.from_transport(client)
+            sftp.put(localpath=src, remotepath=dst_file)
+        except OSError as e:
+            LOG.info(f"Copy file to nfs server failed, {e}")
+        finally:
+            if client is not None:
+                client.close()
+    else:
+        # copy to local
+        for count in range(1, 4):
+            LOG.info(f"Trying to copy the file from {src} to nfs server")
+            try:
+                os.remove(dst_file)
+            except (FileNotFoundError, IOError, PermissionError) as e:
+                LOG.info(f"Remove file on nfs server failed, {e}")
+
+            try:
+                shutil.copy(src, nfs_dir)
+            except (FileNotFoundError, IOError, PermissionError) as e:
+                LOG.info(f"Copy file to nfs server failed, {e}")
+
+            if check_server_file(src, nfs_dir):
+                break
+            LOG.info(f"Trying to copy the file from {src} to nfs server {count} times")
+            if count == 3:
+                LOG.info("Copy file to nfs server failed after retry")
+                LOG.debug("Nfs server: {}".format(glob.glob(os.path.join(nfs_dir, '*.*'))))
+
+
+def get_file_from_nfs(nfs_config, src, dst):
+    ip = nfs_config.get("ip")
+    port = nfs_config.get("port")
+    username = nfs_config.get("username")
+    password = nfs_config.get("password")
+    is_remote = nfs_config.get("remote", "false")
+
+    try:
+        if is_remote.lower() == "true":
+            import paramiko
+            client = None
+            try:
+                client = paramiko.Transport(ip, int(port))
+                client.connect(username=username, password=password)
+                sftp = paramiko.SFTPClient.from_transport(client)
+                sftp.get(remotepath=src, localpath=dst)
+            finally:
+                if client is not None:
+                    client.close()
+        else:
+            if os.path.exists(dst):
+                os.remove(dst)
+            if os.path.exists(src):
+                shutil.copy(src, dst)
+    except (FileNotFoundError, IOError) as e:
+        LOG.error(f"Get file from nfs server failed, {e}")
+
+
+def get_nfs_server(request):
+    config_manager = UserConfigManager(
+        config_file=request.get(ConfigConst.configfile, ""),
+        env=request.get(ConfigConst.test_environment, ""))
+    remote_info = config_manager.get_user_config("testcases/server",
+                                                 filter_name="NfsServer")
+    if not remote_info:
+        err_msg = "The name of remote nfs server does not match"
+        LOG.error(err_msg)
+        raise ParamError(err_msg)
+    return remote_info
+
+
+def execute_query(device, query, request):
+    if not query:
+        LOG.debug("query bin is none")
+        return
+    if device.device_props:
+        LOG.debug("query bin has been executed")
+        return
+    LOG.debug("execute query bin begins")
+    content = ""
+    if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
+        # query_pth, /storage/test_tool/tools/querySmall.bin
+        query_pth = f"/storage{query}"
+        query_dir = os.path.dirname(query_pth)
+        query_result = f"{query_dir}/query_result.txt"
+        commands = [
+            f"chmod +x {query_pth}",
+            f"{query_pth} > {query_result}",
+            f"cat {query_result}"
+        ]
+        for cmd in commands:
+            device.execute_command_with_timeout(command=cmd, timeout=10)
+        nfs_config = get_nfs_server(request)
+        src = os.path.join(nfs_config.get("dir"), "query_result.txt")
+        dst = os.path.join(request.config.report_path, "log", "query_result.txt")
+        get_file_from_nfs(nfs_config, src, dst)
+        if os.path.exists(dst):
+            with open(dst, encoding="utf-8") as query_result_f:
+                content = query_result_f.read()
+            os.remove(dst)
+    else:
+        # query, /test_tool/tools/querySmall.bin
+        command = f".{query}"
+        output, _, _ = device.execute_command_with_timeout(command=command, timeout=10)
+        LOG.debug(output)
+        content = output
+    params = parse_strings_key_value(content)
+    device.update_device_props(params)
+    LOG.debug("execute query bin ends")
 
 
 @Plugin(type=Plugin.TEST_KIT, id=CKit.deploy)
@@ -166,7 +292,7 @@ class MountKit(ITestKit):
             LOG.error(msg, error_no="00108")
             raise TypeError("Load Error[00108]")
 
-    def mount_on_board(self, device=None, remote_info=None, case_type=""):
+    def mount_on_board(self, device=None, remote_info=None, case_type="", request=None):
         """
         Init the environment on the device server, e.g. mount the testcases to
         server
@@ -224,14 +350,18 @@ class MountKit(ITestKit):
             if target in self.mounted_dir:
                 LOG.debug("%s is mounted" % target)
                 continue
+            if target == "/test_root/tools" and device.device_props:
+                LOG.debug("query bin has been executed, '/test_root/tools' no need to mount again")
+                continue
             mkdir_on_board(device, target)
+            self.mounted_dir.add(target)
 
-            # local nfs server need use alias of dir to mount
+            temp_linux_directory = linux_directory
             if is_remote.lower() == "false":
-                linux_directory = get_mount_dir(linux_directory)
+                temp_linux_directory = get_mount_dir(linux_directory)
             for command in commands:
                 command = command.replace("nfs_ip", linux_host). \
-                    replace("nfs_directory", linux_directory).replace(
+                    replace("nfs_directory", temp_linux_directory).replace(
                     "device_directory", target).replace("//", "/")
                 timeout = 15 if command.startswith("mount") else 1
                 if command.startswith("mount"):
@@ -256,6 +386,7 @@ class MountKit(ITestKit):
                     result, status, _ = device.execute_command_with_timeout(
                         command=command, case_type=case_type, timeout=timeout)
         LOG.info('Prepare environment success')
+        execute_query(device, '/test_root/tools/querySmall.bin', request)
 
     def __setup__(self, device, **kwargs):
         """
@@ -269,31 +400,35 @@ class MountKit(ITestKit):
                              error_no="02401")
         device.connect()
 
-        config_manager = UserConfigManager(
-            config_file=request.get(ConfigConst.configfile, ""),
-            env=request.get(ConfigConst.test_environment, ""))
-        remote_info = config_manager.get_user_config("testcases/server",
-                                                     filter_name=self.server)
-
-        copy_list = self.copy_to_server(remote_info.get("dir"),
-                                        remote_info.get("ip"),
-                                        request, request.config.testcases_path)
-
+        remote_info = get_nfs_server(request)
+        copy_list = self.copy_to_server(remote_info, request.config.testcases_path)
         self.mount_on_board(device=device, remote_info=remote_info,
-                            case_type=DeviceTestType.cpp_test_lite)
-
+                            case_type=DeviceTestType.cpp_test_lite, request=request)
         return copy_list
 
-    def copy_to_server(self, linux_directory, linux_host, request,
-                       testcases_dir):
+    def copy_to_server(self, remote_info, testcases_dir):
         file_local_paths = []
+        # find querySmall.bin
+        query_small_src = "resource/tools/querySmall.bin"
+        try:
+            file_path = get_file_absolute_path(query_small_src, self.paths)
+            file_local_paths.append(file_path)
+            self.mount_list.append({"source": query_small_src, "target": "/test_root/tools"})
+        except ParamError:
+            LOG.debug("query bin is not found")
+
+        is_query_small_copy_before = False
         for mount_file in self.mount_list:
             source = mount_file.get("source")
             if not source:
                 raise TypeError("The source of MountKit cant be empty "
                                 "in Test.json!")
-            source = source.replace("$testcases/", "").\
-                replace("$resources/", "")
+            if source == query_small_src:
+                is_query_small_copy_before = True
+            if is_query_small_copy_before:
+                LOG.debug("query bin has been copy to nfs server")
+                continue
+            source = source.replace("$testcases/", "").replace("$resources/", "")
             file_path = get_file_absolute_path(source, self.paths)
             if os.path.isdir(file_path):
                 for root, _, files in os.walk(file_path):
@@ -304,69 +439,18 @@ class MountKit(ITestKit):
             else:
                 file_local_paths.append(file_path)
 
-        config_manager = UserConfigManager(
-            config_file=request.get(ConfigConst.configfile, ""),
-            env=request.get(ConfigConst.test_environment, ""))
-        remote_info = config_manager.get_user_config("testcases/server",
-                                                     filter_name=self.server)
-        self.remote_info = remote_info
+        ip = linux_host = remote_info.get("ip", "")
+        port = remote_info.get("port", "")
+        remote_dir = linux_directory = remote_info.get("dir", "")
 
-        if not remote_info:
-            err_msg = "The name of remote device {} does not match". \
-                format(self.remote)
-            LOG.error(err_msg, error_no="00403")
-            raise TypeError(err_msg)
-        is_remote = remote_info.get("remote", "false")
         if (str(get_local_ip()) == linux_host) and (
                 linux_directory == ("/data%s" % testcases_dir)):
-            return
-        ip = remote_info.get("ip", "")
-        port = remote_info.get("port", "")
-        remote_dir = remote_info.get("dir", "")
+            return []
         if not ip or not port or not remote_dir:
             LOG.warning("Nfs server's ip or port or dir is empty")
-            return
+            return []
         for _file in file_local_paths:
-            # remote copy
-            LOG.info("Trying to copy the file from {} to nfs server".
-                     format(_file))
-            if not is_remote.lower() == "false":
-                try:
-                    import paramiko
-                    client = paramiko.Transport(ip, int(port))
-                    client.connect(username=remote_info.get("username"),
-                                   password=remote_info.get("password"))
-                    sftp = paramiko.SFTPClient.from_transport(client)
-                    sftp.put(localpath=_file, remotepath=os.path.join(
-                        remote_info.get("dir"), os.path.basename(_file)))
-                    client.close()
-                except (OSError, Exception) as exception:
-                    msg = "copy file to nfs server failed with error {}" \
-                        .format(exception)
-                    LOG.error(msg, error_no="00403")
-            # local copy
-            else:
-                for count in range(1, 4):
-                    try:
-                        os.remove(os.path.join(remote_info.get("dir"),
-                                               os.path.basename(_file)))
-                    except OSError as _:
-                        pass
-                    shutil.copy(_file, remote_info.get("dir"))
-                    if check_server_file(_file, remote_info.get("dir")):
-                        break
-                    else:
-                        LOG.info(
-                            "Trying to copy the file from {} to nfs "
-                            "server {} times".format(_file, count))
-                        if count == 3:
-                            msg = "Copy {} to nfs server " \
-                                  "failed {} times".format(
-                                   os.path.basename(_file), count)
-                            LOG.error(msg, error_no="00403")
-                            LOG.debug("Nfs server:{}".format(glob.glob(
-                                os.path.join(remote_info.get("dir"), '*.*'))))
-
+            copy_file_to_nfs(remote_info, _file)
             self.file_name_list.append(os.path.basename(_file))
 
         return self.file_name_list
@@ -578,17 +662,7 @@ class QueryKit(ITestKit):
             raise ParamError("the request of queryKit is None",
                              error_no="02401")
         self.mount_kit.__setup__(device, request=request)
-        device.execute_command_with_timeout(command="cd /", timeout=0.2)
-        if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-            command = f"chmod +x /storage{self.query} && ./storage{self.query}"
-            output, _, _ = device.execute_command_with_timeout(
-                command=command, timeout=5)
-        else:
-            output, _, _ = device.execute_command_with_timeout(
-                command=".{}".format(self.query), timeout=5)
-        LOG.debug(output)
-        params = parse_strings_key_value(output)
-        device.update_device_props(params)
+        execute_query(device, self.query, request)
 
     def __teardown__(self, device):
         if device.label != DeviceLabelType.ipcamera:
