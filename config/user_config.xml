@@ -64,7 +64,7 @@
         <web_resource>
             <enable>FALSE</enable>
             <url></url>
-        </web_resource>>
+        </web_resource>
     </resource>
     <devicelog>
         <enable>ON</enable>
