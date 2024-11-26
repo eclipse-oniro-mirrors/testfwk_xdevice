@@ -138,7 +138,7 @@ def execute_query(device, query, request):
     LOG.debug("execute query bin begins")
     commands = ["cd /"]
     if device.__get_device_kernel__() == DeviceLiteKernel.linux_kernel:
-        # query_pth, /storage/test_tool/tools/querySmall.bin
+        # query_pth, /storage/test_root/tools/querySmall.bin
         query_pth = f"/storage{query}"
         query_dir = os.path.dirname(query_pth)
         query_bin = os.path.basename(query_pth)
@@ -148,7 +148,7 @@ def execute_query(device, query, request):
         commands.append(f"./{query_bin}")
         commands.append("ls")
     else:
-        # query, /test_tool/tools/querySmall.bin
+        # query, /test_root/tools/querySmall.bin
         query_dir = os.path.dirname(query)
         query_bin = os.path.basename(query)
         commands.append(f"cd {query_dir}")
