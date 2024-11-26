@@ -268,42 +268,36 @@ class OHYaraTestDriver(IDriver):
         self._generate_xml_report(request, vul_items, message_list)
 
     def _check_if_expire_or_risk(self, date_str, expire_time=2, check_risk=False):
-        from dateutil.relativedelta import relativedelta
         self.security_patch = self.security_patch.replace(' ', '')
         self.security_patch = self.security_patch.replace('/', '-')
         # get current date
         source_date = datetime.strptime(date_str, '%Y-%m')
         security_patch_date = datetime.strptime(self.security_patch[:-3], '%Y-%m')
-        # check if expire 2 months
-        rd = relativedelta(source_date, security_patch_date)
-        months = rd.months + (rd.years * 12)
+        y1, m1 = source_date.year, source_date.month
+        y2, m2 = security_patch_date.year, security_patch_date.month
+        months = (y1 - y2) * 12 + (m1 - m2)
+
         if check_risk:
             # vul time after security patch time no risk
             LOG.debug("Security patch time: {}, vul time: {}, delta_months: {}"
                       .format(self.security_patch[:-3], date_str, months))
-            if months > 0:
-                return False
-            else:
-                return True
+            return months <= 0
         else:
             # check if security patch time expire current time 2 months
             LOG.debug("Security patch time: {}, current time: {}, delta_months: {}"
                       .format(self.security_patch[:-3], date_str, months))
-            if abs(months) > expire_time:
-                return True
-            else:
-                return False
+            return abs(months) > expire_time
 
     @staticmethod
     def _check_if_intersection(source_version, dst_version):
         # para dst_less_sor control if dst less than source
-        def _do_check(soruce, dst, dst_less_sor=True):
-            if re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}', soruce) and \
+        def _do_check(src, dst, dst_less_src=True):
+            if re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}', src) and \
                     re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}', dst):
-                source_vers = soruce.split(".")
+                source_vers = src.split(".")
                 dst_vers = dst.split(".")
                 for index, _ in enumerate(source_vers):
-                    if dst_less_sor:
+                    if dst_less_src:
                         # check if all source number less than dst number
                         if int(source_vers[index]) < int(dst_vers[index]):
                             return False
@@ -322,12 +316,12 @@ class OHYaraTestDriver(IDriver):
             return source_version == dst_version
         elif len(source_groups) == 1 and len(dst_groups) == 2:
             return _do_check(source_groups[0], dst_groups[0]) and \
-                _do_check(source_groups[0], dst_groups[1], dst_less_sor=False)
+                _do_check(source_groups[0], dst_groups[1], dst_less_src=False)
         elif len(source_groups) == 2 and len(dst_groups) == 1:
-            return _do_check(source_groups[0], dst_groups[0], dst_less_sor=False) and \
+            return _do_check(source_groups[0], dst_groups[0], dst_less_src=False) and \
                 _do_check(source_groups[1], dst_groups[0])
         elif len(source_groups) == 2 and len(dst_groups) == 2:
-            return _do_check(source_groups[0], dst_groups[1], dst_less_sor=False) and \
+            return _do_check(source_groups[0], dst_groups[1], dst_less_src=False) and \
                 _do_check(source_groups[1], dst_groups[0])
         return False
 
