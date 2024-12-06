@@ -20,6 +20,8 @@ from ohos.parser import *
 
 __all__ = ["OHRustTestParser"]
 
+LOG = platform_logger("Parser")
+
 
 @Plugin(type=Plugin.PARSER, id=CommonParserType.oh_rust)
 class OHRustTestParser(IParser):
@@ -43,6 +45,7 @@ class OHRustTestParser(IParser):
 
     def __process__(self, lines):
         for line in lines:
+            LOG.debug(line)
             self.parse(line)
 
     def __done__(self):
@@ -115,7 +118,6 @@ class OHRustTestParser(IParser):
         test_suite.suite_name = self.suite_name
         test_suite.test_num = int(matcher.group(1))
 
-        self.running_suite_pos += 1
         for listener in self.get_listeners():
             suite_report = copy.copy(test_suite)
             listener.__started__(LifeCycle.TestSuite, suite_report)
