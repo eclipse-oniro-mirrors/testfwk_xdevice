@@ -364,8 +364,10 @@ class OHJSUnitTestParser(IParser):
         self.handler_suites_end()
 
     def _handle_result_msg(self, line):
-        if OHJSUnitItemConstants.APP_DIED.value in line:
+        is_app_died = OHJSUnitItemConstants.APP_DIED.value in line
+        if is_app_died:
             self.__test_finish_result_msg = line.replace(OHJSUnitPrefixes.TEST_FINISHED_RESULT_MSG.value, '')
+        if is_app_died and not self.state_machine.is_suite_empty():
             test_result = self.state_machine.test()
             suite = self.state_machine.suite()
             if not test_result.is_completed:
@@ -572,8 +574,10 @@ class OHJSWorkParser(IParser):
                 self.parse_key(line, len(OHJSUnitPrefixes.STATUS.value))
 
     def _handle_result_msg(self, line):
-        if OHJSUnitItemConstants.APP_DIED.value in line and not self.state_machine.is_suite_empty():
+        is_app_died = OHJSUnitItemConstants.APP_DIED.value in line
+        if is_app_died:
             self.__test_finish_result_msg = line.replace(OHJSUnitPrefixes.TEST_FINISHED_RESULT_MSG.value, '')
+        if is_app_died and not self.state_machine.is_suite_empty():
             test_result = self.state_machine.test()
             suite = self.state_machine.suite()
             if not test_result.is_completed:
