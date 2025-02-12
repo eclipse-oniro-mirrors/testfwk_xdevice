@@ -58,7 +58,7 @@ const suiteTable = {
           total: 0,
           pageSize: 10,
           currentPage: 1,
-          pageSizes: [10, 20, 50],
+          pageSizes: [10, 50, 100],
         },
         pageSuitesList: [],
       };
@@ -119,7 +119,7 @@ const suiteTable = {
       handleRowClick(row) {
         this.$emit("view-detail",row);
         setTimeout(() => {
-          window.emitter.emitEvent("filter-name", {
+          window.emitter.emit("filter-name", {
             type: "suite",
             value: row.name,
           });

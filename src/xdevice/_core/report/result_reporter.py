@@ -176,7 +176,7 @@ class ResultReporter(IReporter):
         for source in ReportConstant.new_template_sources:
             file = source.get("file")
             to_path = os.path.join(report_template, file)
-            if not os.path.exists(to_path):
+            if not os.path.exists(to_path) or os.path.getsize(to_path) == 0:
                 missing_files.append(to_path)
         # 若新报告模板文件缺失，则使用旧报告模板生成测试报告
         if len(missing_files) > 0:

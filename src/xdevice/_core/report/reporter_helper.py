@@ -128,24 +128,24 @@ class ReportConstant:
     # 新报告模板依赖的资源文件
     new_template_sources = [
         {
-            "file": "static/css/element-plus@2.3.4_index.css",
-            "url": "https://cdn.bootcdn.net/ajax/libs/element-plus/2.3.4/index.css"
+            "file": "static/css/element-plus@2.3.4_index.min.css",
+            "url": "https://cdn.jsdelivr.net/npm/element-plus@2.3.4/dist/index.min.css"
         },
         {
-            "file": "static/element-plus@2.3.4_index.full.js",
-            "url": "https://cdn.bootcdn.net/ajax/libs/element-plus/2.3.4/index.full.js"
+            "file": "static/element-plus@2.3.4_index.full.min.js",
+            "url": "https://cdn.jsdelivr.net/npm/element-plus@2.3.4/dist/index.full.min.js"
         },
         {
             "file": "static/element-plus_icons-vue@2.0.10_index.iife.min.js",
-            "url": "https://cdn.bootcdn.net/ajax/libs/element-plus-icons-vue/2.0.10/index.iife.min.js"
+            "url": "https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.0.10/dist/index.iife.min.js"
         },
         {
-            "file": "static/EventEmitter.js",
-            "url": "https://cdn.bootcdn.net/ajax/libs/EventEmitter/5.2.8/EventEmitter.js"
+            "file": "static/mitt@3.0.1_mitt.umd.min.js",
+            "url": "https://cdn.jsdelivr.net/npm/mitt@3.0.1/dist/mitt.umd.min.js"
         },
         {
             "file": "static/vue@3.2.41_global.min.js",
-            "url": "https://cdn.bootcdn.net/ajax/libs/vue/3.2.41/vue.global.min.js"
+            "url": "https://cdn.jsdelivr.net/npm/vue@3.2.41/dist/vue.global.min.js"
         }
     ]
 
