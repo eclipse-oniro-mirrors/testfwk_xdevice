@@ -57,9 +57,9 @@ const popoverCheckBox = {
     props: ["headername", "options", "type"],
     mounted() {
       if (!window.emitter) {
-        window.emitter = new window.EventEmitter();
+        window.emitter = new window.mitt();
       }
-      window.emitter.addListener("filter-name", (data) => {
+      window.emitter.on("filter-name", (data) => {
         if (this.type === data.type) {
           this.checkedValues.length = 0;
           this.isIndeterminate = false;

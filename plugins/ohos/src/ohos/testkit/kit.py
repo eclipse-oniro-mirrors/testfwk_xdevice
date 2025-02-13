@@ -303,6 +303,7 @@ class PushBase(ITestKit):
         # 必须是resource或./resource开头的资源文件
         pattern = re.compile(r'^(\./)?resource/')
         if re.match(pattern, file_path) is None:
+            LOG.warning("push file path does not start with resource")
             return None
         file_path = re.sub(pattern, "", file_path)
         save_file = os.path.join(
@@ -342,8 +343,12 @@ class PushBase(ITestKit):
         if device_class == "DeviceLite" and device.label == DeviceLabelType.ipcamera:
             os_type = "small system"
         os_version = getattr(device, "device_props", {}).get("OsFullName", "")
-        test_type = self.request.config.get(ConfigConst.task, "").upper()
-        if not os_type or not os_version or re.search(r'(AC|DC|HA|HI|SS)TS', test_type) is None:
+        task_name = self.request.config.get(ConfigConst.task, "")
+        module_name = self.request.get_module_name()
+        pattern = r'((?:AC|DC|HA|HI|SS)TS)\S*'
+        ret = re.match(pattern, task_name.upper()) or re.match(pattern, module_name.upper())
+        test_type = ret.group(1) if ret else None
+        if not os_type or not os_version or not test_type:
             LOG.warning("query resource params is none")
             return url
         cli = None

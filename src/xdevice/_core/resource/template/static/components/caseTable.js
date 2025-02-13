@@ -74,7 +74,7 @@ const caseTable = {
           total: 0,
           pageSize: 10,
           currentPage: 1,
-          pageSizes: [10, 20, 50],
+          pageSizes: [10, 50, 100],
         },
         pageCaseList: [],
         resultFilterOption: [],

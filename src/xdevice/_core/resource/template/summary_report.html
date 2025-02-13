@@ -4,14 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="./static/favicon.ico">
   <title>xDevice Report</title>
-  <link rel="stylesheet" href="static/css/element-plus@2.3.4_index.css">
+  <link rel="stylesheet" href="static/css/element-plus@2.3.4_index.min.css">
   <link rel="stylesheet" href="static/css/index.css">
   <script src="static/vue@3.2.41_global.min.js"></script>
-  <script src="static/element-plus@2.3.4_index.full.js"></script>
+  <script src="static/element-plus@2.3.4_index.full.min.js"></script>
   <script src="static/element-plus_icons-vue@2.0.10_index.iife.min.js"></script>
-  <script src="static/EventEmitter.js"></script>
+  <script src="static/mitt@3.0.1_mitt.umd.min.js"></script>
   <script src="static/components/popoverCheckBox.js"></script>
   <script src="static/data.js"></script>
 </head>
@@ -222,7 +221,7 @@
           total: 0,
           pageSize: 10,
           currentPage: 1,
-          pageSizes: [10, 20, 50],
+          pageSizes: [10, 50, 100],
         });
 
         return {

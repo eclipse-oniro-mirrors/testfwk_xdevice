@@ -29,7 +29,7 @@ sys.path.append(srcpath)
 
 LOG = platform_logger("Main")
 notice_zh = '''
-若想使用新报告模板，请按如下指引进行修复：
+若希望使用新报告模板，请按如下指引进行修复：
 1.下载已归档的报告模板文件
   下载链接：https://gitee.com/openharmony-sig/compatibility/raw/master/test_suite/resource/xdevice/template.zip?lfs=1
 2.解压template.zip到“{resource_path}”路径下
@@ -49,22 +49,25 @@ def check_report_template():
     for source in ReportConstant.new_template_sources:
         file, url = source.get("file"), source.get("url")
         to_path = os.path.join(template_path, file)
-        if os.path.exists(to_path):
+        if os.path.exists(to_path) and os.path.getsize(to_path) != 0:
             continue
-        LOG.info(f"get report template resource {file} from {url}")
+        LOG.info(f"get report template {file} from {url}")
         try:
             response = request.urlopen(url, timeout=5)
-            to_path_fd = os.open(to_path, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
-            with os.fdopen(to_path_fd, "wb") as f:
-                f.write(response.read())
+            if response.status == 200:
+                to_path_fd = os.open(to_path, os.O_CREAT | os.O_WRONLY, FilePermission.mode_644)
+                with os.fdopen(to_path_fd, "wb") as f:
+                    f.write(response.read())
+            else:
+                LOG.warning("get report template error, response code is not 200")
         except Exception as e:
-            LOG.warning(f"get report template resource error, {e}")
-            LOG.warning("Download report template failed, using the default report template.")
-            if not os.path.exists(to_path):
-                missing_files.append(to_path)
+            LOG.warning(f"get report template error, {e}")
+        if not os.path.exists(to_path) or os.path.getsize(to_path) == 0:
+            missing_files.append(to_path)
             break
     if len(missing_files) == 0:
         return
+    LOG.warning("download new report template failed, using the default report template")
     LOG.warning("------" * 5)
     LOG.warning(notice_zh.format(resource_path=resource_path))
     LOG.warning(notice_en.format(resource_path=resource_path))
