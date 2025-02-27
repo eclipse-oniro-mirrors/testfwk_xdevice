@@ -42,7 +42,7 @@ def oh_jsunit_para_parse(runner, junit_paras):
     junit_paras = dict(junit_paras)
     test_type_list = ["function", "performance", "reliability", "security"]
     size_list = ["small", "medium", "large"]
-    level_list = ["0", "1", "2", "3"]
+    level_list = ["0", "1", "2", "3", "4"]
     for para_name in junit_paras.keys():
         para_name = para_name.strip()
         para_values = junit_paras.get(para_name, [])
