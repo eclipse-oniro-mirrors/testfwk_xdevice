@@ -326,10 +326,7 @@ class JSUnitTestDriver(IDriver):
 
             self.config.device.set_device_report_path(
                 request.config.report_path)
-            if self.ohca:
-                command = "shell hilogcat -c"
-            else:
-                command = "shell hilog -r"
+            command = "shell hilog -r"
             self.config.device.connector_command(command, timeout=30 * 1000)
             self._run_jsunit_outer(json_config, request)
         except Exception as exception:
@@ -365,31 +362,13 @@ class JSUnitTestDriver(IDriver):
         hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                              0o755)
         # execute test case
-        if self.ohca:
-            self.device_log = get_device_log_file(
-                request.config.report_path,
-                request.config.device.__get_serial__(),
-                "device_log",
-                module_name=request.get_module_name(),
-                repeat=request.config.repeat,
-                repeat_round=request.get_repeat_round())
-            device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                                      0o755)
-            self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
-            with os.fdopen(hilog_open, "a") as hilog_file_pipe, \
-                    os.fdopen(device_log_open, "a") as device_log_file_pipe:
-                self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
-                    start_catch_device_log(log_file_pipe=device_log_file_pipe,
-                                           hilog_file_pipe=hilog_file_pipe)
-            command = "ohsh aa start -d 123 -a %s -b %s" \
-                      % (ability_name, package)
-        else:
-            self.config.device.device_log_collector.add_log_address(None, self.hilog)
-            with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
-                    start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
-            command = "aa start -d 123 -a %s -b %s" \
-                      % (ability_name, package)
+
+        self.config.device.device_log_collector.add_log_address(None, self.hilog)
+        with os.fdopen(hilog_open, "a") as hilog_file_pipe:
+            self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
+                start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
+        command = "aa start -d 123 -a %s -b %s" \
+                  % (ability_name, package)
         result_value = self.config.device.execute_shell_command(command)
         if result_value and "start ability successfully" in \
                 str(result_value).lower():
@@ -426,15 +405,6 @@ class JSUnitTestDriver(IDriver):
         if not package:
             raise ParamError(ErrorMessage.Config.Code_0302002)
         return package, ability_name
-
-    # 判断安装的模块是否为半容器的hap
-    def _check_hap(self, device, json_config):
-        package = get_config_value('package', json_config.get_driver(), False)
-        if self.ohca:
-            out = device.execute_shell_command("ohsh bm dump -a | grep {}".format(package))
-            return True if package in out else False
-        else:
-            return False
 
     def _make_exclude_list_file(self, request):
         filter_list = []
