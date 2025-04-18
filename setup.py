@@ -17,7 +17,16 @@
 #
 from setuptools import setup
 
-install_requires = []
+install_requires = [
+    "requests",
+    "psutil",
+    "urllib3<2.1;python_version<'3.8'",
+    "fastapi;python_version>='3.10'",
+    "filelock;python_version>='3.10'",
+    "python-multipart;python_version>='3.10'",
+    "sqlmodel;python_version>='3.10'",
+    "uvicorn;python_version>='3.10'"
+]
 setup(
     name='xdevice',
     description='xdevice test framework',
@@ -34,6 +43,9 @@ setup(
         'xdevice._core.report',
         'xdevice._core.testkit',
         'xdevice._core.context',
+        'xdevice._core.cluster',
+        'xdevice._core.cluster.controller',
+        'xdevice._core.cluster.worker'
     ],
     package_data={
         'xdevice._core': [
