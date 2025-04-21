@@ -161,6 +161,7 @@ from _core.report.result_reporter import ResultReporter
 from _core.report.reporter_helper import DataHelper
 from _core.report.__main__ import main_report
 from _core.command.console import Console
+from _core.cluster.utils import report_worker_device
 
 VERSION = '5.0.6.100'
 
@@ -303,7 +304,8 @@ __all__ = [
     "copy_folder",
     "check_uitest_version",
     "Error",
-    "ErrorCategory"
+    "ErrorCategory",
+    "report_worker_device"
 ]
 
 

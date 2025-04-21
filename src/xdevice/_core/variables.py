@@ -69,9 +69,9 @@ def _init_global_config():
         MODULES_DIR, "_core", "resource"))
 
     # create xdevice temp folder  /temp
-    Variables.temp_dir = os.path.join(_get_temp_dir(), "xdevice_data")
-    if not os.path.exists(Variables.temp_dir):
-        os.makedirs(Variables.temp_dir)
+    data_path = os.path.join(_get_temp_dir(), "xdevice_data")
+    os.makedirs(data_path, exist_ok=True)
+    Variables.temp_dir = data_path
 
     # set report variables
     Variables.report_vars.log_dir = "log"
@@ -108,7 +108,6 @@ def _get_temp_dir():
 
 
 def _init_logger():
-    import time
     from _core.constants import LogType
     from _core.logger import Log
     from _core.plugin import Plugin
@@ -135,9 +134,7 @@ def _init_logger():
                                      Variables.report_vars.report_dir,
                                      Variables.report_vars.log_dir)
         os.makedirs(host_log_path, exist_ok=True)
-        time_str = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())
-        tool_file_name = "platform_log_{}.log".format(time_str)
-        tool_log_file = os.path.join(host_log_path, tool_file_name)
+        tool_log_file = os.path.join(host_log_path, "platform_log.log")
 
     tool_logger_plugin = get_plugin(Plugin.LOG, LogType.tool)[0] or ToolLog()
     tool_logger_plugin.__initial__(Variables.report_vars.log_handler,
