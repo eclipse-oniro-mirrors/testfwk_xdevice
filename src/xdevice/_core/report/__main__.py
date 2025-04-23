@@ -53,16 +53,11 @@ def main_report():
         if filename in [ReportConstant.details_vision_report, ReportConstant.passes_vision_report,
                         ReportConstant.failures_vision_report]:
             os.remove(os.path.join(report_path, filename))
-    start_time = time.strftime(ReportConstant.time_format, time.localtime())
-    renew_report(report_path, start_time)
-
-
-def renew_report(report_path: str, start_time: str):
     task_info = ExecInfo()
     task_info.platform = "None"
     task_info.test_type = "Test"
     task_info.device_name = "None"
-    task_info.test_time = start_time
+    task_info.test_time = time.strftime(ReportConstant.time_format, time.localtime())
     result_report = ResultReporter()
     result_report.__generate_reports__(report_path, task_info=task_info)
 

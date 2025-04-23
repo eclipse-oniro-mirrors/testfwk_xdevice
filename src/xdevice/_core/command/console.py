@@ -24,14 +24,9 @@ import re
 import signal
 import sys
 import threading
-import time
 import copy
 from collections import namedtuple
 
-from _core.cluster.utils import console_create_task
-from _core.cluster.utils import console_list_devices
-from _core.cluster.utils import console_list_task
-from _core.cluster.utils import enable_cluster
 from _core.config.config_manager import UserConfigManager
 from _core.constants import SchedulerType
 from _core.constants import ConfigConst
@@ -108,9 +103,6 @@ class Console(object):
             sys.exit(0)
 
         if args is None or len(args) < 2:
-            from _core.cluster.__main__ import cluster_main
-            cluster_main()
-            time.sleep(1)
             # init environment manager
             Context.set_execute_status(True)
             EnvironmentManager()
@@ -397,16 +389,9 @@ class Console(object):
 
     @classmethod
     def _params_pre_processing(cls, para_list):
-        para_list_len = len(para_list)
-        if para_list_len <= 1:
+        if len(para_list) <= 1 or (
+                len(para_list) > 1 and "-" in str(para_list[1])):
             para_list.insert(1, Task.EMPTY_TASK)
-        elif para_list_len > 1:
-            item1 = str(para_list[1])
-            # cluster的任务id是由日期加时间组成的（如2025-04-12-15-28-10-944103）
-            # 当使用指令“list 任务id”查询任务时，不用加Task.EMPTY_TASK
-            if "-" in item1 and not re.match(r'\d{4}-(?:\d{2}-){5}\d{6}', item1):
-                para_list.insert(1, Task.EMPTY_TASK)
-
         for index, param in enumerate(para_list):
             if param == "--retry":
                 if index + 1 == len(para_list):
@@ -568,9 +553,6 @@ class Console(object):
 
     @classmethod
     def _process_command_run(cls, command, options):
-        test_file = options.testfile.strip()
-        if test_file and enable_cluster() and console_create_task(test_file):
-            return
 
         scheduler = get_plugin(plugin_type=Plugin.SCHEDULER,
                                plugin_id=SchedulerType.scheduler)[0]
@@ -579,37 +561,25 @@ class Console(object):
         else:
             scheduler.exec_command(command, options)
 
+        return
+
     def _process_command_list(self, command, para_list):
         if command != ToolCommandType.toolcmd_key_list:
             LOG.error("Wrong list command.")
-            return
-        if enable_cluster():
-            self._cluster_list(para_list)
             return
         if len(para_list) > 1:
             if para_list[1] == "history":
                 self._list_history()
             elif para_list[1] == "devices" or para_list[1] == Task.EMPTY_TASK:
-                EnvironmentManager().list_devices()
+                env_manager = EnvironmentManager()
+                env_manager.list_devices()
             else:
                 self._list_task_id(para_list[1])
             return
         # list devices
-        EnvironmentManager().list_devices()
-
-    @staticmethod
-    def _cluster_list(para_list):
-        if len(para_list) > 1:
-            item = para_list[1]
-            if item == "history":
-                console_list_task()
-            elif item == "devices" or item == Task.EMPTY_TASK:
-                console_list_devices()
-            else:
-                console_list_task(task_id=item)
-            return
-        # list devices
-        console_list_devices()
+        env_manager = EnvironmentManager()
+        env_manager.list_devices()
+        return
 
     @classmethod
     def _process_command_quit(cls, command):
@@ -631,7 +601,7 @@ class Console(object):
             if tool_name in [ConfigConst.renew_report, ConfigConst.export_report]:
                 report_path = str(getattr(options, ConfigConst.report_path, ""))
                 if not report_path:
-                    LOG.error("report path must be specified, you can pass it with option -rp")
+                    LOG.error("report path must be specified, you can pass it with option -rp ")
                     return
                 cls._report_helper(report_path.split(";"), tool_name)
 

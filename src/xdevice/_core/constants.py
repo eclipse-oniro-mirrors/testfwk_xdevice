@@ -16,7 +16,6 @@
 # limitations under the License.
 #
 
-import platform
 from dataclasses import dataclass
 
 __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
@@ -27,7 +26,7 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
            "DeviceConnectorType", "ReportConst", "DeviceProperties", "AdvanceDeviceOption",
            "LoggerMethod", "LifeStage", "Platform", "HcpTestMode", "DeviceResult",
-           "AgentMode", "CaseResult", "Cluster", "State"]
+           "AgentMode", "CaseResult"]
 
 
 @dataclass
@@ -331,7 +330,7 @@ class ConfigConst(object):
     tag_hdc = "hdc"
 
     # Ignore testcase path
-    ignore_testcases_path = "__pycache__|.git|.svn|.idea|.test"
+    ignore_testcases_path = "__pycache__|.git|.svn|.idea"
 
     screenshot_on_failure = "screenshot_on_failure"
     report_plus = "report_plus"
@@ -345,12 +344,6 @@ class ConfigConst(object):
 
     # if upload track data
     tag_uploadtrack = "uploadtrack"
-
-    # cluster
-    cluster = "cluster"
-    service_mode = "service_mode"
-    service_port = "service_port"
-    control_service_url = "control_service_url"
 
 
 @dataclass
@@ -489,27 +482,3 @@ class CaseResult:
     blocked = "Blocked"
     ignored = "Ignored"
     unavailable = "Unavailable"
-
-
-class Cluster:
-    if platform.system() == "Windows":
-        local_path = "D:\\Local"
-        project_root_path = "D:\\Local\\Projects"
-        report_root_path = "D:\\Local\\Reports"
-    else:
-        local_path = "/data/Local"
-        project_root_path = "/data/Local/Projects"
-        report_root_path = "/data/Local/Reports"
-    service_port = "8000"
-    stars = "***"
-    controller = "controller"
-    worker = "worker"
-    worker_logs = "worker_logs"
-
-
-class State:
-    Waiting = "Waiting"
-    Running = "Running"
-    Completed = "Completed"
-    Stopped = "Stopped"
-    Stopping = "Stopping"
