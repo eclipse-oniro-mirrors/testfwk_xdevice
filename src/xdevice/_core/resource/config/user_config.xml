@@ -15,8 +15,10 @@
 -->
 <user_config>
     <environment>
-        <device type="usb-hdc" label="ohos">
-            <info ip="" port="" sn="" alias=""/>
+        <device type="usb-hdc">
+            <ip></ip>
+            <port></port>
+            <sn></sn>
         </device>
         <device type="com" label="wifiiot">
             <serial>
@@ -81,10 +83,5 @@
             <password></password>
         </wifi>
     </custom>
-    <cluster>
-        <enable>false</enable>
-        <service_mode>controller</service_mode>
-        <service_port></service_port>
-        <control_service_url>http://127.0.0.1:8000</control_service_url>
-    </cluster>
+    <uploadtrack>true</uploadtrack>
 </user_config>
