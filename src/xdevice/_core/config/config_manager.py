@@ -18,6 +18,7 @@
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from xml.etree import ElementTree
 
@@ -26,6 +27,7 @@ from _core.exception import ParamError
 from _core.logger import platform_logger
 from _core.utils import get_local_ip
 from _core.constants import ConfigConst
+from _core.constants import Cluster
 
 __all__ = ["UserConfigManager"]
 LOG = platform_logger("ConfigManager")
@@ -225,6 +227,35 @@ class UserConfigManager(object):
         <custom></custom>
         """
         return self.get_element_cfg("custom")
+
+    @property
+    @initialize
+    def cluster(self):
+        """
+        <cluster>
+          <enable>true/false</enable>
+          <service_mode>controller/worker</service_mode>
+          <service_port>8000</service_port>
+          <control_service_url>http://127.0.0.1:8000</control_service_url>
+        </cluster>
+        """
+        cfg = self.get_element_cfg(ConfigConst.cluster)
+        enable = cfg.get(ConfigConst.tag_enable) or "false"
+        service_mode = cfg.get(ConfigConst.service_mode) or Cluster.controller
+        service_port = cfg.get(ConfigConst.service_port) or Cluster.service_port
+        cfg.update({
+            ConfigConst.tag_enable: enable.lower(),
+            ConfigConst.service_mode: service_mode.lower(),
+            ConfigConst.service_port: service_port.lower()
+        })
+        return cfg
+
+    def enable_cluster(self):
+        enable = self.cluster.get(ConfigConst.tag_enable) == "true"
+        if enable:
+            if sys.version_info < (3, 10, 0):
+                raise Exception(ErrorMessage.Cluster.Code_0104026)
+        return enable
 
     @property
     @initialize

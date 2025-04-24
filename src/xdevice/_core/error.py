@@ -202,10 +202,124 @@ class _UserConfigErr:
                             "suggestions": "设备别名不允许同名"})
 
 
+class _Cluster:
+    """Code_0104xxx，cluster模块使用的错误码"""
+    Code_0104001 = Error(**{"error": "cluster.control_service_url cannot be none",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104001"})
+    Code_0104002 = Error(**{"error": "Unsupported project manage mode '{}'",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104002"})
+    Code_0104003 = Error(**{"error": "The project path does not exist! path: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104003"})
+    Code_0104004 = Error(**{"error": "The configured project relative path does not exist! path: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104004"})
+    Code_0104005 = Error(**{"error": "The git url cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104005"})
+    Code_0104006 = Error(**{"error": "The git username cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104006"})
+    Code_0104007 = Error(**{"error": "The git password cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104007"})
+    Code_0104008 = Error(**{"error": "The git branch cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104008"})
+    Code_0104009 = Error(**{"error": "Non-HTTP git url is not supported, url: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104009"})
+    Code_0104010 = Error(**{"error": "Prepare git project failed",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104010"})
+    Code_0104011 = Error(**{"error": "The svn url cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104011"})
+    Code_0104012 = Error(**{"error": "The svn username cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104012"})
+    Code_0104013 = Error(**{"error": "The svn password cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104013"})
+    Code_0104014 = Error(**{"error": "Prepare svn project failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104014"})
+    Code_0104015 = Error(**{"error": "The downloaded file url cannot be empty",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104015"})
+    Code_0104016 = Error(**{"error": "Download file failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104016"})
+    Code_0104017 = Error(**{"error": "Download file failed because the downloaded file is incomplete",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104017"})
+    Code_0104018 = Error(**{"error": "Extract file failed, file: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104018"})
+    Code_0104019 = Error(**{"error": "用例需要{}个测试设备，所有worker环境上的在线设备数量均小于用例测试设备需求数量",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104019"})
+    Code_0104020 = Error(**{"error": "所有worker环境上在线的设备均不满足用例的要求",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104020"})
+    Code_0104021 = Error(**{"error": "用例json未配置environment，或配置的environment为空",
+                            "category": ErrorCategory.Script,
+                            "code": "0104021"})
+    Code_0104022 = Error(**{"error": "无法运行{}命令",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104022",
+                            "suggestions": "未配置工具的环境变量"})
+    Code_0104023 = Error(**{"error": "zipfile({}) contains {} files exceed max file count",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104023",
+                            "suggestions": "不支持解压文件总个数超过100万的zip压缩包"})
+    Code_0104024 = Error(**{"error": "zipfile({}) size({}) exceed max limit",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104024",
+                            "suggestions": "不支持解压文件总大小超过5GB的zip压缩包"})
+    Code_0104025 = Error(**{"error": "zipfile({}) size({}) exceed remain target disk space",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104025",
+                            "suggestions": "压缩文件总大小超过磁盘剩余空间"})
+    Code_0104026 = Error(**{"error": "To use the cluster test service, upgrade Python to 3.10 or later",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104026",
+                            "suggestions": "使用cluster测试服务，需将Python升级到3.8及之后的版本"})
+    Code_0104027 = Error(**{"error": "failed to create the controller task because the "
+                                     "task template file does not exist, path: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104027"})
+    Code_0104028 = Error(**{"error": "failed to create the controller task because the "
+                                     "task template info is not validated",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104028"})
+    Code_0104029 = Error(**{"error": "create the controller task failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104029"})
+    Code_0104030 = Error(**{"error": "get controller devices failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104030"})
+    Code_0104031 = Error(**{"error": "get controller task(s) failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104031"})
+    Code_0104032 = Error(**{"error": "report worker device failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104032"})
+    Code_0104033 = Error(**{"error": "upload task end failed, {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104033"})
+    Code_0104034 = Error(**{"error": "No device in task info",
+                            "category": ErrorCategory.Environment,
+                            "code": "0104034"})
+
+
 class ErrorMessage:
     Common: _CommonErr = _CommonErr()
     InterfaceImplement: _InterfaceImplementErr = _InterfaceImplementErr()
     UserConfig: _UserConfigErr = _UserConfigErr()
+    Cluster: _Cluster = _Cluster()
 
 
 if __name__ == "__main__":
