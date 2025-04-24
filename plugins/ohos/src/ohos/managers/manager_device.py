@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import re
 import threading
 
 from xdevice import ManagerType
@@ -38,6 +39,7 @@ from xdevice import convert_serial
 from xdevice import check_mode_in_sys
 from xdevice import DeviceNode
 from xdevice import DeviceSelector
+from xdevice import Variables
 
 from ohos.environment.dmlib import DeviceConnector
 from ohos.environment.dmlib import HDC_NAME
@@ -409,12 +411,12 @@ class ManagedDeviceListener(object):
         LOG.debug("Device changed to %s: %s %s %s %s" % (
             new_state, convert_serial(idevice.device_sn),
             idevice.device_os_type, idevice.host, idevice.port))
+        self.report_device(idevice, new_state)
 
     def device_connected(self, idevice):
         test_device = self.manager.find_or_create(idevice)
         if test_device is None:
             return
-
         new_state = TestDeviceState.get_test_device_state(idevice.device_state)
         test_device.test_device_state = new_state
         if test_device.test_device_state == TestDeviceState.ONLINE:
@@ -431,9 +433,10 @@ class ManagedDeviceListener(object):
         LOG.debug("Set device %s %s to true" % (
             convert_serial(idevice.device_sn), ConfigConst.recover_state))
         test_device.set_recover_state(True)
+        self.report_device(idevice, new_state)
 
-    def device_disconnected(self, disconnected_device):
-        test_device = self.manager.find_device(disconnected_device)
+    def device_disconnected(self, idevice):
+        test_device = self.manager.find_device(idevice)
         if test_device is not None:
             test_device.test_device_state = TestDeviceState.NOT_AVAILABLE
             self.manager.handle_device_event(test_device,
@@ -441,6 +444,20 @@ class ManagedDeviceListener(object):
             test_device.device_state_monitor.set_state(
                 TestDeviceState.NOT_AVAILABLE)
         LOG.debug("Device disconnected: %s %s %s %s" % (
-            convert_serial(disconnected_device.device_sn),
-            disconnected_device.device_os_type,
-            disconnected_device.host, disconnected_device.port))
+            convert_serial(idevice.device_sn), idevice.device_os_type,
+            idevice.host, idevice.port))
+        self.report_device(idevice, TestDeviceState.NOT_AVAILABLE)
+
+    @staticmethod
+    def report_device(idevice, device_state):
+        """向controller上报设备的信息和状态"""
+        sn = idevice.device_sn
+        if not Variables.config.enable_cluster() \
+                or re.match(r'COM\d+', sn, flags=re.IGNORECASE):
+            return
+        from xdevice._core.cluster.utils import report_worker_device
+        device_os = idevice.device_os_type
+        device_type, report_state = "", DeviceState.OFFLINE
+        if device_state == TestDeviceState.ONLINE:
+            device_type, report_state = idevice.get_device_type(), DeviceState.ONLINE
+        report_worker_device(sn, "", "", device_os, device_type, report_state)
