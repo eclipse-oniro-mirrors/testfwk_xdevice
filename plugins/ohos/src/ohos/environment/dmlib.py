@@ -858,6 +858,9 @@ class HdcHelper:
                     else:
                         break
                     data = sock.recv(length)
+                    recv_length = len(data)
+                    if recv_length < length:
+                        data += HdcHelper.read(sock, length - recv_length)
                     ret = HdcHelper.reply_to_string(data)
                     if ret:
                         if receiver:
