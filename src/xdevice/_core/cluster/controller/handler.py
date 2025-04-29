@@ -215,21 +215,28 @@ class BlockHandler:
                 if tmp_occupied_devices is not None:
                     pre_occupied_devices.append(tmp_occupied_devices)
 
-            if len(pre_occupied_devices) != len(self._cur_blk_environment):
+            required_devices_cnt = len(self._cur_blk_environment)
+            if len(pre_occupied_devices) < required_devices_cnt:
                 # 匹配下一个ip环境上的设备
                 break
-            # 到这里，用例已成功配置需求设备，检查所有设备是否空闲
+            # 到这里，用例已成功配置需求设备，挑选空闲的设备下发测试用例
             exist_matched_devices = True
-            if self._is_matched_devices_available(pre_occupied_devices):
-                # 预占用设备列表里的设备，均处于空闲可用状态
-                devices_json = jsonable_encoder(pre_occupied_devices)
+            devices = []
+            for pre_occupied_device in pre_occupied_devices:
+                if pre_occupied_device.usage_state != DeviceAllocationState.available:
+                    continue
+                if len(devices) == required_devices_cnt:
+                    break
+            if len(devices) == required_devices_cnt:
+                # 存在足量的空闲设备，向worker下发任务块
+                devices_json = jsonable_encoder(devices)
                 with Session(engine) as session:
                     task_info_json = self._cur_blk_info
                     task_info_json.update({
                         "block_id": self._cur_blk_id,
                         "devices": devices_json
                     })
-                    worker_url = pre_occupied_devices[0].worker_url
+                    worker_url = devices[0].worker_url
                     # 设备占用状态改为“占用”
                     update_devices_usage_state(session, devices_json, DeviceAllocationState.allocated)
                     code, rsp_msg = send_worker_task(task_info_json, worker_url)
@@ -260,14 +267,6 @@ class BlockHandler:
         if expect_device_os != device.os \
                 or expect_device_label and expect_device_label != device.type:
             return False
-        return True
-
-    @staticmethod
-    def _is_matched_devices_available(devices: List[TestDevice]):
-        """检查预占用设备列表里的设备是否均处于空闲可用状态"""
-        for device in devices:
-            if device.usage_state != DeviceAllocationState.available:
-                return False
         return True
 
 
