@@ -19,13 +19,7 @@ from setuptools import setup
 
 install_requires = [
     "requests",
-    "psutil",
     "urllib3<2.1;python_version<'3.8'",
-    "fastapi;python_version>='3.10'",
-    "filelock;python_version>='3.10'",
-    "python-multipart;python_version>='3.10'",
-    "sqlmodel;python_version>='3.10'",
-    "uvicorn;python_version>='3.10'"
 ]
 setup(
     name='xdevice',
@@ -67,6 +61,14 @@ setup(
     zip_safe=False,
     install_requires=install_requires,
     extras_require={
-        "full": ["cryptography"]
+        "full": [
+            "cryptography",
+            "psutil",
+            "fastapi;python_version>='3.10'",
+            "filelock;python_version>='3.10'",
+            "python-multipart;python_version>='3.10'",
+            "sqlmodel;python_version>='3.10'",
+            "uvicorn;python_version>='3.10'"
+        ]
     },
 )
