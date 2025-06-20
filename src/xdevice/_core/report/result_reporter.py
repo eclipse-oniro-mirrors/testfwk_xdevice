@@ -507,6 +507,7 @@ class ResultReporter(IReporter):
                         update_value)
             if failed_cases:
                 self.record_params.update({module_name: failed_cases})
+                self.record_reports.update({module_name: data_report})
 
         if test_suite_elements:
             child = test_suite_elements[-1]
