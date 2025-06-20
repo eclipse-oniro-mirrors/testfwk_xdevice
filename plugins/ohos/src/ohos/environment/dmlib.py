@@ -164,7 +164,7 @@ class HdcMonitor:
                         "for Device List Monitoring" %
                         str(self.connection_attempt))
                     raise HdcError(ErrorMessage.Hdc.Code_0304001.format(
-                        self.channel.get("host"), str(self.channel.get("post"))))
+                        self.channel.get("host"), str(self.channel.get("port"))))
 
                 LOG.debug(
                     "HdcMonitor Connection attempts: %s" %
@@ -340,7 +340,7 @@ class HdcMonitor:
             LOG.error("HdcMonitor Connection handshake: error {}".format(e))
             time.sleep(3)
             raise HdcError(ErrorMessage.Hdc.Code_0304001.format(
-                self.channel.get("host"), self.channel.get("post"))) from e
+                self.channel.get("host"), self.channel.get("port"))) from e
         request = HdcHelper.form_hdc_request('list targets -v')
         HdcHelper.write(self.main_hdc_connection, request)
 

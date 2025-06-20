@@ -16,7 +16,6 @@
 #
 
 import os
-import pkg_resources
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -307,16 +306,39 @@ __all__ = [
 ]
 
 
-def _load_external_plugins():
-    plugins = [Plugin.SCHEDULER, Plugin.DRIVER, Plugin.DEVICE, Plugin.LOG,
-               Plugin.PARSER, Plugin.LISTENER, Plugin.TEST_KIT, Plugin.MANAGER,
-               Plugin.REPORTER]
+def __load_entry_point1(plugin_group, python_version):
+    from importlib.metadata import entry_points
+    if python_version >= (3, 10, 0):
+        for ep in entry_points().select(group=plugin_group):
+            ep.load()
+        return
+    # python3.8、3.9下的实现
+    eps = entry_points().get(plugin_group)
+    if eps is None:
+        return
+    for ep in eps:
+        ep.load()
+
+
+def __load_entry_point2(plugin_group):
+    import pkg_resources
+    for entry_point in pkg_resources.iter_entry_points(group=plugin_group):
+        entry_point.load()
+
+
+def __load_external_plugins():
+    plugins = [
+        Plugin.SCHEDULER, Plugin.DRIVER, Plugin.DEVICE, Plugin.LOG,
+        Plugin.PARSER, Plugin.LISTENER, Plugin.TEST_KIT, Plugin.MANAGER,
+        Plugin.REPORTER
+    ]
+    python_version = sys.version_info
     for plugin_group in plugins:
-        for entry_point in pkg_resources.iter_entry_points(group=plugin_group):
-            entry_point.load()
-    return
+        if python_version >= (3, 8, 0):
+            __load_entry_point1(plugin_group, python_version)
+        else:
+            __load_entry_point2(plugin_group)
 
 
-_load_external_plugins()
-del _load_external_plugins
+__load_external_plugins()
 Variables.config = UserConfigManager()
