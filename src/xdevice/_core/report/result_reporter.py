@@ -479,6 +479,7 @@ class ResultReporter(IReporter):
                 modules[module_name] = list()
             modules[module_name].append(total)
 
+            failed_cases = []
             for child in root:
                 child.tail = self.data_helper.LINE_BREAK_INDENT
                 if not child.get(ReportConstant.module_name) or child.get(
@@ -492,6 +493,11 @@ class ResultReporter(IReporter):
                             ReportConstant.not_run:
                         ignored = int(child.get(ReportConstant.ignored, 0)) + 1
                         child.set(ReportConstant.ignored, "%s" % ignored)
+                    # 记录运行失败的测试用例的编号
+                    if get_case_result(element)[0] != CaseResult.passed:
+                        class_name = element.get(ReportConstant.class_name, "")
+                        name = element.get(ReportConstant.name)
+                        failed_cases.append(f"{class_name}#{name}")
                 test_suite_elements.append(child)
                 for update_attribute in need_update_attributes:
                     update_value = child.get(update_attribute, 0)
@@ -499,6 +505,8 @@ class ResultReporter(IReporter):
                         update_value = 0
                     test_suites_attributes[update_attribute] += int(
                         update_value)
+            if failed_cases:
+                self.record_params.update({module_name: failed_cases})
 
         if test_suite_elements:
             child = test_suite_elements[-1]
