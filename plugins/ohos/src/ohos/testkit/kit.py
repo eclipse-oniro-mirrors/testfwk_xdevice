@@ -511,7 +511,7 @@ class ShellKit(ITestKit):
         else:
             for command in self.tear_down_local_command:
                 LOG.info("Run local command: {}".format(command))
-                ret = exec_cmd(command)
+                ret = exec_cmd(command, timeout=None)
                 LOG.info("command output: {}".format(ret))
 
 
