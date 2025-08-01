@@ -495,6 +495,8 @@ class Device(IDevice):
             timeout = kwargs.get("timeout", TIMEOUT)
             HdcHelper.push_file(self, local, remote, is_create=is_create,
                                 timeout=timeout)
+            if not self.is_file_exist(remote):
+                self.connector_command("file send {} {}".format(local, remote), retry=0)
         if not self.is_file_exist(remote):
             err_msg = ErrorMessage.Device.Code_0303004.format(local, remote)
             LOG.error(err_msg)
