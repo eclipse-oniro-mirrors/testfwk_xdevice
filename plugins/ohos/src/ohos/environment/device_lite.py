@@ -17,7 +17,6 @@
 #
 
 import re
-import telnetlib
 import time
 import os
 import threading
@@ -413,6 +412,7 @@ class RemoteController:
         try:
             if self.telnet:
                 return self.telnet
+            import telnetlib
             self.telnet = telnetlib.Telnet(self.host, self.port,
                                            timeout=TIMEOUT)
         except Exception as error:
