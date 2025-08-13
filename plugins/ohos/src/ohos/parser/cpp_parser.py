@@ -30,6 +30,7 @@ _SKIPPED_TEST_MARKER = "[  SKIPPED ]"
 _FAILED_TEST_MARKER = "[  FAILED  ]"
 _ALT_OK_MARKER = "[    OK    ]"
 _TIMEOUT_MARKER = "[ TIMEOUT  ]"
+_SIGNAL_CORE_DUMPED = r'Signal \d+ \(core dumped\)'
 
 
 LOG = platform_logger("CppTestParser")
@@ -73,7 +74,6 @@ class CppTestParser(IParser):
         self.state_machine.current_suites = None
 
     def parse(self, line):
-
         if self.state_machine.suites_is_started() or line.startswith(
                 _TEST_RUN_MARKER):
             if line.startswith(_START_TEST_RUN_MARKER):
@@ -84,7 +84,7 @@ class CppTestParser(IParser):
                 message = line[len(_INFORMATIONAL_MARKER):].strip()
                 if re.match(pattern, line.strip()):
                     self.handle_suite_ended_tag(message)
-                elif re.match(r'(\d+) test[s]? from (.*)', message):
+                elif re.match(r'(\d+) tests? from (.*)', message):
                     self.handle_suite_started_tag(message)
             elif line.startswith(_TEST_RUN_MARKER):
                 if not self.state_machine.suites_is_running():
@@ -222,7 +222,7 @@ class CppTestParser(IParser):
 
     def handle_suites_started_tag(self, message):
         self.state_machine.get_suites(reset=True)
-        matcher = re.match(r'Running (\d+) test[s]? from .*', message)
+        matcher = re.match(r'Running (\d+) tests? from .*', message)
         expected_test_num = int(matcher.group(1)) if matcher else -1
         if expected_test_num >= 0:
             test_suites = self.state_machine.get_suites()
@@ -235,7 +235,7 @@ class CppTestParser(IParser):
 
     def handle_suite_started_tag(self, message):
         self.state_machine.suite(reset=True)
-        matcher = re.match(r'(\d+) test[s]? from (.*)', message)
+        matcher = re.match(r'(\d+) tests? from (.*)', message)
         expected_test_num = int(matcher.group(1)) if matcher else -1
         if expected_test_num >= 0:
             test_suite = self.state_machine.suite()
@@ -272,9 +272,15 @@ class CppTestParser(IParser):
                                suite_report=True)
 
     def append_test_output(self, message):
-        if self.state_machine.test().stacktrace:
-            self.state_machine.test().stacktrace += "\r\n"
-        self.state_machine.test().stacktrace += message
+        test_result = self.state_machine.test()
+        if test_result.stacktrace:
+            test_result.stacktrace += "\r\n"
+        test_result.stacktrace += message
+        if re.match(_SIGNAL_CORE_DUMPED, message):
+            # 构造临时字符串，复用test_end里的方法
+            temp = f'{test_result.test_class}.{test_result.test_name} (0 ms)'
+            self.handle_test_ended_tag(temp, ResultCode.BLOCKED)
+            self.handle_suite_ended_tag('')
 
     @staticmethod
     def handle_test_run_failed(error_msg):
@@ -342,8 +348,7 @@ class CppTestListParser(IParser):
 
     def parse(self, line):
         class_matcher = re.match('^([a-zA-Z]+.*)\\.$', line)
-        method_matcher = re.match('\\s+([a-zA-Z_]+[\\S]*)(.*)?(\\s+.*)?$',
-                                  line)
+        method_matcher = re.match('\s+([a-zA-Z_]+\S*)(.*)?(\s+.*)?$', line)
         if class_matcher:
             self.last_test_class_name = class_matcher.group(1)
             if self.last_test_class_name not in self.suites:
