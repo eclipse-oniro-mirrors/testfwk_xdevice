@@ -74,6 +74,7 @@
         <repeat></repeat>
         <screenshot>false</screenshot>
         <screenrecorder>false</screenrecorder>
+        <max_driver_threads />
     </taskargs>
     <custom>
         <wifi>

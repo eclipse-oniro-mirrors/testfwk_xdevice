@@ -166,7 +166,7 @@ class BaseScheduler(Sub, ABC):
             params = message_queue, test_drivers, current_driver_threads
             self._queue_monitor_thread = self._start_queue_monitor(*params)
             while test_drivers:
-                if len(current_driver_threads) > 5:
+                if len(current_driver_threads) > self.max_driver_threads_size():
                     time.sleep(3)
                     continue
                 # clear remaining test drivers when scheduler is terminated
@@ -283,4 +283,8 @@ class BaseScheduler(Sub, ABC):
     @classmethod
     @abstractmethod
     def _terminate(cls):
+        pass
+
+    @abstractmethod
+    def max_driver_threads_size(self) -> int:
         pass

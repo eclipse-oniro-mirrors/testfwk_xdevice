@@ -434,13 +434,8 @@ class UserConfigManager(object):
             return True
         return False
 
-    @property
-    @initialize
-    def uploadtrack(self):
-        """
-        Below configuring closes uploading track data.
-        <uploadtrack>FALSE</uploadtrack>
-        """
-        tag = "uploadtrack"
-        cfg = self.get_element_cfg(tag)
-        return cfg
+    def get_max_driver_threads(self):
+        if not self.taskargs or not self.taskargs.get("max_driver_threads"):
+            return 8
+        value = int(self.taskargs.get("max_driver_threads"))
+        return value if value > 0 else 8
