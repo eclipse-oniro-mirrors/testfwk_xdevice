@@ -749,6 +749,9 @@ class Scheduler(BaseScheduler):
                         "Require subsystem=%s part=%s, no device match this"
                         % (module_name, _subsystem, _part))
 
+    def max_driver_threads_size(self):
+        return Variables.config.get_max_driver_threads()
+
 
 class TaskListener(ILifeStageListener):
     def __on_event__(self, stage_event: StageEvent):
