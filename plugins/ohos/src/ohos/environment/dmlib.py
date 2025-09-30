@@ -852,7 +852,7 @@ class HdcHelper:
                 resp = HdcResponse()
                 resp.okay = True
                 while True:
-                    len_buf = sock.recv(DATA_UNIT_LENGTH)
+                    len_buf = HdcHelper.read(sock, DATA_UNIT_LENGTH)
                     if len_buf:
                         length = struct.unpack("!I", len_buf)[0]
                     else:
