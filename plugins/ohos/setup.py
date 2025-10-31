@@ -54,7 +54,8 @@ setup(
             'oh_yara_driver=ohos.drivers.oh_yara_driver',
             'c_driver_lite=ohos.drivers.c_driver_lite',
             'opensource_driver_lite=ohos.drivers.opensource_driver_lite',
-            'build_only_driver_lite=ohos.drivers.build_only_driver_lite'
+            'build_only_driver_lite=ohos.drivers.build_only_driver_lite',
+            'vulkan_driver=ohos.drivers.vulkan_driver'
         ],
         'listener': [
             'listener=ohos.executor.listener',
@@ -77,6 +78,7 @@ setup(
             'oh_kernel_parser=ohos.parser.oh_kernel_parser',
             'oh_rust_parser=ohos.parser.oh_rust_parser',
             'oh_yara_parser=ohos.parser.oh_yara_parser',
+            'vulkan_parser=ohos.parser.vulkan_parser'
         ]
     },
     zip_safe=False,
