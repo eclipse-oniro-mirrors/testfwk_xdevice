@@ -74,6 +74,9 @@ class OHJSUnitTestParser(IParser):
     def get_listeners(self):
         return self.listeners
 
+    def set_test_finish_result_msg(self, msg: str):
+        self.__test_finish_result_msg = msg
+
     def __process__(self, lines):
         for line in lines:
             line = str(line).strip().rstrip("\r")
@@ -360,7 +363,8 @@ class OHJSUnitTestParser(IParser):
                 suite = copy.copy(current_suite)
                 listener.__ended__(LifeCycle.TestSuite, suite, is_clear=True)
 
-    def notify_task_finished(self):
+    def notify_task_finished(self, finish_msg: str = ""):
+        self.set_test_finish_result_msg(finish_msg)
         self.handler_suites_end()
 
     def _handle_result_msg(self, line):
@@ -442,6 +446,9 @@ class OHJSWorkParser(IParser):
 
         # message from test output, the 'TestFinished-ResultMsg'
         self.__test_finish_result_msg = ""
+
+    def set_test_finish_result_msg(self, msg: str):
+        self.__test_finish_result_msg = msg
 
     def __process__(self, lines):
         for line in lines:
@@ -639,7 +646,8 @@ class OHJSWorkParser(IParser):
     def clear_current_test_info(self):
         self.state_machine.current_test = None
 
-    def notify_task_finished(self):
+    def notify_task_finished(self, finish_msg: str = ""):
+        self.set_test_finish_result_msg(finish_msg)
         self.handler_suites_end()
 
     def handler_suites_end(self):
