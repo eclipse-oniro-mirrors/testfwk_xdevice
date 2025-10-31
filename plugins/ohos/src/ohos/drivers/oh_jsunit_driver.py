@@ -294,8 +294,12 @@ class OHJSUnitTestDriver(IDriver):
                  format(len(self.runner.expect_tests_dict.keys()),
                         len(test_to_run) if test_to_run else 0))
         if not test_to_run or not self.rerun:
-            self.runner.run(listener_fixed)
-            self.runner.notify_finished()
+            try:
+                self.runner.run(listener_fixed)
+                self.runner.notify_finished()
+            except Exception as e:
+                self.runner.notify_finished(finish_msg=str(e))
+                raise e
         else:
             self._run_with_rerun(listener_fixed, test_to_run)
 
@@ -307,7 +311,11 @@ class OHJSUnitTestDriver(IDriver):
         test_tracker = CollectingPassListener()
         listener_copy = listener.copy()
         listener_copy.append(test_tracker)
-        self.runner.run(listener_copy)
+        try:
+            self.runner.run(listener_copy)
+        except Exception as e:
+            self.runner.notify_finished(finish_msg=str(e))
+            raise e
         test_run = test_tracker.get_current_run_results()
         return test_run
 
@@ -576,9 +584,9 @@ class OHJSUnitTestRunner:
         self.config.device.execute_shell_command(
             command, timeout=self.config.timeout, receiver=handler, retry=0)
 
-    def notify_finished(self):
+    def notify_finished(self, finish_msg: str = ""):
         if self.finished_observer:
-            self.finished_observer.notify_task_finished()
+            self.finished_observer.notify_task_finished(finish_msg=finish_msg)
         self.retry_times -= 1
 
     def _get_shell_handler(self, listener):
@@ -862,8 +870,12 @@ class OHJSLocalTestDriver(IDriver):
             self.runner.add_arg("coverage", "true")
 
     def _do_test_run(self, listener):
-        self.runner.run(listener)
-        self.runner.notify_finished()
+        try:
+            self.runner.run(listener)
+            self.runner.notify_finished()
+        except Exception as e:
+            self.runner.notify_finished(finish_msg=str(e))
+            raise e
 
     def _collect_test_to_run(self):
         run_results = self.runner.dry_run()
@@ -1003,9 +1015,9 @@ class OHJSLocalTestRunner:
             proc.kill()
             stop_event.set()
 
-    def notify_finished(self):
+    def notify_finished(self, finish_msg: str = ""):
         if self.finished_observer:
-            self.finished_observer.notify_task_finished()
+            self.finished_observer.notify_task_finished(finish_msg=finish_msg)
         self.retry_times -= 1
 
     def _get_shell_handler(self, listener):
