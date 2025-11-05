@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 
 __all__ = ["Constant", "ComType", "HostDrivenTestType",
-           "ParserType", "DeviceLiteKernel", "CKit"]
+           "ParserType", "DeviceLiteKernel", "CKit", "DriverType"]
 
 
 class Constant:
@@ -54,6 +54,7 @@ class ParserType:
     open_source_test = "OpenSourceTest"
     build_only_test = "BuildOnlyTestLite"
     jsuit_test_lite = "JSUnitTestLite"
+    vulkan_test = "VulkanTest"
 
 
 @dataclass
@@ -87,3 +88,7 @@ class CKit:
     component = "ComponentKit"
     permission = "PermissionKit"
     smartperf = "SmartPerfKit"
+
+@dataclass
+class DriverType(object):
+    vulkan_test = "VulkanTest"
