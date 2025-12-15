@@ -23,45 +23,52 @@ cd /d %BASE_DIR%
     goto:eof
 )
 
-python -c "import sys; exit(1) if sys.version_info.major < 3 or sys.version_info.minor < 7 else exit(0)"
+%PYTHON% -c "import sys; exit(1) if sys.version_info.major < 3 or sys.version_info.minor < 7 else exit(0)"
 @if errorlevel 1 (
     @echo "Python3.7 or higher version required!"
     pause
     goto:eof
 )
 
-python -c "import pip"
+%PYTHON% -c "import pip"
 @if errorlevel 1 (
     @echo "Please install pip first!"
     pause
     goto:eof
 )
 
-python -c "import easy_install"
-@if errorlevel 1 (
-    @echo "Please install setuptools first!"
-    goto:eof
-)
-
 if not exist %TOOLS% (
-    @echo "no %TOOLS% directory exist"
+    @echo "%TOOLS% directory not exist"
+    pause
 	goto:eof
 )
 
-python -m pip uninstall -y xdevice
-python -m pip uninstall -y xdevice-extension
-python -m pip uninstall -y xdevice-ohos
+@echo Uninstall all xdevice packages
+for /f "tokens=1 delims= " %%a in ('%PYTHON% -m pip list ^| findstr "^xdevice"') do (
+    %PYTHON% -m pip uninstall -y %%a
+)
+
+@echo.
+@echo Install packages under %BASE_DIR%%TOOLS%
 
 for %%a in (%TOOLS%/*.egg) do (
-    python -m easy_install --user %TOOLS%/%%a
+    %PYTHON% -c "import easy_install"
+    @if errorlevel 1 (
+        @echo "Please install setuptools==46.1.3 first!"
+        goto:eof
+    )
+    %PYTHON% -m easy_install --user "%TOOLS%\%%a"
     @if errorlevel 1 (
       @echo "Error occurs to install %%a!"
     )
 )
+
 for %%a in (%TOOLS%/*.tar.gz) do (
-    python -m pip install --user %TOOLS%/%%a
+    @echo Installing: %%a
+    %PYTHON% -m pip install --user "%TOOLS%\%%a"
     @if errorlevel 1 (
       @echo "Error occurs to install %%a!"
     )
 )
-python -m xdevice %*
+
+%PYTHON% -m xdevice %*

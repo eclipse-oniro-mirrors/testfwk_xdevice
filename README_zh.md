@@ -33,7 +33,7 @@ xdevice
 |     |—— ohos                        # openharmony测试驱动插件
 │           ├── src                   # 扩展模块源码
 │           └── setup.py              # ohos扩展模块安装脚本
-|     |--devicetest                   # devicetest测试驱动插件
+|     |—— devicetest                   # devicetest测试驱动插件
 |           └── setup.py              # deviectest扩展模块安装脚本
 ```
 
@@ -51,18 +51,27 @@ xdevice
 
   1. 打开xdevice安装目录。
 
-  2. 打开控制台，执行如下命令：
+  2. 打开控制台，执行如下命令，编译模块：
     ```
-    python setup.py install
+    python setup.py sdist
+    ```
+  3. 安装编译出来的模块
+    ```
+    python -m pip install dist/xdevice-0.0.0.tar.gz
     ```
 
 - **安装ohos扩展模块**
 
   1. 打开plugins\ohos安装目录。
 
-  2. 打开控制台，执行如下命令：
+  2. 打开控制台，执行如下命令，编译模块：
     ```
-    python setup.py install
+    python setup.py sdist
+    ```
+  
+  3. 安装编译出来的模块
+    ```
+    python -m pip install dist/xdevice-ohos-0.0.0.tar.gz
     ```
 
 - **修改user\_config.xml**
@@ -75,11 +84,13 @@ xdevice
     
        ```xml
        <environment>
-           <!-- 标准系统设备配置>
-           <device type="usb-hdc"> <!-- type: 设备连接方式,usb-hdc表示使用hdc命令控制设备(默认) -->
-               <ip></ip> <!-- ip: 远端设备地址,ip和port为空时使用本地设备,非空时使用远端设备 -->
-               <port></port> <!-- port: 远端设备端口号 -->
-               <sn></sn> <!-- sn: 设备串口号列表,串口号之间用分号;分隔,sn为空时使用所有本地设备,非空时使用指定的sn设备 -->
+           <!-- 标准系统设备配置 -->
+           <!-- type: 设备连接方式,usb-hdc表示使用hdc命令控制设备(默认) -->
+           <device type="usb-hdc" label="ohos">
+               <!-- ip: 远端设备地址,ip和port为空时使用本地设备,非空时使用远端设备 -->
+               <!-- port: 远端设备端口号 -->
+               <!-- sn: 设备序列号列,sn为空时使用所有本地设备,非空时使用指定的sn设备 -->
+               <info ip="" port="" sn=""/>
            </device>
        
            <!-- 轻量系统设备配置(轻量系统设备进行测试时，需要刷入已经集成好测试用例的系统，所以需要配置两个串口进行通信，如设备支持，可以将两个serial标签的com口设置为一致)，可配置多个 -->
