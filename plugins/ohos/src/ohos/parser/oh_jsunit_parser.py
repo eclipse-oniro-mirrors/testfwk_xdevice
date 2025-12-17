@@ -199,6 +199,12 @@ class OHJSUnitTestParser(IParser):
             run_time = get_delta_time_ms(self.start_time)
             test_info.run_time = run_time
             test_info.code = ResultCode.PASSED.value
+        elif test_info.code == StatusCodes.IGNORE.value:
+            self.state_machine.running_test_index += 1
+            test_info.current = self.state_machine.running_test_index
+            run_time = get_delta_time_ms(self.start_time)
+            test_info.run_time = run_time
+            test_info.code = ResultCode.SKIPPED.value
 
     @classmethod
     def output_stack_trace(cls, test_info):

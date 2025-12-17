@@ -16,48 +16,51 @@
 
 set -e
 
-error()
-{
-  echo "$1"
-  exit 1
-}
-PYTHON="python3"
-TOOLS_DIR="tools"
+BASE_DIR=$(dirname "$0")
+PYTHON=python3
+TOOLS=tools
 
-flag=$(command -v $PYTHON | grep -c $PYTHON)
-if [ "$flag" -eq 0 ]; then
-    error "Python3.7 or higher version required!"
+if ! command -v "$PYTHON" &> /dev/null; then
+    echo "Python3.7 or higher version required!"
+    exit 1
 fi
 
-$PYTHON -c 'import sys; exit(1) if sys.version_info.major < 3 or sys.version_info.minor < 7 else exit(0)' || \
-error "Python3.7 or higher version required!"
-cd $(dirname "$0") || error "Failure to change direcory!"
-$PYTHON -c "import pip" || error "Please install pip first!"
-$PYTHON -c "import easy_install" || error "Please install setuptools first!"
-
-if [ ! -d "$TOOLS_DIR" ]; then
-  error "$TOOLS_DIR directory not exists"
+if ! $PYTHON -c "import sys; exit(1) if sys.version_info.major < 3 or sys.version_info.minor < 7 else exit(0)" &> /dev/null; then
+    echo "Python3.7 or higher version required!"
+    exit 1
 fi
 
-$PYTHON -m pip uninstall -y xdevice
-$PYTHON -m pip uninstall -y xdevice-extension
-$PYTHON -m pip uninstall -y xdevice-ohos
+if ! $PYTHON -c "import pip" &> /dev/null; then
+    echo "Please install pip first!"
+    exit 1
+fi
 
-for f in "$TOOLS_DIR"/*.egg
-do
-  if [ ! -e "$f" ]; then
-    error "Can not find xdevice package!"
-  fi
-  $PYTHON -m easy_install --user "$f" || echo "Error occurs to install $f!"
+if [ ! -d "$TOOLS" ]; then
+    echo "$TOOLS directory not exists"
+    exit 1
+fi
+
+echo "Uninstall all xdevice packages"
+packages=$($PYTHON -m pip list | grep "^xdevice" | awk '{print $1}')
+for pkg in $packages; do
+    $PYTHON -m pip uninstall -y "$pkg"
 done
 
-for f in "$TOOLS_DIR"/*.tar.gz
-do
-  if [ ! -e "$f" ]; then
-    error "Can not find xdevice package!"
-  fi
-  $PYTHON -m pip install --user "$f" || echo "Error occurs to install $f!"
+echo
+echo "Install packages under $BASE_DIR/$TOOLS"
+
+for pkg in "$TOOLS"/*.egg; do
+    if ! $PYTHON -c "import easy_install" &> /dev/null; then
+        echo "Please install setuptools==46.1.3 first!"
+        exit 1
+    fi
+    echo "Installing: $pkg"
+    $PYTHON -m easy_install --user "$pkg" || echo "Error occurs to install $pkg!"
+done
+
+for pkg in "$TOOLS"/*.tar.gz; do
+    echo "Installing: $pkg"
+    $PYTHON -m pip install  --user "$pkg" || echo "Error occurs to install $pkg!"
 done
 
 $PYTHON -m xdevice "$@"
-exit 0

@@ -51,7 +51,11 @@ The environment requirements for using this module are as follows:
     2.  Open the console window and run the following command:
 
         ```
-        python setup.py install
+        python setup.py sdist
+        ```
+    3.  Install the complied module
+        ```
+        python -m pip install dist/xdevice-0.0.0.tar.gz
         ```
 
 
@@ -60,7 +64,11 @@ The environment requirements for using this module are as follows:
     2.  Open the console and run the following command:
 
         ```
-        python setup.py install
+        python setup.py sdist
+        ```
+    3.  Install the complied module
+        ```
+        python -m pip install dist/xdevice-ohos-0.0.0.tar.gz
         ```
 
 
