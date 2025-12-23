@@ -17,12 +17,18 @@
 #
 
 import os
+import re
+
 from ohos.drivers import *
 from ohos.error import ErrorMessage
+from ohos.utils import get_ta_class
+from ohos.utils import group_list
+from ohos.utils import print_not_exist_class
+from xdevice import Request
 
 __all__ = ["CppTestDriver"]
 LOG = platform_logger("CppTestDriver")
-DEFAULT_TEST_PATH = "/%s/%s/" % ("data", "test")
+DEFAULT_TEST_PATH = "/data/test/"
 
 FAILED_RUN_TEST_ATTEMPTS = 3
 TIME_OUT = 900 * 1000
@@ -135,7 +141,7 @@ class CppTestDriver(IDriver):
                 self._do_test_retry(listeners, self.config.testargs)
             else:
                 gtest_para_parse(self.config.testargs, self.runner, request)
-                self._do_test_run(listeners)
+                _cpp_run_test(self, request)
 
         finally:
             do_module_kit_teardown(request)
@@ -149,22 +155,25 @@ class CppTestDriver(IDriver):
                 "gtest_filter", "%s.%s" % (test_item[0], test_item[1]))
             self.runner.run(listener)
 
-    def _do_test_run(self, listener):
-        test_to_run = self._collect_test_to_run()
+    def do_test_run(self, listener):
+        test_to_run = self.collect_test_to_run()
         LOG.info("Collected test count is: %s" % (len(test_to_run)
                                                   if test_to_run else 0))
+        filter_class = self.runner.arg_list.get("class", "")
+        if filter_class:
+            ta_class = filter_class.replace(".", "#").split(":")
+            print_not_exist_class(ta_class, test_to_run)
+
         if not test_to_run:
             self.runner.run(listener)
         else:
             self._run_with_rerun(listener, test_to_run)
 
-    def _collect_test_to_run(self):
-        if self.rerun:
-            self.runner.add_instrumentation_arg("gtest_list_tests", True)
-            run_results = self.runner.dry_run()
-            self.runner.remove_instrumentation_arg("gtest_list_tests")
-            return run_results
-        return None
+    def collect_test_to_run(self):
+        self.runner.add_instrumentation_arg("gtest_list_tests", True)
+        run_results = self.runner.dry_run()
+        self.runner.remove_instrumentation_arg("gtest_list_tests")
+        return run_results
 
     def _run_tests(self, listener):
         test_tracker = CollectingTestListener()
@@ -209,6 +218,7 @@ class CppTestDriver(IDriver):
     def _rerun_serially(self, expected_tests, listener):
         LOG.debug("Rerun serially, expected run: %s" % len(expected_tests))
         for test in expected_tests:
+            self.runner.remove_instrumentation_arg("gtest_filter")
             self.runner.add_instrumentation_arg(
                 "gtest_filter", "%s.%s" % (test.class_name, test.test_name))
             self.runner.rerun(listener, test)
@@ -338,13 +348,34 @@ class RemoteCppTestRunner:
             del self.arg_list[name]
 
     def get_args_command(self):
-        args_commands = ""
+        args_commands = []
         for key, value in self.arg_list.items():
+            if key == "test_args":
+                # 跳过拓展的运行参数
+                continue
             if key == "gtest_list_tests":
-                args_commands = "%s --%s" % (args_commands, key)
+                args_commands.append("--gtest_list_tests")
+            elif key == "class":
+                args_commands.append(f"--gtest_filter={value}")
             else:
-                args_commands = "%s --%s=%s" % (args_commands, key, value)
-        return args_commands
+                args_commands.append(f"--{key}={value}")
+
+        pattern = re.compile(r'--(\S+)=\S+')
+        # 处理拓展的运行参数
+        for test_arg in self.arg_list.get("test_args", []):
+            test_arg = str(test_arg).strip()
+            result = re.match(pattern, test_arg)
+            if not result:
+                continue
+            cmd_opt = result.group(1)
+            # 检查命令参数是否重复
+            test_arg_exists = False
+            for cmd_str in args_commands:
+                if cmd_opt in cmd_str:
+                    test_arg_exists = True
+            if not test_arg_exists:
+                args_commands.append(test_arg)
+        return " ".join(args_commands)
 
     def _get_shell_handler(self, listener):
         parsers = get_plugin(Plugin.PARSER, CommonParserType.cpptest)
@@ -375,3 +406,24 @@ def _cpp_output_method(handler, output, end_mark="\n"):
         # not return the tail element of this list contains unfinished str,
         # so we set position -1
         return lines[:-1]
+
+
+def _cpp_run_test(driver: CppTestDriver, request: Request):
+    listeners = request.listeners
+    runner = driver.runner
+    test_args_from_tf = request.get_tf_test_args()
+    if test_args_from_tf:
+        runner.add_instrumentation_arg('test_args', test_args_from_tf)
+
+    filter_class = group_list(get_ta_class(driver, request))
+    if not filter_class:
+        LOG.info('----- run test with no filter class -----')
+        driver.do_test_run(listeners)
+        return
+    LOG.info('----- run test with filter class -----')
+    total = len(filter_class)
+    for index, ta_class in enumerate(filter_class, 1):
+        LOG.info(f'[{index}/{total}] run test with filter class size {len(ta_class)}')
+        runner.add_instrumentation_arg('class', ':'.join(ta_class).replace('#', '.'))
+        driver.do_test_run(listeners)
+        runner.remove_instrumentation_arg('class')

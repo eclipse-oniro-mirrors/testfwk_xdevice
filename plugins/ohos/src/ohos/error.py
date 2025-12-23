@@ -257,10 +257,10 @@ class _DeviceErr:
     Code_0303024 = Error(**{"error": "The harmony device rpc({}) port is not found",
                             "category": ErrorCategory.Environment,
                             "code": "0303024"})
-    Code_0303025 = Error(**{"error": "BIN(ABC) RPC process is not found",
+    Code_0303025 = Error(**{"error": "UI RPC process is not found",
                             "category": ErrorCategory.Environment,
                             "code": "0303025"})
-    Code_0303026 = Error(**{"error": "BIN(ABC) RPC listening port is not found",
+    Code_0303026 = Error(**{"error": "UI RPC listening port is not found",
                             "category": ErrorCategory.Environment,
                             "code": "0303026"})
     Code_0303027 = Error(**{"error": "HAP RPC process is not found",
@@ -269,6 +269,18 @@ class _DeviceErr:
     Code_0303028 = Error(**{"error": "HAP RPC listening port is not found",
                             "category": ErrorCategory.Environment,
                             "code": "0303028"})
+    Code_0303029 = Error(**{"error": "UI PROXY init failed: {}!",
+                            "category": ErrorCategory.Environment,
+                            "code": "0303029"})
+    Code_0303030 = Error(**{"error": "HAP PROXY init failed: {}!",
+                            "category": ErrorCategory.Environment,
+                            "code": "0303030"})
+    Code_0303031 = Error(**{"error": "AI PROXY init failed: {}!",
+                            "category": ErrorCategory.Environment,
+                            "code": "0303031"})
+    Code_0303032 = Error(**{"error": "HAP PROXY handle message failed!",
+                            "category": ErrorCategory.Environment,
+                            "code": "0303032"})
 
 
 class _HdcErr:

@@ -225,6 +225,7 @@ class BlockHandler:
             for pre_occupied_device in pre_occupied_devices:
                 if pre_occupied_device.usage_state != DeviceAllocationState.available:
                     continue
+                devices.append(pre_occupied_device)
                 if len(devices) == required_devices_cnt:
                     break
             if len(devices) == required_devices_cnt:

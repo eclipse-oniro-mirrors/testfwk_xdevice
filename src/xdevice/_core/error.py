@@ -161,6 +161,9 @@ class _CommonErr:
     Code_0101031 = Error(**{"error": "The parameter {} {} is error",
                             "category": ErrorCategory.Environment,
                             "code": "0101031"})
+    Code_0101032 = Error(**{"error": "Resource file/dir does not exist, file: {}",
+                            "category": ErrorCategory.Script,
+                            "code": "0101032"})
 
 
 class _InterfaceImplementErr:

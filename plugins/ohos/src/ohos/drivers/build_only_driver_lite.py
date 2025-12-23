@@ -83,7 +83,7 @@ class BuildOnlyTestDriver(IDriver):
     @classmethod
     def _get_result_list(cls, file_path):
         result_list = list()
-        for root_path, dirs_path, file_names in os.walk(file_path):
+        for root_path, _, file_names in os.walk(file_path):
             for file_name in file_names:
                 if file_name == "logfile":
                     result_list.append(os.path.join(root_path, file_name))

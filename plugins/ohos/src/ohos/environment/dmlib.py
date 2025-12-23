@@ -77,6 +77,7 @@ INVALID_MODE_CODE = -1
 DEFAULT_STD_PORT = 8710
 HDC_NAME = "hdc"
 HDC_STD_NAME = "hdc_std"
+HDC_UDS_ADDRESS = "/data/hdc/hdc_debug/hdc_server"
 LOG = platform_logger("Hdc")
 
 
@@ -87,8 +88,9 @@ class HdcMonitor:
     debuggable process information from it.
     """
     MONITOR_MAP = {}
+    LOCK = threading.RLock()
 
-    def __init__(self, host="127.0.0.1", port=None, device_connector=None):
+    def __init__(self, host="127.0.0.1", port=None, device_connector=None, device_sns=None):
         self.channel = dict()
         self.channel.setdefault("host", host)
         self.channel.setdefault("port", port)
@@ -98,31 +100,38 @@ class HdcMonitor:
         self.monitoring = False
         self.server = device_connector
         self.devices = []
+        self.device_sns = device_sns or []
         self.last_msg_len = 0
         self.changed = True
+        self.server_thread = None
+        self.last_sock_name = None
 
     @staticmethod
-    def get_instance(host, port=None, device_connector=None):
-        if host not in HdcMonitor.MONITOR_MAP:
-            monitor = HdcMonitor(host, port, device_connector)
-            HdcMonitor.MONITOR_MAP[host] = monitor
-            LOG.debug("HdcMonitor map add host %s, map is %s" %
-                      (host, HdcMonitor.MONITOR_MAP))
-
-        return HdcMonitor.MONITOR_MAP[host]
+    def get_instance(host, port=None, device_connector=None, device_sns=None):
+        with HdcMonitor.LOCK:
+            if host not in HdcMonitor.MONITOR_MAP:
+                monitor = HdcMonitor(host, port, device_connector, device_sns)
+                HdcMonitor.MONITOR_MAP[host] = monitor
+                LOG.debug("HdcMonitor map add host %s, map is %s" %
+                          (host, HdcMonitor.MONITOR_MAP))
+                HdcHelper.CONNECTOR_NAME = HdcMonitor.peek_hdc()
+            return HdcMonitor.MONITOR_MAP[host]
 
     def start(self):
         """
         Starts the monitoring.
         """
-        try:
-            server_thread = threading.Thread(target=self.loop_monitor,
-                                             name="HdcMonitor", args=())
-            server_thread.daemon = True
-            server_thread.start()
-        except FileNotFoundError as _:
-            LOG.error("HdcMonitor can't find connector, init device "
-                      "environment failed!")
+        with HdcMonitor.LOCK:
+            if self.server_thread is not None and self.server_thread.is_alive():
+                return
+            try:
+                self.server_thread = threading.Thread(target=self.loop_monitor,
+                                                      name="HdcMonitor", args=())
+                self.server_thread.daemon = True
+                self.server_thread.start()
+            except FileNotFoundError as _:
+                LOG.error("HdcMonitor can't find connector, init device "
+                          "environment failed!")
 
     def init_hdc(self, connector_name=HDC_NAME):
         env_hdc = shutil.which(connector_name)
@@ -132,7 +141,12 @@ class HdcMonitor:
             self.is_stop = True
             LOG.error("Can not find {} or {} environment variable, please set first!".format(HDC_NAME, HDC_STD_NAME))
             LOG.error("Stop {} monitor!".format(HdcHelper.CONNECTOR_NAME))
-        if not is_proc_running(connector_name):
+        if platform.system() == 'HarmonyOS':
+            process_name = "hdc -m -s"
+        else:
+            process_name = connector_name
+
+        if not is_proc_running(process_name):
             port = DEFAULT_STD_PORT
             self.start_hdc(
                 connector=connector_name,
@@ -175,20 +189,22 @@ class HdcMonitor:
         """
         Stops the monitoring.
         """
-        for host in HdcMonitor.MONITOR_MAP:
-            LOG.debug("HdcMonitor stop host %s" % host)
-            monitor = HdcMonitor.MONITOR_MAP[host]
-            try:
-                monitor.is_stop = True
-                if monitor.main_hdc_connection is not None:
-                    monitor.main_hdc_connection.shutdown(2)
-                    monitor.main_hdc_connection.close()
-                    monitor.main_hdc_connection = None
-            except (socket.error, socket.gaierror, socket.timeout) as _:
-                LOG.error("HdcMonitor close socket exception")
-        HdcMonitor.MONITOR_MAP.clear()
-        LOG.debug("HdcMonitor {} monitor stop!".format(HdcHelper.CONNECTOR_NAME))
-        LOG.debug("HdcMonitor map is %s" % HdcMonitor.MONITOR_MAP)
+        with HdcMonitor.LOCK:
+            for host in HdcMonitor.MONITOR_MAP:
+                LOG.debug("HdcMonitor stop host %s" % host)
+                monitor = HdcMonitor.MONITOR_MAP[host]
+                try:
+                    monitor.is_stop = True
+                    if monitor.main_hdc_connection is not None:
+                        monitor.main_hdc_connection.shutdown(2)
+                        monitor.main_hdc_connection.close()
+                        monitor.main_hdc_connection = None
+                        monitor.last_sock_name = None
+                except (socket.error, socket.gaierror, socket.timeout) as _:
+                    LOG.error("HdcMonitor close socket exception")
+            HdcMonitor.MONITOR_MAP.clear()
+            LOG.debug("HdcMonitor {} monitor stop!".format(HdcHelper.CONNECTOR_NAME))
+            LOG.debug("HdcMonitor map is %s" % HdcMonitor.MONITOR_MAP)
 
     def loop_monitor(self):
         """
@@ -222,19 +238,28 @@ class HdcMonitor:
         self.main_hdc_connection = None
 
     def _get_device_instance(self, items, os_type):
+        device_sn = items[0]
+        device_state = items[3]
+        host = self.channel.get("host")
+        port = self.channel.get("port")
+        if self.device_sns and device_sn not in self.device_sns:
+            LOG.debug("Dmlib ignore device {} on {}:{} that is not in config, state: {}".format(
+                device_sn, host, port, device_state))
+            return None
+
         device = get_plugin(plugin_type=Plugin.DEVICE, plugin_id=os_type)[0]
         device_instance = device.__class__()
-        device_instance.__set_serial__(items[0])
-        device_instance.host = self.channel.get("host")
-        device_instance.port = self.channel.get("port")
+        device_instance.__set_serial__(device_sn)
+        device_instance.host = host
+        device_instance.port = port
         if self.changed:
-            if DeviceState.get_state(items[3]) == DeviceState.CONNECTED:
-                LOG.debug("Dmlib get device instance {} {} {}, status: {}".format(
-                    device_instance.device_sn, device_instance.host, device_instance.port, items[3]))
+            if DeviceState.get_state(device_state) == DeviceState.CONNECTED:
+                LOG.debug("Dmlib get device {} on {}:{}, state: {}".format(
+                    device_sn, host, port, device_state))
             else:
-                LOG.debug("Dmlib ignore device instance {} {} {}, status: {}".format(
-                    device_instance.device_sn, device_instance.host, device_instance.port, items[3]))
-        device_instance.device_state = DeviceState.get_state(items[3])
+                LOG.debug("Dmlib ignore device {} on {}:{}, state: {}".format(
+                    device_sn, host, port, device_state))
+        device_instance.device_state = DeviceState.get_state(device_state)
         return device_instance
 
     def update_devices(self, param_array_list):
@@ -272,17 +297,24 @@ class HdcMonitor:
             LOG.debug("HdcMonitor socket connection host: %s, port: %s" %
                       (str(convert_ip(self.channel.get("host"))),
                        str(int(self.channel.get("port")))))
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((self.channel.get("host"),
-                          int(self.channel.get("port"))))
+            if self.channel.get("host") == "127.0.0.1" and platform.system() == 'HarmonyOS':
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.connect(HDC_UDS_ADDRESS)
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((self.channel.get("host"),
+                              int(self.channel.get("port"))))
             return sock
 
         except (socket.error, socket.gaierror, socket.timeout) as exception:
-            LOG.error("HdcMonitor hdc socket connection Error: %s, "
-                      "host is %s, port is %s" % (str(exception),
-                                                  self.channel.get("host"),
-                                                  self.channel.get("port")))
+            if self.channel.get("host") == "127.0.0.1" and platform.system() == 'HarmonyOS':
+                LOG.error("HdcMonitor hdc socket connection Error: {}, "
+                          "address is {}".format(str(exception), HDC_UDS_ADDRESS))
+            else:
+                LOG.error("HdcMonitor hdc socket connection Error: {}, "
+                          "host is {}, port is {}".format(str(exception),
+                                                      self.channel.get("host"),
+                                                      self.channel.get("port")))
             return None
 
     def start_hdc(self, connector=HDC_NAME, kill=False, local_port=None):
@@ -345,9 +377,12 @@ class HdcMonitor:
         HdcHelper.write(self.main_hdc_connection, request)
 
     def process_incoming_target_data(self, length):
-        local_array_list = []
         data_buf = HdcHelper.read(self.main_hdc_connection, length)
+        if not self.is_need_to_handle():
+            return
+        local_array_list = []
         data_str = HdcHelper.reply_to_string(data_buf)
+        LOG.info(data_str)
         if 'Empty' not in data_str:
             lines = data_str.split('\n')
             for line in lines:
@@ -357,6 +392,8 @@ class HdcMonitor:
                     continue
                 device_instance = self._get_device_instance(
                     items, DeviceOsType.default)
+                if not device_instance:
+                    continue
                 local_array_list.append(device_instance)
         else:
             if self.changed:
@@ -375,6 +412,13 @@ class HdcMonitor:
             connector_name = HDC_STD_NAME
         LOG.debug("Peak end")
         return connector_name
+
+    def is_need_to_handle(self):
+        if (self.last_sock_name is not None and self.main_hdc_connection.getsockname() == self.last_sock_name
+                and not self.changed):
+            return False
+        self.last_sock_name = self.main_hdc_connection.getsockname()
+        return True
 
 
 @dataclass
@@ -584,10 +628,10 @@ class SyncService:
             modes = stat.S_IWUSR | stat.S_IRUSR
             with os.fdopen(os.open(local, flags, modes), "rb") as test_file:
                 while True:
-                    if platform.system() == "Linux":
-                        data = test_file.read(1024 * 4)
-                    else:
+                    if platform.system() == "Windows":
                         data = test_file.read(SYNC_DATA_MAX)
+                    else:
+                        data = test_file.read(1024 * 4)
 
                     if not data:
                         break
@@ -787,7 +831,7 @@ class HdcHelper:
                                            package_file_path))
         remote_file_path = "/data/local/tmp/%s" % os.path.basename(
             package_file_path)
-        HdcHelper.push_file(device, package_file_path, remote_file_path)
+        device.push_file(package_file_path, remote_file_path)
         result = HdcHelper._install_remote_package(device, remote_file_path,
                                                    command)
         HdcHelper.execute_shell_command(device, "rm %s " % remote_file_path)
@@ -1023,8 +1067,12 @@ class HdcHelper:
             time.sleep(2)
 
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((host, int(port)))
+            if host == "127.0.0.1" and platform.system() == 'HarmonyOS':
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.connect(HDC_UDS_ADDRESS)
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((host, int(port)))
         except socket.error as exception:
             LOG.exception("Connect hdc server error: %s" % str(exception),
                           exc_info=False)
@@ -1074,16 +1122,15 @@ class DeviceConnector(object):
     __instance = None
     __init_flag = False
 
-    def __init__(self, host=None, port=None, usb_type=None):
+    def __init__(self, host=None, port=None, usb_type=None, device_sns=None):
         if DeviceConnector.__init_flag:
             return
         self.device_listeners = []
         self.device_monitor = None
+        self.device_sns = device_sns or []
         self.monitor_lock = threading.Condition()
         self.host = host if host else "127.0.0.1"
         self.usb_type = usb_type
-        connector_name = HdcMonitor.peek_hdc()
-        HdcHelper.CONNECTOR_NAME = connector_name
         if port:
             self.port = int(port)
         else:
@@ -1091,7 +1138,7 @@ class DeviceConnector(object):
 
     def start(self):
         self.device_monitor = HdcMonitor.get_instance(
-            self.host, self.port, device_connector=self)
+            self.host, self.port, device_connector=self, device_sns=self.device_sns)
         self.device_monitor.start()
 
     def terminate(self):

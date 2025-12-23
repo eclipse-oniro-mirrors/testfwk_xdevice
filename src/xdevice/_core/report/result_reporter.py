@@ -26,6 +26,7 @@ import shutil
 import time
 import stat
 from importlib import util
+from operator import itemgetter
 from xml.etree import ElementTree
 
 from _core.interface import IReporter
@@ -38,20 +39,20 @@ from _core.constants import FilePermission
 from _core.logger import platform_logger
 from _core.exception import ParamError
 from _core.utils import calculate_elapsed_time
+from _core.utils import parse_xml_cdata
 from _core.utils import calculate_percent
 from _core.utils import copy_folder
 from _core.utils import get_filename_extension
-from _core.utils import parse_xml_cdata
 from _core.utils import show_current_environment
+from _core.variables import Variables
 from _core.report.encrypt import check_pub_key_exist
 from _core.report.encrypt import do_rsa_encrypt
+from _core.report.reporter_helper import Case
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ExecInfo
 from _core.report.reporter_helper import ReportConstant
 from _core.report.repeater_helper import RepeatHelper
-from _core.variables import Variables
 from _core.context.center import Context
-from _core.context.handler import get_case_result
 from _core.context.upload import Uploader
 
 LOG = platform_logger("ResultReporter")
@@ -101,6 +102,7 @@ class ResultSummary:
 
 @Plugin(type=Plugin.REPORTER, id=TestType.all)
 class ResultReporter(IReporter):
+    summary_report_result = []
 
     def __init__(self):
         self.report_path = None
@@ -112,6 +114,7 @@ class ResultReporter(IReporter):
         self.repeat_helper = None
         self.summary = ResultSummary()
 
+        self._data_reports = []
         # task_record.info数据
         self._failed_cases = []
         self.record_params = {}
@@ -129,7 +132,8 @@ class ResultReporter(IReporter):
             self._generate_data_report()
 
             # generate vision reports
-            self._generate_test_report()
+            if not self._check_mode(ModeType.decc):
+                self._generate_test_report()
 
             # generate task info record
             self._generate_task_record()
@@ -214,7 +218,8 @@ class ResultReporter(IReporter):
             "exec_info": self._get_exec_info(),
             "summary": self.summary.get_data(),
             "devices": self.summary.get_devices(),
-            "modules": modules,
+            # 先按模块名排序，再按轮次排序
+            "modules": sorted(modules, key=itemgetter("name", "round"))
         }
         return data
 
@@ -258,6 +263,7 @@ class ResultReporter(IReporter):
         file_name = os.path.basename(xml_file)
         try:
             xml_file_open = os.open(xml_file, os.O_RDWR, stat.S_IWUSR | stat.S_IRUSR)
+            xml_str = ""
             with os.fdopen(xml_file_open, mode="r", encoding="utf-8") as file_handler:
                 xml_str = file_handler.read()
             for char_index in range(32):
@@ -356,7 +362,7 @@ class ResultReporter(IReporter):
         """解析测试用例"""
         name = ele_case.get(ReportConstant.name)
         class_name = ele_case.get(ReportConstant.class_name, "")
-        result, error = get_case_result(ele_case)
+        result, error = Case.get_case_result(ele_case)
         if result != CaseResult.passed:
             self._failed_cases.append(f"{class_name}#{name}")
         return [name, class_name, result, ResultReporter._parse_time(ele_case),
@@ -377,8 +383,7 @@ class ResultReporter(IReporter):
             return []
         try:
             devices = json.loads(parse_xml_cdata(devices_str))
-        except Exception as e:
-            LOG.warning(f"parse devices from xml failed, {e}")
+        except SyntaxError:
             return []
         # 汇总测试设备信息
         for device in devices:
@@ -406,7 +411,7 @@ class ResultReporter(IReporter):
         ignored = int(ele.get(ReportConstant.ignored, "0"))
         unavailable = int(ele.get(ReportConstant.unavailable, "0"))
 
-        tmp_pass = tests - failed - blocked - ignored
+        tmp_pass = tests - failed - blocked - ignored - unavailable
         passed = tmp_pass if tmp_pass > 0 else 0
 
         Result = collections.namedtuple(
@@ -458,6 +463,25 @@ class ResultReporter(IReporter):
         if not self._check_mode(ModeType.decc):
             self.data_helper.generate_report(test_suites_element,
                                              self.summary_data_path)
+        if check_pub_key_exist() and self._check_mode(ModeType.decc):
+            self.set_summary_report_result(self.summary_data_path, DataHelper.to_string(test_suites_element))
+            try:
+                from agent.decc import Handler
+                LOG.info("Upload task summary result to decc")
+                Handler.upload_task_summary_results(self.get_result_of_summary_report())
+            except ModuleNotFoundError as error:
+                LOG.error("Module not found %s", error.args)
+
+    @classmethod
+    def set_summary_report_result(cls, summary_data_path, result_xml):
+        cls.summary_report_result.clear()
+        cls.summary_report_result.append((summary_data_path, result_xml))
+
+    @classmethod
+    def get_result_of_summary_report(cls):
+        if cls.summary_report_result:
+            return cls.summary_report_result[0][1]
+        return None
 
     def _update_test_suites(self, test_suites_element):
         # initial attributes for test suites element
@@ -471,7 +495,6 @@ class ResultReporter(IReporter):
             if data_report.endswith(ReportConstant.summary_data_report):
                 continue
             root = self.data_helper.parse_data_report(data_report)
-            self._parse_devices(root)
             if module_name == ReportConstant.empty_name:
                 module_name = self._get_module_name(data_report, root)
             total = int(root.get(ReportConstant.tests, 0))
@@ -479,7 +502,6 @@ class ResultReporter(IReporter):
                 modules[module_name] = list()
             modules[module_name].append(total)
 
-            failed_cases = []
             for child in root:
                 child.tail = self.data_helper.LINE_BREAK_INDENT
                 if not child.get(ReportConstant.module_name) or child.get(
@@ -493,11 +515,6 @@ class ResultReporter(IReporter):
                             ReportConstant.not_run:
                         ignored = int(child.get(ReportConstant.ignored, 0)) + 1
                         child.set(ReportConstant.ignored, "%s" % ignored)
-                    # 记录运行失败的测试用例的编号
-                    if get_case_result(element)[0] != CaseResult.passed:
-                        class_name = element.get(ReportConstant.class_name, "")
-                        name = element.get(ReportConstant.name)
-                        failed_cases.append(f"{class_name}#{name}")
                 test_suite_elements.append(child)
                 for update_attribute in need_update_attributes:
                     update_value = child.get(update_attribute, 0)
@@ -505,9 +522,6 @@ class ResultReporter(IReporter):
                         update_value = 0
                     test_suites_attributes[update_attribute] += int(
                         update_value)
-            if failed_cases:
-                self.record_params.update({module_name: failed_cases})
-                self.record_reports.update({module_name: data_report})
 
         if test_suite_elements:
             child = test_suite_elements[-1]
@@ -570,6 +584,8 @@ class ResultReporter(IReporter):
 
     @property
     def data_reports(self):
+        if self._data_reports:
+            return self._data_reports
         if check_pub_key_exist() or self._check_mode(ModeType.decc):
             from xdevice import SuiteReporter
             suite_reports = SuiteReporter.get_report_result()
@@ -578,25 +594,22 @@ class ResultReporter(IReporter):
                           format(len(suite_reports)))
                 SuiteReporter.clear_history_result()
                 SuiteReporter.append_history_result(suite_reports)
-            data_reports = []
             for report_path, report_result in suite_reports:
                 module_name = get_filename_extension(report_path)[0]
-                data_reports.append((report_result, module_name))
+                self._data_reports.append((report_result, module_name))
             SuiteReporter.clear_report_result()
-            return data_reports
+            return self._data_reports
 
         if not os.path.isdir(self.report_path):
             return []
-        data_reports = []
         result_path = os.path.join(self.report_path, "result")
         for root, _, files in os.walk(result_path):
             for file_name in files:
                 if not file_name.endswith(self.data_helper.DATA_REPORT_SUFFIX):
                     continue
                 module_name = self._find_module_name(result_path, root)
-                data_reports.append((os.path.join(root, file_name),
-                                     module_name))
-        return data_reports
+                self._data_reports.append((os.path.join(root, file_name), module_name))
+        return self._data_reports
 
     @classmethod
     def _find_module_name(cls, result_path, root):
@@ -699,6 +712,7 @@ class ResultReporter(IReporter):
         if Context.command_queue().size() == 0:
             return
         _, command, report_path = Context.command_queue().get(-1)
+        command = command.replace(f" -rp {report_path}", "").replace(f" --reportpath {report_path}", "")
 
         record_info = {
             "command": command,

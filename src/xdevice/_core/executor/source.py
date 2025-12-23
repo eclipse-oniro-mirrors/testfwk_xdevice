@@ -199,7 +199,7 @@ def _get_test_sources(config, testcases_dirs):
         test_file = _get_test_file(config, testcases_dirs)
         flags = os.O_RDONLY
         modes = stat.S_IWUSR | stat.S_IRUSR
-        with os.fdopen(os.open(test_file, flags, modes), "r") as file_content:
+        with os.fdopen(os.open(test_file, flags, modes), "r", encoding="utf-8") as file_content:
             if str(test_file).endswith(".json"):
                 content = file_content.read()
                 source_list, case_dict = parse_source_from_data(content)
@@ -332,12 +332,7 @@ def _make_test_descriptor(file_path, test_type_key):
 
 
 def _get_test_driver(test_source):
-    try:
-        json_config = JsonParser(test_source)
-        return json_config.get_driver_type()
-    except ParamError as error:
-        LOG.error(error, error_no=error.error_no)
-        return ""
+    return JsonParser(test_source).get_driver_type()
 
 
 def _make_test_descriptors_from_testsources(test_sources, config):
@@ -348,14 +343,25 @@ def _make_test_descriptors_from_testsources(test_sources, config):
         if os.path.isfile(test_source):
             filename, ext = get_filename_extension(test_source)
 
-        test_driver = config.testdriver
-        if is_config_str(test_source):
-            test_driver = _get_test_driver(test_source)
-
-        # get params
         config_file = _get_config_file(
             os.path.join(os.path.dirname(test_source), filename), ext, config)
-        test_type = _get_test_type(config_file, test_driver, ext)
+        try:
+            test_driver = config.testdriver
+            if is_config_str(test_source):
+                test_driver = _get_test_driver(test_source)
+            test_type = _get_test_type(config_file, test_driver, ext)
+        except Exception as e:
+            LOG.error(e)
+            from _core.executor.request import Descriptor
+            uid = unique_id("TestSource", filename)
+            if is_config_str(test_source):
+                source = TestSource("", test_source, config_file, filename, "", filename, "")
+            else:
+                source = TestSource(test_source, "", config_file, filename, "", filename, "")
+            desc = Descriptor(uuid=uid, name=filename, source=source)
+            report_not_executed(config.report_path, [("", desc)], str(e))
+            continue
+
         if not config_file:
             if getattr(config, ConfigConst.testcase, "") and not \
                     getattr(config, ConfigConst.testlist):
@@ -383,7 +389,6 @@ def _get_module_info(config_file):
     if not os.path.exists(module_info_path):
         return NO_MODULE_SUBSYSTEM
     try:
-        from _core.testkit.json_parser import JsonParser
         json_config = JsonParser(module_info_path)
         return json_config.get_module_subsystem()
     except ParamError as error:
@@ -524,9 +529,14 @@ def parse_source_from_data(content):
     source_list = list()
     data = dict(json.loads(content))
     case_dict = dict()
-    for item in data.get("suite", list()):
+    suite = []
+    if "suite" in data:
+        suite = data.pop("suite")
+    for item in suite:
         name = item.get("module_name", "")
-        case_dict.update({name: item})
+        case_data = copy.deepcopy(data)
+        case_data.update(item)
+        case_dict.update({name: case_data})
         source_list.append(name)
     return source_list, case_dict
 

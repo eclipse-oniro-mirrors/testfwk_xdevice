@@ -69,7 +69,8 @@ class OHOSUserConfigManager(UserConfigManager):
         device_list = {}
         for node in self.config_content.findall(target_name):
             data_dic = {}
-            if node.attrib["type"] != "usb-hdc":
+            skip_rule = [node.attrib["type"] != "usb-hdc"]
+            if all(skip_rule):
                 continue
             data_dic["usb_type"] = node.attrib["type"]
             for sub in node:

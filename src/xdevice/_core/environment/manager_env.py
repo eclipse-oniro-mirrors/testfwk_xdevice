@@ -46,7 +46,7 @@ class Environment(object):
         ProductForm.car: "Car",
         ProductForm.television: "Tv",
         ProductForm.watch: "Watch",
-        }
+    }
 
     def __init__(self):
         self.devices = []
@@ -206,7 +206,8 @@ class EnvironmentManager(object):
             if not support_labels:
                 continue
             if device_option.label is None:
-                if manager_type != "ManagerDevice":
+                skip_rules = [manager_type != "ManagerDevice"]
+                if all(skip_rules):
                     continue
             else:
                 if support_labels and \
@@ -258,7 +259,8 @@ class EnvironmentManager(object):
                 if device_option.required_manager not in support_types:
                     continue
                 if device_option.label is None:
-                    if manager_type != "ManagerDevice":
+                    skip_rules = [manager_type != "ManagerDevice"]
+                    if all(skip_rules):
                         continue
                 else:
                     if support_labels and \
@@ -332,11 +334,11 @@ class DeviceSelectionOption(object):
     def matches(self, device, allocate=True):
         LOG.debug("Do matches, device:{state:%s, sn:%s, label:%s}, selection "
                   "option:{device sn:%s, label:%s}" % (
-                   device.device_allocation_state,
-                   convert_serial(device.device_sn),
-                   device.label,
-                   [convert_serial(sn) if sn else "" for sn in self.device_sn],
-                   self.label))
+                      device.device_allocation_state,
+                      convert_serial(device.device_sn),
+                      device.label,
+                      [convert_serial(sn) if sn else "" for sn in self.device_sn],
+                      self.label))
         if not getattr(device, "task_state", True):
             return False
         if allocate and device.device_allocation_state != \

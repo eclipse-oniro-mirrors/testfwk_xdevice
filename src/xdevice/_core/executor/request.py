@@ -30,7 +30,7 @@ from _core.plugin import Config
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.testkit.json_parser import JsonParser
-from _core.utils import get_kit_instances
+from _core.testkit.kit import get_kit_instances
 from _core.utils import get_repeat_round
 
 __all__ = ["Descriptor", "Task", "Request"]
@@ -263,3 +263,49 @@ class Request:
         if not source:
             return default
         return getattr(source, key, default)
+
+    def get_ta_class(self):
+        # 从-ta class中提取执行参数，运行命令：run -l xx -ta class:1,2,3
+        test_args = self.get_test_args()
+        ta_class = list(set(test_args.get("class", [])))
+        if ta_class:
+            return ta_class
+        # 从testfile.json中提取执行参数，运行命令：run -tf testfile.json
+        return self.get_tf_class()
+
+    def get_ta_not_class(self):
+        # 从-ta class中提取执行参数，运行命令：run -l xx -ta notClass:1,2,3
+        test_args = self.get_test_args()
+        ta_not_class = list(set(test_args.get("notClass", [])))
+        if ta_not_class:
+            return ta_not_class
+        # 从testfile.json中提取执行参数，运行命令：run -tf testfile.json
+        return self.get_tf_not_class()
+
+    def get_test_args(self):
+        return self.config.testargs
+
+    def get_tf_config(self, key: str = "", default=None):
+        testfile_cfg = getattr(self.config, "tf_suite", {})
+        if not key:
+            return testfile_cfg
+        return testfile_cfg.get(key, default)
+
+    def get_tf_class(self):
+        # 原先testfile.json是用cases字段，表示要运行的用例，现统一用class
+        return list(set(self.get_tf_config("class", []) or self.get_tf_config("cases", [])))
+
+    def get_tf_not_class(self):
+        return list(set(self.get_tf_config("notClass", [])))
+
+    def get_tf_kits(self):
+        return self.get_tf_config("kits", [])
+
+    def get_tf_test_args(self):
+        return self.get_tf_config("test_args", [])
+
+    def get_tf_loop_tests(self):
+        loop_tests = self.get_tf_config("loop_tests", {})
+        strategies = self.get_tf_config("loop_tests_strategies", {})
+        strategies.update(loop_tests)
+        return strategies

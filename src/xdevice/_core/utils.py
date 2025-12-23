@@ -16,38 +16,37 @@
 # limitations under the License.
 #
 
-import copy
 import os
 import re
+import shlex
 import shutil
 import socket
 import sys
 import time
+import pathlib
 import platform
 import argparse
 import subprocess
-import signal
 import uuid
 import json
 import stat
-from datetime import timezone
-from datetime import timedelta
+import glob
+import hashlib
 from datetime import datetime
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, SpooledTemporaryFile
 
 from _core.error import ErrorCategory
 from _core.error import ErrorMessage
 from _core.executor.bean import SuiteResult
 from _core.driver.parser_lite import ShellHandler
 from _core.exception import ParamError
-from _core.exception import ExecuteTerminate
+from _core.exception import TestError
 from _core.logger import platform_logger
 from _core.report.suite_reporter import SuiteReporter
 from _core.plugin import get_plugin
 from _core.plugin import Plugin
 from _core.constants import ModeType
 from _core.constants import CaseResult
-from _core.constants import ConfigConst
 
 LOG = platform_logger("Utils")
 
@@ -80,9 +79,21 @@ def start_standing_subprocess(cmd, pipe=subprocess.PIPE, return_result=False):
         The subprocess that got started.
     """
     sys_type = platform.system()
-    process = subprocess.Popen(cmd, stdout=pipe, shell=False,
-                               preexec_fn=None if sys_type == "Windows"
-                               else os.setsid)
+    if sys_type == "Darwin":
+        # 执行spawn模式
+        if isinstance(cmd, list):
+            cmd = " ".join(cmd)
+        unix_shell = '/bin/sh'
+        cmd = [unix_shell, "-c"] + [cmd]
+        close_fds = False
+        preexec_fn = None
+    elif sys_type == "Windows":
+        close_fds = True
+        preexec_fn = None
+    else:
+        close_fds = True
+        preexec_fn = os.setsid
+    process = subprocess.Popen(cmd, stdout=pipe, shell=False, close_fds=close_fds, preexec_fn=preexec_fn)
     if not return_result:
         return process
     else:
@@ -127,8 +138,24 @@ def is_proc_running(pid, name=None):
         proc = subprocess.Popen(["C:\\Windows\\System32\\findstr", "/B", "%s" % pid],
                                 stdin=proc_sub.stdout,
                                 stdout=subprocess.PIPE, shell=False)
-    elif platform.system() == "Linux":
-        # /bin/ps -ef | /bin/grep -v grep | /bin/grep -w pid
+    elif platform.system() == "Darwin":
+        unix_shell = '/bin/sh'
+        proc_sub_cmd = [unix_shell, "-c"] + [" ".join(["/bin/ps", "-ef"])]
+
+        proc_sub = subprocess.Popen(proc_sub_cmd,
+                                    stdout=subprocess.PIPE,
+                                    shell=False, close_fds=False)
+        proc_v_sub_cmd = [unix_shell, "-c"] + [" ".join(["/usr/bin/grep", "-v", "grep"])]
+        proc_v_sub = subprocess.Popen(proc_v_sub_cmd,
+                                      stdin=proc_sub.stdout,
+                                      stdout=subprocess.PIPE,
+                                      shell=False, close_fds=False)
+
+        proc_cmd = [unix_shell, "-c"] + [" ".join(["/usr/bin/grep", "-w", "%s" % pid])]
+        proc = subprocess.Popen(proc_cmd, stdin=proc_v_sub.stdout,
+                                stdout=subprocess.PIPE, shell=False,
+                                close_fds=False)
+    else:
         proc_sub = subprocess.Popen(["/bin/ps", "-ef"],
                                     stdout=subprocess.PIPE,
                                     shell=False)
@@ -139,19 +166,6 @@ def is_proc_running(pid, name=None):
         proc = subprocess.Popen(["/bin/grep", "-w", "%s" % pid],
                                 stdin=proc_v_sub.stdout,
                                 stdout=subprocess.PIPE, shell=False)
-    elif platform.system() == "Darwin":
-        proc_sub = subprocess.Popen(["/bin/ps", "-ef"],
-                                    stdout=subprocess.PIPE,
-                                    shell=False)
-        proc_v_sub = subprocess.Popen(["/usr/bin/grep", "-v", "grep"],
-                                      stdin=proc_sub.stdout,
-                                      stdout=subprocess.PIPE,
-                                      shell=False)
-        proc = subprocess.Popen(["/usr/bin/grep", "-w", "%s" % pid],
-                                stdin=proc_v_sub.stdout,
-                                stdout=subprocess.PIPE, shell=False)
-    else:
-        raise Exception(ErrorMessage.Common.Code_0101001)
 
     (out, _) = proc.communicate(timeout=60)
     out = get_decode(out).strip()
@@ -178,46 +192,35 @@ def exec_cmd(cmd, timeout=5 * 60, error_print=True, join_result=False, redirect=
     Returns:
         The output of the command run.
     """
-    # PIPE本身可容纳的量比较小，所以程序会卡死，所以一大堆内容输出过来的时候，会导致PIPE不足够处理这些内容，因此需要将输出内容定位到其他地方，例如临时文件等
-    import tempfile
-    out_temp = tempfile.SpooledTemporaryFile(max_size=10 * 1000)
-    fileno = out_temp.fileno()
+    close_fds = True
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    if platform.system() == "Darwin":
+        # 执行spawn模式
+        if isinstance(cmd, list):
+            cmd = " ".join(cmd)
+        unix_shell = '/bin/sh'
+        cmd = [unix_shell, "-c"] + [cmd]
+        close_fds = False
 
-    sys_type = platform.system()
-    if sys_type == "Linux" or sys_type == "Darwin":
-        if redirect:
-            proc = subprocess.Popen(cmd, stdout=fileno,
-                                    stderr=fileno, shell=False,
-                                    preexec_fn=os.setsid)
-        else:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, shell=False,
-                                    preexec_fn=os.setsid)
+    # PIPE本身可容纳的量比较小，所以程序会卡死，所以一大堆内容输出过来的时候，会导致PIPE不足够处理这些内容，因此需要将输出内容定位到其他地方，例如临时文件等
+    if redirect:
+        out_temp = SpooledTemporaryFile(max_size=10 * 1000)
+        file_no = out_temp.fileno()
+        proc = subprocess.Popen(cmd, stdout=file_no, stderr=file_no, close_fds=close_fds)
     else:
-        if redirect:
-            proc = subprocess.Popen(cmd, stdout=fileno,
-                                    stderr=fileno, shell=False)
-        else:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, shell=False)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=close_fds)
     try:
-        (out, err) = proc.communicate(timeout=timeout)
-        err = get_decode(err).strip()
+        out, err = proc.communicate(timeout=timeout)
         out = get_decode(out).strip()
         if err and error_print:
-            LOG.exception(err, exc_info=False)
+            LOG.error(get_decode(err).strip())
         if join_result:
-            return "%s\n %s" % (out, err) if err else out
-        else:
-            return err if err else out
-
+            return "%s\n %s" % (out, get_decode(err).strip()) if err else out
+        return out
     except (TimeoutError, KeyboardInterrupt, AttributeError, ValueError,  # pylint:disable=undefined-variable
             EOFError, IOError, subprocess.TimeoutExpired) as e:
-        sys_type = platform.system()
-        if sys_type == "Linux" or sys_type == "Darwin":
-            os.killpg(proc.pid, signal.SIGTERM)
-        else:
-            os.kill(proc.pid, signal.SIGINT)
+        proc.kill()
         raise e
 
 
@@ -498,6 +501,12 @@ def convert_port(port):
 
 
 def convert_serial(serial):
+    if getattr(sys, "decc_mode", False):
+        if serial.startswith("local_"):
+            return "local_" + '*' * (len(serial) - 6)
+        else:
+            length = len(serial) // 3
+            return serial[0:length] + "*" * (len(serial) - length * 2) + serial[-length:]
     if serial.startswith("remote_"):
         return "remote_{}_{}".format(convert_ip(serial.split("_")[1]),
                                      convert_port(serial.split("_")[-1]))
@@ -536,56 +545,6 @@ def get_shell_handler(request, parser_type):
         parser_instances.append(parser_instance)
     handler = ShellHandler(parser_instances)
     return handler
-
-
-def get_kit_instances(json_config, resource_path="", testcases_path=""):
-    from _core.testkit.json_parser import JsonParser
-    kit_instances = []
-
-    # check input param
-    if not isinstance(json_config, JsonParser):
-        return kit_instances
-
-    # get kit instances
-    for kit in json_config.config.kits:
-        kit["paths"] = [resource_path, testcases_path]
-        kit_type = kit.get("type", "")
-        device_name = kit.get("device_name", None)
-        if get_plugin(plugin_type=Plugin.TEST_KIT, plugin_id=kit_type):
-            test_kit = \
-                get_plugin(plugin_type=Plugin.TEST_KIT, plugin_id=kit_type)[0]
-            test_kit_instance = test_kit.__class__()
-            test_kit_instance.__check_config__(kit)
-            setattr(test_kit_instance, "device_name", device_name)
-            kit_instances.append(test_kit_instance)
-        else:
-            raise ParamError(ErrorMessage.Common.Code_0101003.format(kit_type))
-    return kit_instances
-
-
-def check_device_name(device, kit, step="setup"):
-    kit_device_name = getattr(kit, "device_name", None)
-    device_name = device.get("name")
-    if kit_device_name and device_name and \
-            kit_device_name != device_name:
-        return False
-    if kit_device_name and device_name:
-        LOG.debug("Do kit:%s %s for device:%s",
-                  kit.__class__.__name__, step, device_name)
-    else:
-        LOG.debug("Do kit:%s %s", kit.__class__.__name__, step)
-    return True
-
-
-def check_device_env_index(device, kit):
-    if not hasattr(device, "env_index"):
-        return True
-    kit_device_index_list = getattr(kit, "env_index_list", None)
-    env_index = device.get("env_index")
-    if kit_device_index_list and env_index and \
-            len(kit_device_index_list) > 0 and env_index not in kit_device_index_list:
-        return False
-    return True
 
 
 def check_path_legal(path):
@@ -661,38 +620,6 @@ def check_mode(mode):
     return Context.session().mode == mode
 
 
-def do_module_kit_setup(request, kits):
-    for device in request.get_devices():
-        setattr(device, ConfigConst.module_kits, [])
-
-    from _core.context.center import Context
-    for kit in kits:
-        run_flag = False
-        for device in request.get_devices():
-            if not Context.is_executing():
-                raise ExecuteTerminate()
-            if not check_device_env_index(device, kit):
-                continue
-            if check_device_name(device, kit):
-                run_flag = True
-                kit_copy = copy.deepcopy(kit)
-                module_kits = getattr(device, ConfigConst.module_kits)
-                module_kits.append(kit_copy)
-                kit_copy.__setup__(device, request=request)
-        if not run_flag:
-            err_msg = ErrorMessage.Common.Code_0101004.format(kit.__class__.__name__)
-            LOG.error(err_msg)
-            raise ParamError(err_msg)
-
-
-def do_module_kit_teardown(request):
-    for device in request.get_devices():
-        for kit in getattr(device, ConfigConst.module_kits, []):
-            if check_device_name(device, kit, step="teardown"):
-                kit.__teardown__(device)
-        setattr(device, ConfigConst.module_kits, [])
-
-
 def get_current_time():
     current_time = time.time()
     local_time = time.localtime(current_time)
@@ -707,11 +634,7 @@ def check_mode_in_sys(mode):
 
 
 def get_cst_time():
-    sh_tz = timezone(
-        timedelta(hours=8),
-        name='Asia/Shanghai',
-    )
-    return datetime.now(tz=sh_tz)
+    return datetime.now()
 
 
 def get_delta_time_ms(start_time):
@@ -832,6 +755,10 @@ def copy_folder(src, dst):
             copy_folder(fr_path, to_path)
 
 
+def convert_time(time_str: str, fmt: str = "%Y-%m-%d %H:%M:%S"):
+    return time.mktime(time.strptime(time_str, fmt))
+
+
 def show_current_environment():
     try:
         LOG.debug("Show the current environment. Please wait.")
@@ -856,7 +783,7 @@ def check_uitest_version(uitest_version_info: str, base_version: tuple) -> bool:
 
 def parse_xml_cdata(content: str) -> str:
     """
-    提取CDATA标签里面的内容
+    提取CDATA标签里的内容
     :param content: 内容
     :return: 返回content或者移除CDATA的内容
     """
@@ -865,3 +792,99 @@ def parse_xml_cdata(content: str) -> str:
         if ret is not None:
             return ret.group(1)
     return content
+
+
+def find_file(base_dir: str, name: str, is_dir: bool = False) -> str:
+    """
+    在给定目录下查找指定名称的文件，返回第一个找到的文件路径
+    :param base_dir: 基础目录路径
+    :param name: 要查找的文件名或相对路径
+    :param is_dir: 果为True则搜索文件夹，否则搜索文件
+    :return: 找到的文件完整路径，如果未找到则返回None
+    """
+    path_name = name.replace('\\', os.sep)
+
+    base_name = os.path.basename(path_name)
+    full_path = os.path.join(base_dir, path_name)
+    if is_dir:
+        if os.path.isdir(full_path):
+            return full_path
+    else:
+        if os.path.isfile(full_path):
+            return full_path
+
+    if path_name == base_name:
+        for root, dirs, files in os.walk(base_dir):
+            if is_dir:
+                if base_name in dirs:
+                    return os.path.join(root, base_name)
+            else:
+                if base_name in files:
+                    return os.path.join(root, base_name)
+        return None
+
+    path_parts = path_name.split(os.sep)
+    suffixes = []
+
+    for i in range(len(path_parts)):
+        suffix = os.sep.join(path_parts[i:])
+        suffixes.append(suffix)
+
+    for suffix in sorted(suffixes, key=len, reverse=True):
+        if suffix == base_name:
+            continue
+
+        pattern = os.path.join(base_dir, "**", suffix)
+        matches = glob.glob(pattern, recursive=True)
+
+        if matches:
+            for match in matches:
+                if is_dir and os.path.isdir(match):
+                    return match
+                elif not is_dir and os.path.isfile(match):
+                    return match
+
+    return None
+
+
+def get_resource_path(name: str, is_dir: bool = False) -> str:
+    """
+    在resource目录下查找对应文件
+    :param name: 文件名字
+    :param is_dir: 是否是文件
+    :return:
+    """
+
+    LOG.debug("find {}, is dir: {}".format(name, is_dir))
+    result = None
+    from xdevice import EnvPool
+    if EnvPool.resource_path is not None:
+        result = find_file(EnvPool.resource_path, name, is_dir)
+
+    if result is None:
+        from xdevice import Variables
+        if Variables.config and Variables.config.get_resource_path():
+            result = find_file(Variables.config.get_resource_path(), name, is_dir)
+    LOG.debug("find result: {}".format(result))
+
+    if result is None:
+        err_msg = ErrorMessage.Common.Code_0101032.format(name)
+        LOG.error(err_msg)
+        raise TestError(err_msg, "0101032")
+
+    return result
+
+
+def get_uid():
+    xdevice_path = os.path.join(pathlib.Path.home(), '.xdevice')
+    if os.path.exists(xdevice_path):
+        for filename in os.listdir(xdevice_path):
+            if filename.startswith('events_') and filename.endswith('.db'):
+                return filename[7:-3]
+    return str(uuid.uuid4()).replace('-', '')
+
+
+def get_user_id(pass_through: str = ''):
+    uid_date = get_uid() + get_cst_time().strftime('%Y-%m-%d')
+    uid_hash = hashlib.sha256(uid_date.encode('utf-8')).hexdigest()
+    return 'hypium_' + uid_hash[:32]

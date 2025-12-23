@@ -19,10 +19,13 @@
 from abc import ABC
 from abc import abstractmethod
 from enum import Enum
+from typing import List
+
+from _core.constants import DeviceProperties
 
 __all__ = ["LifeCycle", "IDevice", "IDriver", "IListener", "IShellReceiver",
            "IParser", "ITestKit", "IScheduler", "IDeviceManager", "IReporter",
-           "IFilter"]
+           "IFilter", "IProxy"]
 
 
 class LifeCycle(Enum):
@@ -83,6 +86,30 @@ class IDeviceManager(ABC):
     def list_devices(self):
         pass
 
+    @staticmethod
+    def init_devices_config(configs: dict, devices: List[dict], devices_sn_filter: List[str]):
+        # devices的数据格式：[{"ip": "", "port": "", "sn": "", "alias": "", "reboot_timeout": ""}, ...]
+        for device in devices:
+            reboot_timeout = device.get(DeviceProperties.reboot_timeout, "").strip()
+            try:
+                if float(reboot_timeout) <= 0:
+                    reboot_timeout = ""
+            except ValueError:
+                reboot_timeout = ""
+            device.update({DeviceProperties.reboot_timeout: reboot_timeout})
+
+            sn = device.get(DeviceProperties.sn, "")
+            for s in sn.split(";"):
+                s = s.strip()
+                if s:
+                    devices_sn_filter.append(s)
+            if sn:
+                configs.update({sn: device})
+                continue
+            if reboot_timeout:
+                # 设备sn为空，reboot_timeout不为空，所有设备重启后的等待时长设为一样
+                configs.update({DeviceProperties.reboot_timeout: reboot_timeout})
+
 
 class IDevice(ABC):
     """
@@ -92,7 +119,9 @@ class IDevice(ABC):
     __slots__ = ()
     extend_value = {}
     env_index = None
-
+    screenshot = False
+    screenshot_fail = True
+    
     @abstractmethod
     def __set_serial__(self, device_sn=""):
         pass
@@ -368,6 +397,36 @@ class IReporter(ABC):
     def __subclasshook__(cls, class_info):
         if cls is IReporter:
             return _check_methods(class_info, "__generate_reports__")
+        return NotImplemented
+
+
+class IProxy(ABC):
+    """
+    An extension plug-in used to extend device capabilities.
+    """
+    __slots__ = ()
+
+    @abstractmethod
+    def __set_device__(self, device):
+        pass
+
+    @abstractmethod
+    def __init_proxy__(self):
+        pass
+
+    @abstractmethod
+    def __reconnect_proxy__(self):
+        pass
+
+    @abstractmethod
+    def __clean_proxy__(self):
+        pass
+
+    @classmethod
+    def __subclasshook__(cls, class_info):
+        if cls is IReporter:
+            return _check_methods(class_info, "__set_device__", "__init_proxy__", "__reconnect_proxy__",
+                                  "__clean_proxy__")
         return NotImplemented
 
 

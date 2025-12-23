@@ -36,6 +36,8 @@ class CaseResult:
     current = 0
     report = ""
     result_content = ""
+    tests_result = []
+    starttime = ""
 
     # hts参数
     normal_screen_urls = ""

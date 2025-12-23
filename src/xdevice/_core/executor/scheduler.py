@@ -24,6 +24,7 @@ import shutil
 import json
 import threading
 from collections import Counter
+
 from _core.context.impl import BaseScheduler
 from _core.context.result import ExecuteFinished
 from _core.utils import unique_id
@@ -405,10 +406,6 @@ class Scheduler(BaseScheduler):
         error_message = str(exception)
         LOG.exception(error_message, exc_info=False, error_no=exception.error_no)
         report_not_executed(task.config.report_path, [test_driver], error_message, task)
-        test_source = test_driver[1].source
-        case_id = test_source.module_name or test_source.test_name
-        Uploader.upload_unavailable_result(error_message, case_id=case_id)
-        LOG.info("")
 
     def _start_driver_thread(self, current_driver_threads, thread_params):
         environment, message_queue, task, test_driver = thread_params
@@ -450,20 +447,21 @@ class Scheduler(BaseScheduler):
 
     def _display_executing_process(self, environment, test_driver,
                                    test_drivers):
-        source_content = test_driver[1].source.source_file or \
-                         test_driver[1].source.source_string
+        source = test_driver[1].source
+        source_content = source.source_file or source.source_string
+        test_type = source.test_type
         if environment is None:
             LOG.info("[%d / %d] Executing: %s, Driver: %s" %
                      (self.test_number - len(test_drivers) + 1,
                       self.test_number, source_content,
-                      test_driver[1].source.test_type))
+                      test_type))
             return
 
         LOG.info("[%d / %d] Executing: %s, Device: %s, Driver: %s" %
                  (self.test_number - len(test_drivers) + 1,
                   self.test_number, source_content,
                   environment.__get_serial__(),
-                  test_driver[1].source.test_type))
+                  test_type))
 
     @classmethod
     def _get_thread_name(cls, current_driver_threads):
@@ -497,12 +495,13 @@ class Scheduler(BaseScheduler):
 
     def _on_execute_finished_(self, task, result: ExecuteFinished):
         TSD.reset_test_dict_source()
+        LOG.debug('Starting to notify stage...')
+        self.notify_stage(TaskEnd(task.config.report_path, result.unavailable, result.error_msg))
+        LOG.debug('Starting to upload task result...')
+        Uploader.upload_task_result(task, result.error_msg)
         if getattr(task.config, ConfigConst.test_environment, "") or \
                 getattr(task.config, ConfigConst.configfile, ""):
             self._restore_environment()
-
-        self.notify_stage(TaskEnd(task.config.report_path, result.unavailable, result.error_msg))
-        Uploader.upload_task_result(task, result.error_msg)
         self.upload_report_end()
 
     @staticmethod

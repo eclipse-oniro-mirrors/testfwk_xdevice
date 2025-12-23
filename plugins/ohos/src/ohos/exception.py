@@ -22,7 +22,7 @@ __all__ = ["LiteDeviceConnectError", "LiteDeviceTimeout", "LiteParamError",
            "LiteDeviceError", "LiteDeviceExecuteCommandError",
            "LiteDeviceMountError", "LiteDeviceReadOutputError", "OHOSRpcNotRunningError", "HDCFPortError",
            "OHOSRpcStartFailedError", "OHOSRpcPortNotFindError", "OHOSRpcProcessNotFindError",
-           "OHOSDeveloperModeNotTrueError"]
+           "OHOSDeveloperModeNotTrueError", "OHOSProxyInitFailed", "OHOSRpcHandleError"]
 
 
 class LiteDeviceError(Exception):
@@ -169,3 +169,18 @@ class OHOSRpcProcessNotFindError(OHOSRpcNotRunningError):
 class OHOSDeveloperModeNotTrueError(OHOSRpcNotRunningError):
     def __init__(self, error_msg, error_no="", device=None):
         super(OHOSDeveloperModeNotTrueError, self).__init__(error_msg, error_no, device)
+
+
+class OHOSProxyInitFailed(RpcNotRunningError):
+    def __init__(self, error_msg, error_no=""):
+        super(RpcNotRunningError, self).__init__(error_msg, error_no)
+
+
+class OHOSRpcHandleError(Exception):
+    def __init__(self, error_msg, error_no=""):
+        super(OHOSRpcHandleError, self).__init__(error_msg, error_no)
+        self.error_msg = error_msg
+        self.error_no = error_no
+
+    def __str__(self):
+        return str(self.error_msg)

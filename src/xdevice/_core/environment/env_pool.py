@@ -52,6 +52,7 @@ class EnvPool(object):
     __init_flag = False
     report_path = None
     resource_path = None
+    generate_report = True
 
     def __new__(cls, *args, **kwargs):
         """
@@ -64,6 +65,7 @@ class EnvPool(object):
 
     def __init__(self, **kwargs):
         EnvPool.report_path = kwargs.get("report_path", "")
+        EnvPool.generate_report = kwargs.get("generate_report", True)
         self._stop_task_log()
         self._start_task_log()
         if EnvPool.__init_flag:
@@ -84,15 +86,21 @@ class EnvPool(object):
     def _load_managers(self):
         LOG.info("Load Managers ...")
         from xdevice import EnvironmentManager
+        # 通过_EnvironmentManager__init_flag、_EnvironmentManager__instance访问私有属性
         if EnvironmentManager._EnvironmentManager__init_flag:
-            LOG.info("Managers has inited, using EnvironmentManager managers...")
-            self._managers = EnvironmentManager._EnvironmentManager__instance.managers
-            return
+            LOG.info("The environment manager has been initialized, and we need to reinitialize it "
+                     "to ensure that the device is properly initialized")
+            env_manager = EnvironmentManager()
+            env_manager.env_stop()
+            time.sleep(3)
         manager_plugins = get_plugin(Plugin.MANAGER)
         for manager_plugin in manager_plugins:
+            manager_name = manager_plugin.__class__.__name__
+            if manager_name in self._managers:
+                continue
             try:
                 manager_instance = manager_plugin.__class__()
-                self._managers[manager_instance.__class__.__name__] = manager_instance
+                self._managers[manager_name] = manager_instance
             except Exception as error:
                 LOG.error("Pool start error: {}".format(error))
         # 倒序排列, 优先加载OH设备
@@ -125,11 +133,15 @@ class EnvPool(object):
         for manager in self._managers.values():
             if not isinstance(manager, IFilter):
                 continue
-            if not manager.__filter_xml_node__(node):
-                continue
+            # node，传入格式化的环境配置信息，按需初始化设备管理器和测试设备
+            environment = node
+            if isinstance(node, DeviceNode):
+                if not manager.__filter_xml_node__(node):
+                    continue
+                environment = node.format()
             if not isinstance(manager, IDeviceManager):
                 continue
-            manager.init_environment(node.format(), "")
+            manager.init_environment(environment, "")
             self._filters[manager.__class__.__name__] = manager
             LOG.info("Pool is prepared")
         if not self._filters:
@@ -163,7 +175,8 @@ class EnvPool(object):
             if not support_labels:
                 continue
             if device_option.label is None:
-                if manager_type != "ManagerDevice":
+                skip_rules = [manager_type != "ManagerDevice"]
+                if all(skip_rules):
                     continue
             else:
                 if support_labels and \
@@ -186,6 +199,8 @@ class EnvPool(object):
 
     @classmethod
     def _start_task_log(cls):
+        if not EnvPool.generate_report:
+            return
         report_folder_path = EnvPool.report_path
         if not report_folder_path:
             report_folder_path = os.path.join(
@@ -198,6 +213,8 @@ class EnvPool(object):
 
     @classmethod
     def _stop_task_log(cls):
+        if not EnvPool.generate_report:
+            return
         RuntimeLogs.stop_task_logcat()
 
 

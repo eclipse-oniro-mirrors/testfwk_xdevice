@@ -15,14 +15,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
 import os
 from xdevice import DeviceLabelType
-from ohos.drivers import *
 from ohos.constants import ParserType
+from ohos.drivers import *
 from ohos.drivers.constants import init_remote_server
 from ohos.exception import LiteDeviceExecuteCommandError
 from ohos.error import ErrorMessage
-
 
 __all__ = ["OpenSourceTestDriver"]
 LOG = platform_logger("OpenSourceTestDriver")
@@ -114,7 +114,7 @@ class OpenSourceTestDriver(IDriver):
             self.config.device.close()
             report_name = "report" if request.root.source. \
                 test_name.startswith("{") else get_filename_extension(
-                    request.root.source.test_name)[0]
+                request.root.source.test_name)[0]
             self.result = check_result_report(
                 request.config.report_path, self.result, self.error_message,
                 report_name)

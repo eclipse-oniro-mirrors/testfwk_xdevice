@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import copy
 import os
 import re
 import stat
@@ -26,22 +27,33 @@ import subprocess
 import signal
 from threading import Timer
 
+from _core.constants import ConfigConst
+from _core.constants import DeviceConnectorType
 from _core.constants import DeviceTestType
 from _core.constants import FilePermission
-from _core.constants import DeviceConnectorType
+from _core.context.center import Context
 from _core.error import ErrorMessage
+from _core.exception import ExecuteTerminate
 from _core.exception import ParamError
 from _core.logger import platform_logger
+from _core.plugin import get_plugin
+from _core.plugin import Plugin
+from _core.testkit.json_parser import JsonParser
 from _core.utils import get_file_absolute_path
 
 LOG = platform_logger("Kit")
 
 TARGET_SDK_VERSION = 22
 
-__all__ = ["get_app_name_by_tool", "junit_para_parse", "gtest_para_parse",
-           "get_install_args", "reset_junit_para", "remount", "disable_keyguard",
-           "timeout_callback", "unlock_screen", "unlock_device", "get_class",
-           "check_device_ohca"]
+__all__ = [
+    "get_app_name_by_tool", "junit_para_parse", "gtest_para_parse",
+    "get_install_args", "reset_junit_para", "remount", "disable_keyguard",
+    "timeout_callback", "unlock_screen", "unlock_device", "get_class",
+    "check_device_ohca", "check_device_name", "check_device_env_index",
+    "do_module_kit_setup", "do_module_kit_teardown",
+    "do_common_module_kit_setup", "do_common_module_kit_teardown",
+    "get_kit_instances"
+]
 
 
 def remount(device):
@@ -324,3 +336,111 @@ def unlock_device(device):
 
 def check_device_ohca(device):
     return False
+
+
+def check_device_name(device, kit, step="setup"):
+    kit_name = kit.__class__.__name__
+    kit_device_name = getattr(kit, "device_name", None)
+    device_name = device.get("name")
+    if kit_device_name and device_name and \
+            kit_device_name != device_name:
+        return False
+    if kit_device_name and device_name:
+        LOG.debug("Do kit:%s %s for device:%s", kit_name, step, device_name)
+    else:
+        LOG.debug("Do kit:%s %s", kit_name, step)
+    return True
+
+
+def check_device_env_index(device, kit):
+    if not hasattr(device, "env_index"):
+        return True
+    kit_device_index_list = getattr(kit, "env_index_list", None)
+    env_index = device.get("env_index")
+    if kit_device_index_list and env_index \
+            and len(kit_device_index_list) > 0 \
+            and env_index not in kit_device_index_list:
+        return False
+    return True
+
+
+def do_module_kit_setup(request, kits):
+    tf_kits = request.get_tf_kits()
+    if tf_kits:
+        kits.extend(init_kit_instances(tf_kits))
+    kit_setup(request, kits, ConfigConst.module_kits)
+
+
+def do_module_kit_teardown(request):
+    kit_teardown(request, ConfigConst.module_kits)
+
+
+def do_common_module_kit_setup(request, kits):
+    kit_setup(request, kits, ConfigConst.common_module_kits)
+
+
+def do_common_module_kit_teardown(request):
+    try:
+        kit_teardown(request, ConfigConst.common_module_kits)
+    except Exception as e:
+        LOG.error("common module kit teardown error: {}".format(e))
+
+
+def get_kit_instances(json_config, resource_path="", testcases_path=""):
+    if not isinstance(json_config, JsonParser):
+        return []
+    return init_kit_instances(json_config.config.kits, resource_path, testcases_path)
+
+
+def init_kit_instances(kits, resource_path="", testcases_path=""):
+    kit_instances = []
+    for kit in kits:
+        kit["paths"] = [resource_path, testcases_path]
+        kit_type = kit.get("type", "")
+        device_name = kit.get("device_name", None)
+        plugin = get_plugin(plugin_type=Plugin.TEST_KIT, plugin_id=kit_type)
+        if plugin:
+            test_kit_instance = plugin[0].__class__()
+            test_kit_instance.__check_config__(kit)
+            setattr(test_kit_instance, "device_name", device_name)
+            kit_instances.append(test_kit_instance)
+        else:
+            raise ParamError(ErrorMessage.Common.Code_0101003.format(kit_type))
+    return kit_instances
+
+
+def kit_setup(request, kits, kit_type):
+    devices = request.get_devices()
+    if not devices or not kits:
+        return
+    for device in devices:
+        setattr(device, kit_type, [])
+        kit_name = ""
+        run_flag = False
+        for kit in kits:
+            kit_name = kit.__class__.__name__
+            if not Context.is_executing():
+                raise ExecuteTerminate()
+            if not check_device_env_index(device, kit):
+                continue
+            if check_device_name(device, kit):
+                run_flag = True
+                kit_copy = copy.deepcopy(kit)
+                module_kits = getattr(device, kit_type)
+                module_kits.append(kit_copy)
+                kit_copy.__setup__(device, request=request)
+        if not run_flag:
+            err_msg = ErrorMessage.Common.Code_0101004.format(kit_name)
+            LOG.error(err_msg)
+            raise ParamError(err_msg)
+
+
+def kit_teardown(request, kit_type):
+    devices = request.get_devices()
+    if not devices:
+        return
+    for device in devices:
+        for kit in getattr(device, kit_type, []):
+            if check_device_name(device, kit, step="teardown"):
+                kit.__teardown__(device)
+        setattr(device, kit_type, [])

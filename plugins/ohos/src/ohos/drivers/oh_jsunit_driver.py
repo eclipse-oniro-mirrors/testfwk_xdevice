@@ -21,19 +21,30 @@ import platform
 import subprocess
 import time
 import json
+import re
 import stat
 import shutil
 import zipfile
 import threading
+from typing import Union
 
 from ohos.constants import CKit
 from ohos.drivers import *
 from ohos.drivers.constants import TIME_OUT
 from ohos.error import ErrorMessage
 from ohos.executor.listener import CollectingPassListener
+from ohos.utils import get_ta_class
+from ohos.utils import group_list
+from ohos.utils import print_not_exist_class
+from ohos.utils import modify_class_and_notclass
+from ohos.utils import build_tests_dict
+from ohos.utils import build_new_fault_case
+from ohos.utils import setup_teardown
+from ohos.utils import parse_and_modify_report
+from ohos.utils import build_xml
+from xdevice import Request
 
 __all__ = ["oh_jsunit_para_parse", "OHJSUnitTestDriver", "OHJSUnitTestRunner", "OHJSLocalTestDriver"]
-
 
 LOG = platform_logger("OHJSUnitDriver")
 
@@ -46,29 +57,137 @@ def oh_jsunit_para_parse(runner, junit_paras):
     for para_name in junit_paras.keys():
         para_name = para_name.strip()
         para_values = junit_paras.get(para_name, [])
-        if para_name == "class":
-            runner.add_arg(para_name, ",".join(para_values))
-        elif para_name == "notClass":
-            runner.add_arg(para_name, ",".join(para_values))
-        elif para_name == "testType":
-            if para_values[0] not in test_type_list:
-                continue
+        if not para_values:
+            continue
+        para_value = para_values[0]
+        if para_name == "testType" and para_value in test_type_list:
             # function/performance/reliability/security
-            runner.add_arg(para_name, para_values[0])
-        elif para_name == "size":
-            if para_values[0] not in size_list:
-                continue
-            # size small/medium/large
-            runner.add_arg(para_name, para_values[0])
-        elif para_name == "level":
-            if para_values[0] not in level_list:
-                continue
+            runner.add_arg(para_name, para_value)
+        elif para_name == "size" and para_value in size_list:
+            # small/medium/large
+            runner.add_arg(para_name, para_value)
+        elif para_name == "level" and para_value in level_list:
             # 0/1/2/3/4
-            runner.add_arg(para_name, para_values[0])
+            runner.add_arg(para_name, para_value)
         elif para_name == "stress":
-            runner.add_arg(para_name, para_values[0])
+            runner.add_arg(para_name, para_value)
         elif para_name == "coverage":
-            runner.add_arg(para_name, para_values[0])
+            runner.add_arg(para_name, para_value)
+
+
+class OHJSCoverage:
+
+    def __init__(self, request, runner):
+        self.request = request
+        self.runner = runner
+        self.js_coverage_files = []
+
+        request_config = self.request.config
+        repeat_round = request.get_repeat_round()
+        cov_folder = f"cov{repeat_round}" if request_config.repeat > 1 else "cov"
+        # /report-path/cov
+        self.cov_path = os.path.join(request_config.report_path, cov_folder)
+        self.device = None
+        if request_config.environment is not None:
+            self.device = request_config.environment.devices[0]
+        self.is_coverage_true = hasattr(request_config, "coverage") and request_config.coverage
+
+    def generate_report(self):
+        if not self.js_coverage_files:
+            return
+        npm = shutil.which("npm")
+        if not npm:
+            LOG.error("There is no npm in environment. please install it!")
+            return
+        output_dir = os.path.join(self.cov_path, "output")
+        output_test = os.path.join(output_dir, ".test")
+        os.makedirs(output_dir, exist_ok=True)
+        base_dir = os.path.dirname(self.request.root.source.config_file)
+        source_dir = os.path.join(base_dir, "source")
+        test_dir = os.path.join(base_dir, ".test")
+
+        copy_coverage_files = []
+        init_coverage_jsons = []
+        init_coverage_json_relative_path = os.path.join("intermediates", "ohosTest", "init_coverage.json")
+        for folder in os.listdir(test_dir):
+            temp_path = os.path.join(test_dir, folder)
+            if os.path.isfile(temp_path):
+                continue
+            init_coverage_json = os.path.join(temp_path, init_coverage_json_relative_path)
+            if os.path.exists(init_coverage_json):
+                dst = os.path.join(output_test, folder, init_coverage_json_relative_path)
+                copy_coverage_files.append((init_coverage_json, dst))
+                init_coverage_jsons.append(init_coverage_json)
+        _init_coverage = "#".join(init_coverage_jsons)
+        _js_coverage = "#".join(self.js_coverage_files)
+
+        command = '"{}" run report "{}" "{}" "{}#{}"'.format(
+            npm, source_dir, output_dir, _init_coverage, _js_coverage)
+        package_path = self.request.config.package_tool_path
+        cwd = os.getcwd()
+        os.chdir(package_path)
+        LOG.debug("Current work directory: {}".format(os.getcwd()))
+        LOG.debug(command)
+        result = exec_cmd(command, join_result=True)
+        LOG.debug(result)
+        os.chdir(cwd)
+        # 拷贝覆盖率数据文件到覆盖率报告生成目录
+        for js_coverage_file in self.js_coverage_files:
+            dst = os.path.join(output_dir, os.path.basename(js_coverage_file))
+            copy_coverage_files.append((js_coverage_file, dst))
+        for src, dst in copy_coverage_files:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy(src, dst)
+        self.write_command_to_file(command, output_dir)
+        self.compress_coverage_file(output_dir, self.cov_path, "coverage.zip")
+        LOG.debug("Covert coverage finished")
+
+    @staticmethod
+    def compress_coverage_file(output_dir, cov_dir, dist_name):
+        if not os.path.exists(output_dir):
+            return
+        # 过滤源码文件
+        exclude = re.compile(r'\.e?ts\.html$')
+        zip_name = os.path.join(cov_dir, dist_name)
+        z = zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED)
+        for top, _, files in os.walk(output_dir):
+            if not files:
+                continue
+            for file_name in files:
+                file_path = os.path.join(top, file_name)
+                temp_path = file_path.replace(output_dir + os.sep, "").replace("\\", "/")
+                if re.search(exclude, temp_path) is not None:
+                    continue
+                z.write(file_path, temp_path)
+        z.close()
+        LOG.debug('{} compress success'.format(zip_name))
+
+    def write_command_to_file(self, command, output):
+        save_file = os.path.join(output, "reportCommand.txt")
+        LOG.debug("Save file: {}".format(save_file))
+        save_file_open = os.open(save_file, os.O_WRONLY | os.O_CREAT, FilePermission.mode_755)
+        with os.fdopen(save_file_open, "w", encoding="utf-8") as save_handler:
+            save_handler.write(command)
+            save_handler.flush()
+        LOG.debug("Write command to reportCommand.txt success")
+
+    def pull_coverage_json(self, index: int = 0):
+        if self.device is None:
+            return
+        remote = self.runner.coverage_data_path
+        if not remote:
+            LOG.debug("Coverage data path is null")
+            return
+        LOG.debug("Coverage data path: {}".format(remote))
+        if not self.is_coverage_true:
+            return
+        os.makedirs(self.cov_path, exist_ok=True)
+        module_name = self.request.get_module_name()
+        cov_file_name = f"{module_name}_{index}.cov" if index > 0 else f"{module_name}.cov"
+        cov_file_path = os.path.join(self.cov_path, cov_file_name)
+        self.device.pull_file(remote, cov_file_path)
+        if os.path.exists(cov_file_path):
+            self.js_coverage_files.append(cov_file_path)
 
 
 @Plugin(type=Plugin.DRIVER, id=DeviceTestType.oh_jsunit_test)
@@ -132,11 +251,10 @@ class OHJSUnitTestDriver(IDriver):
                 device_log_open = os.open(self.device_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o755)
                 self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
                 with os.fdopen(device_log_open, "a") as device_log_file_pipe:
-                    self.log_proc, _ = self.config.device.device_log_collector. \
+                    _, self.hilog_proc = self.config.device.device_log_collector. \
                         start_catch_device_log(log_file_pipe=device_log_file_pipe,
                                                hilog_file_pipe=None, log_level=log_level)
                     self.config.device.device_log_collector.start_hilog_task()
-                    self._run_oh_jsunit(config_file, request)
             else:
                 self.hilog = get_device_log_file(
                     request.config.report_path,
@@ -149,9 +267,9 @@ class OHJSUnitTestDriver(IDriver):
                 self.config.device.device_log_collector.add_log_address(self.device_log, self.hilog)
                 self.config.device.execute_shell_command(command="hilog -r")
                 with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                    self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
+                    _, self.hilog_proc = self.config.device.device_log_collector. \
                         start_catch_device_log(hilog_file_pipe=hilog_file_pipe, log_level=log_level)
-                    self._run_oh_jsunit(config_file, request)
+            self._run_oh_jsunit(config_file, request)
         except Exception as exception:
             self.error_message = exception
             if not getattr(exception, "error_no", ""):
@@ -194,10 +312,10 @@ class OHJSUnitTestDriver(IDriver):
             self.runner = OHJSUnitTestRunner(self.config)
             self.runner.suites_name = request.get_module_name()
             # execute test case
-            self._get_runner_config(json_config)
+            _ohjs_runner_config(self, json_config, request)
             oh_jsunit_para_parse(self.runner, self.config.testargs)
 
-            test_to_run = self._collect_test_to_run()
+            test_to_run = self.collect_test_to_run()
             LOG.info("Collected suite count is: {}, test count is: {}".
                      format(len(self.runner.expect_tests_dict.keys()),
                             len(test_to_run) if test_to_run else 0))
@@ -215,6 +333,13 @@ class OHJSUnitTestDriver(IDriver):
                                           self.config.resource_path,
                                           self.config.testcases_path)
 
+            index = next((i for i, kit in enumerate(self.kits)
+                          if kit.__class__.__name__ == "FaultKit"), None)
+            if index is not None:
+                fault_kit = self.kits.pop(index)
+            else:
+                fault_kit = None
+
             self._get_driver_config(json_config)
             self.config.device.connector_command("target mount")
             self._start_smart_perf()
@@ -222,22 +347,15 @@ class OHJSUnitTestDriver(IDriver):
             self.runner = OHJSUnitTestRunner(self.config)
             self.runner.ohca = self.ohca
             self.runner.suites_name = request.get_module_name()
-            self._get_runner_config(json_config)
-            if hasattr(self.config, "history_report_path") and \
-                    self.config.testargs.get("test"):
-                self._do_test_retry(request.listeners, self.config.testargs)
+            _ohjs_runner_config(self, json_config, request)
+            if hasattr(self.config, "history_report_path") and self.config.testargs.get("test"):
+                self._do_test_retry(request.listeners, self.config.testargs, fault_kit=fault_kit)
             else:
-                if self.rerun:
-                    self.runner.retry_times = self.runner.MAX_RETRY_TIMES
-                # execute test case
-                self._do_tf_suite()
                 self._make_exclude_list_file(request)
                 oh_jsunit_para_parse(self.runner, self.config.testargs)
-                self._do_test_run(listeners=request.listeners)
+                _ohjs_run_test(self, request, fault_kit=fault_kit)
 
         finally:
-            # save coverage data to report path
-            self._handle_coverage(request, self.config.device)
             do_module_kit_teardown(request)
 
     def _get_driver_config(self, json_config):
@@ -272,38 +390,28 @@ class OHJSUnitTestDriver(IDriver):
         self.config.coverage = coverage
         self.config.package_tool_path = package_tool_path
 
-    def _get_runner_config(self, json_config):
-        test_timeout = get_config_value('test-timeout',
-                                        json_config.get_driver(), False)
-        if test_timeout:
-            self.runner.add_arg("wait_time", int(test_timeout))
-
-        testcase_timeout = get_config_value('testcase-timeout',
-                                            json_config.get_driver(), False)
-        if testcase_timeout:
-            self.runner.add_arg("timeout", int(testcase_timeout))
-        self.runner.compile_mode = get_config_value(
-            'compile-mode', json_config.get_driver(), False)
-        if self.config.coverage:
-            self.runner.add_arg("coverage", "true")
-
-    def _do_test_run(self, listeners):
+    def do_test_run(self, listeners):
         listener_fixed = self.runner.filter_listener(listeners)
-        test_to_run = self._collect_test_to_run()
+        test_to_run = self.collect_test_to_run()
         LOG.info("Collected suite count is: {}, test count is: {}".
                  format(len(self.runner.expect_tests_dict.keys()),
                         len(test_to_run) if test_to_run else 0))
+        filter_class = self.runner.arg_list.get("class", "")
+        if filter_class:
+            ta_class = filter_class.split(",")
+            print_not_exist_class(ta_class, test_to_run)
+
         if not test_to_run or not self.rerun:
             try:
                 self.runner.run(listener_fixed)
                 self.runner.notify_finished()
             except Exception as e:
-                self.runner.notify_finished(finish_msg=str(e))
+                self.runner.notify_finished(str(e))
                 raise e
         else:
             self._run_with_rerun(listener_fixed, test_to_run)
 
-    def _collect_test_to_run(self):
+    def collect_test_to_run(self):
         run_results = self.runner.dry_run()
         return run_results
 
@@ -314,7 +422,7 @@ class OHJSUnitTestDriver(IDriver):
         try:
             self.runner.run(listener_copy)
         except Exception as e:
-            self.runner.notify_finished(finish_msg=str(e))
+            self.runner.notify_finished(str(e))
             raise e
         test_run = test_tracker.get_current_run_results()
         return test_run
@@ -405,29 +513,36 @@ class OHJSUnitTestDriver(IDriver):
                     filter_list.extend(self.config.testargs.get('notClass', []))
                 self.config.testargs.update({"notClass": filter_list})
 
-    def _do_test_retry(self, listener, testargs):
-        tests_dict = dict()
-        case_list = list()
-        for test in testargs.get("test"):
-            test_item = test.split("#")
-            if len(test_item) != 2:
-                continue
-            case_list.append(test)
-            if test_item[0] not in tests_dict:
-                tests_dict.update({test_item[0]: []})
-            tests_dict.get(test_item[0]).append(
-                TestDescription(test_item[0], test_item[1]))
-        self.runner.add_arg("class", ",".join(case_list))
-        self.runner.expect_tests_dict = tests_dict
+    def _do_test_retry(self, listener, testargs, **kwargs):
+        fault_kit = kwargs.get("fault_kit", None)
+        tests_dict, case_list = build_tests_dict(testargs.get("test"))
         self.config.testargs.pop("test")
-        self.runner.run(listener)
-        self.runner.notify_finished()
 
-    def _do_tf_suite(self):
-        if hasattr(self.config, "tf_suite") and \
-                self.config.tf_suite.get("cases", []):
-            case_list = self.config["tf_suite"]["cases"]
-            self.config.testargs.update({"class": case_list})
+        if not fault_kit:
+            self.runner.add_arg("class", ",".join(case_list))
+            self.runner.expect_tests_dict = tests_dict
+            self.runner.run(listener)
+            self.runner.notify_finished()
+        else:
+            new_fault_case = build_new_fault_case(fault_kit.fault_case, case_list)
+            elements = []
+
+            for test in new_fault_case:
+                _class = test.get("class", None)
+                if not _class:
+                    continue
+                faults = test.get("faults", [])
+                fault_name = "#" + "#".join(faults) if faults else ""
+
+                with setup_teardown(self.config.device, fault_kit, faults=faults):
+                    self.runner.add_arg("class", ",".join(_class))
+                    self.runner.expect_tests_dict = test.get("tests_dict", {})
+                    self.runner.run(listener)
+                    self.runner.notify_finished()
+                    parse_and_modify_report(self.result, fault_name, elements)
+
+            else:
+                build_xml(self.result, elements)
 
     def _start_smart_perf(self):
         if not hasattr(self.config, ConfigConst.kits_in_module):
@@ -465,68 +580,6 @@ class OHJSUnitTestDriver(IDriver):
             self.log_proc)
         self.config.device.device_log_collector.stop_catch_device_log(
             self.hilog_proc)
-
-    def _handle_coverage(self, request, device):
-        if not self.runner or not self.runner.coverage_data_path:
-            LOG.debug("Coverage data path is null")
-            return
-        LOG.debug("Coverage data path: {}".format(self.runner.coverage_data_path))
-        if not hasattr(self.config, "coverage") \
-                or not self.config.coverage:
-            return
-        npm = shutil.which("npm")
-        if not npm:
-            LOG.error("There is no npm in environment. please install it!")
-            return
-        cov_dir = os.path.join(request.config.report_path, "cov")
-        output_dir = os.path.join(cov_dir, "output")
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        cov_file_path = \
-            os.path.join(cov_dir, "{}.cov".format(request.get_module_name()))
-        device.pull_file(self.runner.coverage_data_path, cov_file_path)
-        source_dir = os.path.join(
-            os.path.dirname(request.root.source.config_file), "source")
-        _init_coverage = os.path.join(os.path.dirname(source_dir),
-                                      ".test/default/intermediates/ohosTest/init_coverage.json")
-
-        command = "{} run report \"{}\" \"{}\" \"{}#{}\"". \
-            format(npm, source_dir, output_dir, _init_coverage, cov_file_path)
-        package_path = self.config.package_tool_path
-        cwd = os.getcwd()
-        os.chdir(package_path)
-        LOG.debug("Current work directory:{}".format(os.getcwd()))
-        LOG.debug(command)
-        result = exec_cmd(command, join_result=True)
-        LOG.debug(result)
-        os.chdir(cwd)
-        self._write_command_to_file(command, output_dir)
-        self._compress_coverage_file(output_dir, cov_dir, "coverage.zip")
-        LOG.debug("Covert coverage finished")
-
-    @classmethod
-    def _compress_coverage_file(cls, output_dir, cov_dir, dist_name):
-        zip_name = os.path.join(cov_dir, dist_name)
-        z = zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED)
-        for dir_path, _, file_names in os.walk(output_dir):
-            f_path = dir_path.replace(output_dir, '')
-            f_path = f_path and f_path + os.sep or ''
-            for filename in file_names:
-                z.write(os.path.join(dir_path, filename), f_path + filename)
-        z.close()
-        LOG.debug('{} compress success'.format(zip_name))
-
-    @classmethod
-    def _write_command_to_file(cls, command, output):
-        save_file = os.path.join(output, "reportCommand.txt")
-        LOG.debug("Save file: {}".format(save_file))
-        save_file_open = os.open(save_file, os.O_WRONLY | os.O_CREAT,
-                                 FilePermission.mode_755)
-        with os.fdopen(save_file_open, "w", encoding="utf-8") as save_handler:
-            save_handler.write(command)
-            save_handler.flush()
-        LOG.debug("Write command to reportCommand.txt success")
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
@@ -619,27 +672,54 @@ class OHJSUnitTestRunner:
             del self.arg_list[name]
 
     def get_args_command(self):
-        args_commands = ""
+        args_commands = []
         for key, value in self.arg_list.items():
-            if "wait_time" == key:
-                args_commands = "%s -w %s " % (args_commands, value)
+            if key == 'test_args':
+                # 跳过拓展的运行参数
+                continue
+            if key == 'wait_time':
+                args_commands.append(f'-w {value}')
             else:
-                args_commands = "%s -s %s %s " % (args_commands, key, value)
-        return args_commands
+                args_commands.append(f'-s {key} {value}')
+        # 处理拓展的运行参数
+        for test_arg in self.arg_list.get('test_args', []):
+            test_arg = str(test_arg).strip()
+            opt, key, val = self.unpack_command(test_arg)
+            # 检查命令参数的格式
+            if not (opt and key and val or opt and val):
+                continue
+            # 检查命令参数是否重复，若参数重复，则优先使用驱动自有字段配置的值
+            test_arg_exists = False
+            for cmd_str in args_commands:
+                opt_ext, key_ext, val_ext = self.unpack_command(cmd_str)
+                if opt == opt_ext and key == key_ext or opt == opt_ext and not key:
+                    test_arg_exists = True
+                    break
+            if not test_arg_exists:
+                args_commands.append(test_arg)
+        return ' '.join(args_commands)
+
+    @staticmethod
+    def unpack_command(cmd_str):
+        opt, key, val = None, None, None
+        items = cmd_str.split(' ')
+        if len(items) == 2:
+            opt, val = items[0], items[1]
+        elif len(items) == 3:
+            opt, key, val = items[0], items[1], items[2]
+        return opt, key, val
 
     def _get_run_command(self):
         command = ""
         if self.config.package_name:
-            # aa test -p ${packageName} -b ${bundleName}-s
-            # unittest OpenHarmonyTestRunner
+            # aa test -p ${packageName} -b ${bundleName} -s unittest OpenHarmonyTestRunner
             command = "aa test -p {} -b {} -s unittest OpenHarmonyTestRunner" \
                       " {} {}".format(self.config.package_name,
                                       self.config.bundle_name,
                                       self.get_args_command(),
                                       self.get_worker_count())
         elif self.config.module_name:
-            #  aa test -m ${moduleName}  -b ${bundleName}
-            #  -s unittest OpenHarmonyTestRunner
+            # aa test -m ${moduleName} -b ${bundleName} -s unittest OpenHarmonyTestRunner
             command = "aa test -m {} -b {} -s unittest {} {} {}".format(
                 self.config.module_name, self.config.bundle_name,
                 self.get_oh_test_runner_path(), self.get_args_command(), self.get_worker_count())
@@ -815,16 +895,12 @@ class OHJSLocalTestDriver(IDriver):
             do_module_kit_setup(request, self.kits)
             self.runner = OHJSLocalTestRunner(self.config)
             self.runner.suites_name = request.get_module_name()
-            self._get_runner_config(json_config)
-            if self.rerun:
-                self.runner.retry_times = self.runner.MAX_RETRY_TIMES
+            _ohjs_runner_config(self, json_config, request)
             oh_jsunit_para_parse(self.runner, self.config.testargs)
-            self._do_test_run(listener=request.listeners)
+            _ohjs_run_test(self, request)
 
         finally:
-            # save coverage data to report path
             do_module_kit_teardown(request)
-            self._handle_coverage(request)
 
     def _get_driver_config(self, json_config):
         package = get_config_value('package-name',
@@ -856,28 +932,15 @@ class OHJSLocalTestDriver(IDriver):
         else:
             self.config.timeout = TIME_OUT
 
-    def _get_runner_config(self, json_config):
-        test_timeout = get_config_value('test-timeout',
-                                        json_config.get_driver(), False)
-        if test_timeout:
-            self.runner.add_arg("wait_time", int(test_timeout))
-
-        testcase_timeout = get_config_value('testcase-timeout',
-                                            json_config.get_driver(), False)
-        if testcase_timeout:
-            self.runner.add_arg("timeout", int(testcase_timeout))
-        if self.config.coverage:
-            self.runner.add_arg("coverage", "true")
-
-    def _do_test_run(self, listener):
+    def do_test_run(self, listener):
         try:
             self.runner.run(listener)
             self.runner.notify_finished()
         except Exception as e:
-            self.runner.notify_finished(finish_msg=str(e))
+            self.runner.notify_finished(str(e))
             raise e
 
-    def _collect_test_to_run(self):
+    def collect_test_to_run(self):
         run_results = self.runner.dry_run()
         return run_results
 
@@ -888,54 +951,6 @@ class OHJSLocalTestDriver(IDriver):
         self.runner.run(listener_copy)
         test_run = test_tracker.get_current_run_results()
         return test_run
-
-    def _handle_coverage(self, request):
-        if not self.runner or not self.runner.coverage_data_path:
-            LOG.debug("Coverage data path is null")
-            return
-        LOG.debug("Coverage data path: {}".format(self.runner.coverage_data_path))
-        if not hasattr(self.config, "coverage") \
-                or not self.config.coverage:
-            return
-        npm = shutil.which("npm")
-        if not npm:
-            LOG.error("There is no npm in environment. please install it!")
-            return
-        cov_dir = os.path.join(request.config.report_path, "cov")
-        output_dir = os.path.join(cov_dir, "output")
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        cov_file_path = \
-            os.path.join(cov_dir, "{}.cov".format(request.get_module_name()))
-        shutil.move(self.runner.coverage_data_path, cov_file_path)
-        source_dir = os.path.join(os.path.dirname(request.root.source.config_file), "source")
-        _init_coverage = os.path.join(os.path.dirname(source_dir),
-                                      ".test/default/intermediates/test/init_coverage.json")
-        command = "{} run report \"{}\" \"{}\" \"{}#{}\"". \
-            format(npm, source_dir, output_dir, _init_coverage, cov_file_path)
-        package_path = self.config.package_tool_path
-        cwd = os.getcwd()
-        os.chdir(package_path)
-        LOG.debug("Current work directory:{}".format(os.getcwd()))
-        LOG.debug(command)
-        result = exec_cmd(command, join_result=True)
-        LOG.debug(result)
-        os.chdir(cwd)
-        self._compress_coverage_file(output_dir, cov_dir, "coverage.zip")
-        LOG.debug("Covert coverage finished")
-
-    @classmethod
-    def _compress_coverage_file(cls, output_dir, cov_dir, dist_name):
-        zip_name = os.path.join(cov_dir, dist_name)
-        z = zipfile.ZipFile(zip_name, 'w', zipfile.ZIP_DEFLATED)
-        for dir_path, _, file_names in os.walk(output_dir):
-            f_path = dir_path.replace(output_dir, '')
-            f_path = f_path and f_path + os.sep or ''
-            for filename in file_names:
-                z.write(os.path.join(dir_path, filename), f_path + filename)
-        z.close()
-        LOG.debug('{} compress success'.format(zip_name))
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
@@ -1097,3 +1112,70 @@ def _ohjs_output_method(handler, output, end_mark="\n"):
         # not return the tail element of this list contains unfinished str,
         # so we set position -1
         return lines[:-1]
+
+
+def _ohjs_runner_config(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], json_config: JsonParser, request: Request):
+    runner = driver.runner
+    driver_config = json_config.get_driver()
+    test_timeout = get_config_value('test-timeout', driver_config, False)
+    if test_timeout:
+        runner.add_arg('wait_time', int(test_timeout))
+    testcase_timeout = get_config_value('testcase-timeout', driver_config, False)
+    if testcase_timeout:
+        runner.add_arg('timeout', int(testcase_timeout))
+    test_args = get_config_value('test-args', driver_config, default=[])
+    test_args_from_tf = request.get_tf_test_args()
+    test_args.extend(test_args_from_tf)
+    if test_args:
+        runner.add_arg('test_args', test_args)
+    runner.compile_mode = get_config_value('compile-mode', driver_config, False)
+    if driver.config.coverage:
+        runner.add_arg('coverage', 'true')
+
+
+def _ohjs_run_test(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], request: Request, **kwargs):
+    listeners = request.listeners
+    runner = driver.runner
+    if driver.rerun:
+        runner.retry_times = runner.MAX_RETRY_TIMES
+    ohjs_cov_instance = OHJSCoverage(request, runner)
+
+    fault_kit = kwargs.get("fault_kit", None)
+
+    def _start_run_test():
+        filter_class = group_list(get_ta_class(driver, request))
+        if not filter_class:
+            LOG.info('----- run test with no filter class -----')
+            driver.do_test_run(listeners)
+            ohjs_cov_instance.pull_coverage_json()
+        else:
+            LOG.info('----- run test with filter class -----')
+            total = len(filter_class)
+            for index, ta_class in enumerate(filter_class, 1):
+                LOG.info(f'[{index}/{total}] run test with filter class size {len(ta_class)}')
+                if driver.rerun:
+                    runner.retry_times = runner.MAX_RETRY_TIMES
+                runner.add_arg('class', ','.join(ta_class))
+                driver.do_test_run(listeners)
+                runner.remove_arg('class')
+                ohjs_cov_instance.pull_coverage_json(index=index)
+        ohjs_cov_instance.generate_report()
+
+    if fault_kit:
+        elements = []
+        for test in fault_kit.fault_case:
+            _class = test.get("class", None)
+            notclass = test.get("notclass", None)
+            faults = test.get("faults", [])
+            modify_class_and_notclass(request, _class, notclass)
+            fault_name = "#" + "#".join(faults) if faults else ""
+
+            with setup_teardown(driver.config.device, fault_kit, faults):
+                _start_run_test()
+                parse_and_modify_report(driver.result, fault_name, elements)
+
+        else:
+            build_xml(driver.result, elements)
+
+    else:
+        _start_run_test()

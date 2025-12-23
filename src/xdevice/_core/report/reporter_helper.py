@@ -15,18 +15,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
 import json
 import os
 import platform
 import time
 from ast import literal_eval
 from dataclasses import dataclass
+from typing import Union
+from xml.dom import minidom
 from xml.etree import ElementTree
 
 from _core.logger import platform_logger
 from _core.report.encrypt import check_pub_key_exist
+from _core.report.encrypt import do_rsa_decrypt
 from _core.report.encrypt import do_rsa_encrypt
 from _core.exception import ParamError
+from _core.constants import CaseResult
 from _core.constants import FilePermission
 
 LOG = platform_logger("ReporterHelper")
@@ -112,9 +117,11 @@ class ReportConstant:
     time_format = "%Y-%m-%d %H:%M:%S"
 
     # xml tag constants
+    failure = "failure"
     test_suites = "testsuites"
     test_suite = "testsuite"
     test_case = "testcase"
+    test = "test"
 
     # report title constants
     failed = "failed"
@@ -203,16 +210,20 @@ class DataHelper:
         return self.initial_element(ReportConstant.test_case,
                                     self.LINE_BREAK_INDENT + self.INDENT, "")
 
+    def initial_test_element(self):
+        return self.initial_element(ReportConstant.test,
+                                    self.LINE_BREAK + self.INDENT * 3, "")
+
     @classmethod
     def update_suite_result(cls, suite, case):
         update_time = round(float(suite.get(
             ReportConstant.time, 0)) + float(
             case.get(ReportConstant.time, 0)), 3)
         suite.set(ReportConstant.time, str(update_time))
-        update_tests = str(int(suite.get(ReportConstant.tests, 0))+1)
+        update_tests = str(int(suite.get(ReportConstant.tests, 0)) + 1)
         suite.set(ReportConstant.tests, update_tests)
         if case.findall('failure'):
-            update_failures = str(int(suite.get(ReportConstant.failures, 0))+1)
+            update_failures = str(int(suite.get(ReportConstant.failures, 0)) + 1)
             suite.set(ReportConstant.failures, update_failures)
 
     @classmethod
@@ -290,8 +301,23 @@ class DataHelper:
         summary_element.set(ReportConstant.time, str(updated_time))
 
     @staticmethod
-    def generate_report(element, file_name):
-        if check_pub_key_exist():
+    def generate_report(element, result_xml):
+        is_pub_key_exist = check_pub_key_exist()
+        old_element = None
+        # 如果存在同名的结果xml文件，先合并新旧测试结果数据，再生成新的结果xml
+        if os.path.exists(result_xml):
+            if is_pub_key_exist:
+                with open(result_xml, "rb") as xml_f:
+                    content = xml_f.read()
+                result_content = do_rsa_decrypt(content)
+                old_element = DataHelper.parse_data_report(result_content)
+            else:
+                old_element = DataHelper.parse_data_report(result_xml)
+        if old_element is not None:
+            DataHelper.merge_result_xml(element, old_element)
+            element = old_element
+
+        if is_pub_key_exist:
             plain_text = DataHelper.to_string(element)
             try:
                 cipher_text = do_rsa_encrypt(plain_text)
@@ -302,21 +328,170 @@ class DataHelper:
                 flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_BINARY
             else:
                 flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
-            file_name_open = os.open(file_name, flags, FilePermission.mode_755)
+            file_name_open = os.open(result_xml, flags, FilePermission.mode_755)
             with os.fdopen(file_name_open, "wb") as file_handler:
                 file_handler.write(cipher_text)
                 file_handler.flush()
         else:
             tree = ElementTree.ElementTree(element)
-            tree.write(file_name, encoding="UTF-8", xml_declaration=True,
+            tree.write(result_xml, encoding="UTF-8", xml_declaration=True,
                        short_empty_elements=True)
-        LOG.info("Generate data report: %s", file_name)
+        LOG.info("Generate data report: %s", result_xml)
 
     @staticmethod
     def to_string(element):
         return str(
             ElementTree.tostring(element, encoding='UTF-8', method='xml'),
             encoding="UTF-8")
+
+    @staticmethod
+    def to_pretty_xml(element: Union[str, ElementTree.Element]):
+        if isinstance(element, ElementTree.Element):
+            element_str = DataHelper.to_string(element)
+        else:
+            element_str = element
+        pretty_xml = minidom.parseString(element_str).toprettyxml(indent='  ', newl='')
+        return pretty_xml
+
+    @staticmethod
+    def _get_element_attrs(element: ElementTree.Element):
+        attr = {
+            ReportConstant.time: "0", ReportConstant.tests: "0", ReportConstant.disabled: "0",
+            ReportConstant.errors: "0", ReportConstant.failures: "0", ReportConstant.ignored: "0",
+            ReportConstant.unavailable: "0"
+        }
+        for name, default_val in attr.items():
+            attr.update({name: element.get(name, default_val).strip() or default_val})
+        return attr
+
+    @staticmethod
+    def _get_element_testsuite(testsuites: ElementTree.Element):
+        result, duplicate_elements = {}, []
+        for t in testsuites:
+            testsuite_name = t.get(ReportConstant.name, "")
+            if testsuite_name not in result.keys():
+                result.update({testsuite_name: t})
+                continue
+            duplicate_elements.append(t)
+            DataHelper._merge_testsuite(t, result.get(testsuite_name))
+        # 剔除同名的testsuite节点
+        for t in duplicate_elements:
+            testsuites.remove(t)
+        return result
+
+    @staticmethod
+    def _merge_attrs(src: dict, dst: dict):
+        """merge src to dst"""
+        attr = {
+            ReportConstant.time: "0", ReportConstant.tests: "0", ReportConstant.disabled: "0",
+            ReportConstant.errors: "0", ReportConstant.failures: "0", ReportConstant.ignored: "0",
+            ReportConstant.unavailable: "0"
+        }
+        for name, default_val in attr.items():
+            dst_val = str(dst.get(name, default_val)).strip() or default_val
+            src_val = str(src.get(name, default_val)).strip() or default_val
+            if name in [ReportConstant.time]:
+                # 情况1：浮点数求和，并四舍五入
+                new_val = round(float(dst_val) + float(src_val), 3)
+            else:
+                # 情况2：整数求和
+                new_val = int(dst_val) + int(src_val)
+            dst.update({name: str(new_val)})
+
+    @staticmethod
+    def _merge_testsuite(_new: ElementTree.Element, _old: ElementTree.Element):
+        """遍历新旧测试套的用例，将用例执行机记录合并到旧结果xml"""
+        for new_case in _new:
+            new_case_name = new_case.get(ReportConstant.name, "")
+            exist_case = None
+            for old_case in _old:
+                old_case_name = old_case.get(ReportConstant.name, "")
+                if old_case_name == new_case_name:
+                    exist_case = old_case
+                    break
+            """用例结果合并策略：新替换旧，pass替换fail
+            new_case    old_case    final_case
+            pass        pass        new_case
+            pass        fail        new_case
+            fail        pass        old_case
+            fail        fail        new_case
+            """
+            if exist_case is None:
+                _old.append(new_case)
+                continue
+            merge_case = new_case
+            new_case_result, _ = Case.get_case_result(new_case)
+            old_case_result, _ = Case.get_case_result(exist_case)
+            if new_case_result == CaseResult.failed and old_case_result == CaseResult.passed:
+                merge_case = exist_case
+            if merge_case == new_case:
+                _old.remove(exist_case)
+                _old.append(new_case)
+
+        # 重新生成testsuite节点的汇总数据
+        testsuite_attr = {
+            ReportConstant.time: 0, ReportConstant.tests: len(_old), ReportConstant.disabled: 0,
+            ReportConstant.errors: 0, ReportConstant.failures: 0, ReportConstant.ignored: 0,
+            ReportConstant.message: _new.get(ReportConstant.message, ""),
+            ReportConstant.report: _new.get(ReportConstant.report, "")
+        }
+        for ele_case in _old:
+            case_attr = {
+                ReportConstant.time: ele_case.get(ReportConstant.time, "0")
+            }
+            case_result, _ = Case.get_case_result(ele_case)
+            if case_result == CaseResult.failed:
+                name = ReportConstant.failures
+            elif case_result == CaseResult.blocked:
+                name = ReportConstant.disabled
+            elif case_result == CaseResult.ignored:
+                name = ReportConstant.ignored
+            else:
+                name = ""
+            if name:
+                # 表示对应的结果统计+1
+                case_attr.update({name: "1"})
+            DataHelper._merge_attrs(case_attr, testsuite_attr)
+        for k, v in testsuite_attr.items():
+            if k in [ReportConstant.unavailable]:
+                continue
+            _old.set(k, v)
+
+    @staticmethod
+    def merge_result_xml(_new: ElementTree.Element, _old: ElementTree.Element):
+        """因旧结果xml里的数据是增长的，故将新结果xml里的数据合并到旧结果xml"""
+        LOG.debug("merge test result")
+        # 合并testsuite节点
+        testsuite_dict_new = DataHelper._get_element_testsuite(_new)
+        testsuite_dict_old = DataHelper._get_element_testsuite(_old)
+        all_testsuite_names = set(list(testsuite_dict_new.keys()) + list(testsuite_dict_old.keys()))
+        for name in all_testsuite_names:
+            testsuite_new = testsuite_dict_new.get(name)
+            testsuite_old = testsuite_dict_old.get(name)
+            # 若新结果xml无数据，无需合并数据
+            if not testsuite_new:
+                continue
+            if testsuite_old:
+                # 若新旧结果xml均有数据，先合并新旧结果xml的数据，再合并到旧结果xml
+                DataHelper._merge_testsuite(testsuite_new, testsuite_old)
+            else:
+                # 若旧结果xml无数据，直接将新结果xml合并到旧结果xml
+                _old.append(testsuite_new)
+
+        # 重新生成testsuites节点的汇总数据
+        attr = {
+            ReportConstant.time: "0", ReportConstant.tests: "0", ReportConstant.disabled: "0",
+            ReportConstant.errors: "0", ReportConstant.failures: "0", ReportConstant.ignored: "0",
+            ReportConstant.unavailable: _new.get(ReportConstant.unavailable, "0"),
+            ReportConstant.message: _new.get(ReportConstant.message, ""),
+            # 不更新开始和结束时间
+            ReportConstant.start_time: _new.get(ReportConstant.start_time, ""),
+            ReportConstant.end_time: _new.get(ReportConstant.end_time, "")
+        }
+        for ele_testsuite in _old:
+            DataHelper._merge_attrs(DataHelper._get_element_attrs(ele_testsuite), attr)
+        for k, v in attr.items():
+            _old.set(k, v)
 
 
 @dataclass
@@ -417,8 +592,7 @@ class Case:
         return False
 
     def is_failed(self):
-        return self.result == ReportConstant.false and \
-               (self.status == ReportConstant.run or self.status == "")
+        return self.result == ReportConstant.false and (self.status == ReportConstant.run or self.status == "")
 
     def is_blocked(self):
         return self.status in [ReportConstant.blocked, ReportConstant.disable,
@@ -443,6 +617,28 @@ class Case:
         if self.is_ignored():
             return ReportConstant.ignored
         return ReportConstant.passed
+
+    @staticmethod
+    def get_case_result(ele_case):
+        error_msg = ele_case.get(ReportConstant.message, "")
+        result_kind = ele_case.get(ReportConstant.result_kind, "")
+        if result_kind != "":
+            return result_kind, error_msg
+        result = ele_case.get(ReportConstant.result, "")
+        status = ele_case.get(ReportConstant.status, "")
+        # 适配HCPTest的测试结果，其用例失败时，会在testcase下新建failure节点，存放错误信息
+        if len(ele_case) > 0 and ele_case[0].tag == ReportConstant.failure:
+            error_msg = "\n\n".join([failure.get(ReportConstant.message, "") for failure in ele_case])
+            return CaseResult.failed, error_msg
+        if result == ReportConstant.false and (status == ReportConstant.run or status == ""):
+            return CaseResult.failed, error_msg
+        if status in [ReportConstant.blocked, ReportConstant.disable, ReportConstant.error]:
+            return CaseResult.blocked, error_msg
+        if status in [ReportConstant.skip, ReportConstant.not_run]:
+            return CaseResult.ignored, error_msg
+        if status in [ReportConstant.unavailable]:
+            return CaseResult.unavailable, error_msg
+        return CaseResult.passed, ""
 
 
 # ******************** 使用旧报告模板的代码 BEGIN ********************

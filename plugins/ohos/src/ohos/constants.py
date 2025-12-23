@@ -18,9 +18,8 @@
 
 from dataclasses import dataclass
 
-
 __all__ = ["Constant", "ComType", "HostDrivenTestType",
-           "ParserType", "DeviceLiteKernel", "CKit", "DriverType"]
+           "ParserType", "DeviceLiteKernel", "CKit", "ConnectType"]
 
 
 class Constant:
@@ -88,6 +87,17 @@ class CKit:
     component = "ComponentKit"
     permission = "PermissionKit"
     smartperf = "SmartPerfKit"
+
+
+@dataclass
+class ConnectType:
+    """
+    connect type
+    """
+    remote = "hdc_remote_device"
+    local = "hdc_local_device"
+    native = "native_device"
+
 
 @dataclass
 class DriverType(object):

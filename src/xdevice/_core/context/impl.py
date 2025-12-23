@@ -22,6 +22,7 @@ import uuid
 import copy
 from abc import ABC
 from abc import abstractmethod
+from typing import Dict
 from typing import List
 
 from _core.error import ErrorMessage
@@ -97,24 +98,56 @@ class BaseScheduler(Sub, ABC):
             value = int(getattr(options, ConfigConst.auto_retry, 0))
             cls._auto_retry = value if value <= 10 else 10
 
-    @classmethod
-    def _handler_repeat(cls, task) -> list:
-        drivers_list = list()
-        for index in range(1, task.config.repeat + 1):
-            repeat_list = cls._construct_repeat_list(task, index)
-            if repeat_list:
-                drivers_list.extend(repeat_list)
-        return drivers_list
+    @staticmethod
+    def _get_actual_repeat(module_name, module_repeat_in_testfile, repeat) -> int:
+        repeat_in_testfile = module_repeat_in_testfile.get(module_name)
+        return repeat_in_testfile if repeat_in_testfile else repeat
 
-    @classmethod
-    def _construct_repeat_list(cls, task, index):
-        repeat_list = list()
-        for driver_index, _ in enumerate(task.test_drivers):
-            cur_test_driver = copy.deepcopy(task.test_drivers[driver_index])
-            desc = cur_test_driver[1]
-            desc.unique_id = '{}_{}'.format(desc.unique_id, index)
-            repeat_list.append(cur_test_driver)
-        return repeat_list
+    @staticmethod
+    def _get_module_repeat_in_testfile(task) -> Dict[str, int]:
+        module_repeat = {}
+        testfile_config = getattr(task.config, "tf_suite", {})
+        if testfile_config:
+            for module_name, cfg in testfile_config.items():
+                repeat = cfg.get(ConfigConst.repeat)
+                if not repeat:
+                    continue
+                try:
+                    report = int(repeat)
+                    if report < 1:
+                        repeat = 1
+                    module_repeat.update({module_name: repeat})
+                except ValueError:
+                    pass
+        return module_repeat
+
+    def _repeat_test_drivers(self, task):
+        # 方式1：获取run命令或配置文件里设置的repeat参数
+        repeat = getattr(task.config, ConfigConst.repeat, 1)
+        if repeat < 1:
+            repeat = 1
+        # 方式2：获取test-file.json文件里设置的repeat参数
+        module_repeat_in_testfile = self._get_module_repeat_in_testfile(task)
+
+        max_repeat = repeat
+        if module_repeat_in_testfile:
+            max_repeat = max(module_repeat_in_testfile.values())
+        max_repeat = max(max_repeat, repeat)
+        self.set_repeat_index(max_repeat)
+        task.config.update({ConfigConst.repeat: max_repeat})
+
+        repeat_drivers = []
+        for index in range(1, max_repeat + 1):
+            for test_driver in task.test_drivers:
+                _, test = test_driver
+                actual_repeat = self._get_actual_repeat(test.source.module_name, module_repeat_in_testfile, repeat)
+                if index > actual_repeat:
+                    continue
+                cur_test_driver = test_driver if index == 1 else copy.deepcopy(test_driver)
+                desc = cur_test_driver[1]
+                desc.unique_id = "{}_{}".format(desc.unique_id, index)
+                repeat_drivers.append(cur_test_driver)
+        task.test_drivers = repeat_drivers
 
     def __execute__(self, task):
         if not self._channel.is_empty():
@@ -128,18 +161,10 @@ class BaseScheduler(Sub, ABC):
         unavailable = 0
         err_msg = ""
         try:
-            unavailable, err_msg = self._check_task(task)
-            if unavailable:
-                error_message = ErrorMessage.Common.Code_0101014.format(err_msg)
-                LOG.error("Exec task error: {}".format(error_message))
-                raise ParamError(error_message)
-            self._prepare_environment(task)
-            repeat = getattr(task.config, ConfigConst.repeat, 1)
-            if repeat > 1:
-                self.set_repeat_index(repeat)
-                task.test_drivers = self._handler_repeat(task)
-            else:
-                self.set_repeat_index(1)
+            available, unavailable = self._check_task(task)
+            if available == 0:
+                return
+            self._repeat_test_drivers(task)
             self.test_number = len(task.test_drivers)
             self._do_execute_(task)
         except (ParamError, ValueError, TypeError, SyntaxError, AttributeError,
@@ -258,13 +283,17 @@ class BaseScheduler(Sub, ABC):
 
     @classmethod
     def _check_task(cls, task):
-        error_items = []
-        unavailable = 0
-        for des in task.root.children:
-            if des.error:
-                error_items.append(des.error.error_msg)
-                unavailable += 1
-        return unavailable, ";".join(error_items)
+        available, unavailable = 0, 0
+        for test_driver in task.test_drivers:
+            _, desc = test_driver
+            if not desc.error:
+                available += 1
+                continue
+            unavailable += 1
+            error_message = ErrorMessage.Common.Code_0101014.format(desc.source.module_name)
+            LOG.error(error_message)
+            report_not_executed(task.config.report_path, [test_driver], error_message)
+        return available, unavailable
 
     def _prepare_environment(self, task):
         if getattr(task.config, ConfigConst.test_environment, ""):
