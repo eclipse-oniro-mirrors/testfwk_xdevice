@@ -24,8 +24,8 @@ import re
 import signal
 import sys
 import threading
-import time
 import copy
+import time
 from collections import namedtuple
 
 from _core.config.config_manager import UserConfigManager
@@ -116,9 +116,18 @@ class Console(object):
         else:
             # init environment manager
             Context.set_execute_status(True)
-            EnvironmentManager()
+            cmd_args = " ".join(args[1:])
+            para_list = self._pre_handle_test_args(cmd_args).split()
+            argument = self.argument_parser(para_list)
+            options = argument.options
+            config_file = options.config
+            test_environment = options.test_environment
+            if config_file or test_environment:
+                EnvironmentManager(environment=test_environment, user_config_file=config_file)
+            else:
+                EnvironmentManager()
             # Enter xDevice command parser
-            self.command_parser(" ".join(args[1:]))
+            self.command_parser(cmd_args)
 
     def _console(self):
         # Enter xDevice console
@@ -153,45 +162,97 @@ class Console(object):
         try:
             parser = argparse.ArgumentParser(
                 description="Specify tests to run.")
-            group = parser.add_mutually_exclusive_group()
-            parser.add_argument("action",
-                                type=str.lower,
-                                help="Specify action")
-            parser.add_argument("task",
-                                type=str,
-                                default=None,
-                                help="Specify task name")
-            group.add_argument("-l", "--testlist",
-                               action=SplicingAction,
-                               type=str,
-                               nargs='+',
-                               dest=ConfigConst.testlist,
-                               default="",
-                               help="Specify test list"
-                               )
-            group.add_argument("-tf", "--testfile",
-                               action=SplicingAction,
-                               type=str,
-                               nargs='+',
-                               dest=ConfigConst.testfile,
-                               default="",
-                               help="Specify test list file"
-                               )
-            parser.add_argument("-tc", "--testcase",
-                                action="store",
-                                type=str,
-                                dest=ConfigConst.testcase,
-                                default="",
-                                help="Specify test case"
-                                )
-            parser.add_argument("-c", "--config",
-                                action=SplicingAction,
-                                type=str,
-                                nargs='+',
-                                dest=ConfigConst.configfile,
-                                default="",
-                                help="Specify config file path"
-                                )
+            parser.add_argument(
+                "action",
+                type=str.lower,
+                help="Specify action"
+            )
+            parser.add_argument(
+                "task",
+                type=str,
+                default=None,
+                help="Specify task name"
+            )
+            # 命令参数run acts、run -l xx、run -tc xx互斥
+            group1 = parser.add_mutually_exclusive_group()
+            group1.add_argument(
+                "-l", "--testlist",
+                action=SplicingAction,
+                type=str,
+                nargs='+',
+                dest=ConfigConst.testlist,
+                default="",
+                help="Specify test list"
+            )
+            group1.add_argument(
+                "-tc", "--testcase",
+                action="store",
+                type=str,
+                dest=ConfigConst.testcase,
+                default="",
+                help="Specify test case"
+            )
+            group1.add_argument(
+                "-tf", "--testfile",
+                action=SplicingAction,
+                type=str,
+                nargs='+',
+                dest=ConfigConst.testfile,
+                default="",
+                help="Specify test list file"
+            )
+            # 命令参数-c与-env互斥
+            group2 = parser.add_mutually_exclusive_group()
+            group2.add_argument(
+                "-c", "--config",
+                action=SplicingAction,
+                type=str,
+                nargs='+',
+                dest=ConfigConst.configfile,
+                default="",
+                help="Specify config file path"
+            )
+            group2.add_argument(
+                "-env", "--environment",
+                action=SplicingAction,
+                type=str,
+                nargs='+',
+                dest=ConfigConst.test_environment,
+                default="",
+                help="Specify test environment"
+            )
+            # 命令参数--repeat N、--retry --session xx、--auto_retry [N]互斥
+            group3 = parser.add_mutually_exclusive_group()
+            group3.add_argument(
+                "--repeat",
+                type=int,
+                default=1,
+                dest=ConfigConst.repeat,
+                help="number of times that a task is executed repeatedly"
+            )
+            group3.add_argument(
+                "--retry",
+                action="store",
+                type=str,
+                dest=ConfigConst.retry,
+                default="",
+                help="Specify retry command"
+            )
+            group3.add_argument(
+                "--auto_retry",
+                dest=ConfigConst.auto_retry,
+                type=int,
+                default=0,
+                help="- the count of auto retry"
+            )
+
+            parser.add_argument(
+                "-di", "--device_info",
+                dest=ConfigConst.device_info,
+                action="store",
+                type=str,
+                help="- describe device info in json style"
+            )
             parser.add_argument("-sn", "--device_sn",
                                 action="store",
                                 type=str,
@@ -236,14 +297,6 @@ class Console(object):
                                 dest=ConfigConst.pass_through,
                                 help="Pass through test arguments"
                                 )
-            parser.add_argument("-env", "--environment",
-                                action=SplicingAction,
-                                type=str,
-                                nargs='+',
-                                dest=ConfigConst.test_environment,
-                                default="",
-                                help="Specify test environment"
-                                )
             parser.add_argument("-e", "--exectype",
                                 action="store",
                                 type=str,
@@ -286,13 +339,6 @@ class Console(object):
                                 default="",
                                 help="Specify coverage"
                                 )
-            parser.add_argument("--retry",
-                                action="store",
-                                type=str,
-                                dest=ConfigConst.retry,
-                                default="",
-                                help="Specify retry command"
-                                )
             parser.add_argument("--session",
                                 action=SplicingAction,
                                 type=str,
@@ -313,12 +359,6 @@ class Console(object):
                                 dest=ConfigConst.check_device,
                                 help="check the test device meets the "
                                      "requirements")
-            parser.add_argument("--repeat",
-                                type=int,
-                                default=1,
-                                dest=ConfigConst.repeat,
-                                help="number of times that a task is executed"
-                                     " repeatedly")
             parser.add_argument("-le", "--local_execution_log_path",
                                 dest="local_execution_log_path",
                                 help="- The local execution log path.")
@@ -332,11 +372,6 @@ class Console(object):
                                 action="store",
                                 type=str,
                                 help="- Specify the list of part")
-            parser.add_argument("-di", "--device_info",
-                                dest=ConfigConst.device_info,
-                                action="store",
-                                type=str,
-                                help="- describe device info in json style")
             parser.add_argument("-kim", "--kits_in_module",
                                 dest=ConfigConst.kits_in_module,
                                 action=SplicingAction,
@@ -353,11 +388,6 @@ class Console(object):
                                 help='- the params of kits that related to'
                                      ' module'
                                 )
-            parser.add_argument("--auto_retry",
-                                dest=ConfigConst.auto_retry,
-                                type=int,
-                                default=0,
-                                help="- the count of auto retry")
             parser.add_argument("--enable_unicode",
                                 dest=ConfigConst.enable_unicode,
                                 action="store_true",
@@ -384,12 +414,10 @@ class Console(object):
             if unparsed:
                 LOG.warning("Unparsed input: %s", " ".join(unparsed))
             self._params_post_processing(options)
-
         except SystemExit as _:
             valid_param = False
             parser.print_help()
             LOG.warning("Parameter parsing system exit exception.")
-
         return Argument(options, unparsed, valid_param, parser)
 
     @classmethod
@@ -403,7 +431,6 @@ class Console(object):
             # 当使用指令“list 任务id”查询任务时，不用加Task.EMPTY_TASK
             if "-" in item1 and not re.match(r'\d{4}-(?:\d{2}-){5}\d{6}', item1):
                 para_list.insert(1, Task.EMPTY_TASK)
-
         for index, param in enumerate(para_list):
             if param == "--retry":
                 if index + 1 == len(para_list):
@@ -609,7 +636,6 @@ class Console(object):
             else:
                 console_list_task(task_id=item)
             return
-        # list devices
         console_list_devices()
 
     @classmethod

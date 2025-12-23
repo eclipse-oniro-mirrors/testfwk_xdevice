@@ -62,3 +62,4 @@ class StackStateRecorder:
         if self.current_suite_list:
             return self.current_suite_list.pop()
         return None
+

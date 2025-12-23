@@ -277,7 +277,7 @@ class CppTestParser(IParser):
             test_result.stacktrace += "\r\n"
         test_result.stacktrace += message
         if re.match(_SIGNAL_CORE_DUMPED, message):
-            # 构造临时字符串，复用test_end里的方法
+            # 构造临时字符串，复用test_ended里的方法
             temp = f'{test_result.test_class}.{test_result.test_name} (0 ms)'
             self.handle_test_ended_tag(temp, ResultCode.BLOCKED)
             self.handle_suite_ended_tag('')

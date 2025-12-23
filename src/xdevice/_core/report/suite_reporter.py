@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import json
 import os
 import time
 from enum import Enum
@@ -25,10 +26,10 @@ from _core.constants import CaseResult
 from _core.constants import ModeType
 from _core.logger import platform_logger
 from _core.report.encrypt import check_pub_key_exist
+from _core.report.reporter_helper import Case
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ReportConstant
 from _core.context.center import Context
-from _core.context.handler import get_case_result
 
 LOG = platform_logger("SuiteReporter")
 SUITE_REPORTER_LOCK = RLock()
@@ -40,6 +41,7 @@ class ResultCode(Enum):
     PASSED = 0
     FAILED = 1
     SKIPPED = 2
+    UNAVAILABLE = 3
 
 
 class SuiteReporter:
@@ -60,9 +62,13 @@ class SuiteReporter:
         self.data_helper = DataHelper()
         self.report_name = report_name
         self.report_path = report_path
-        self.suite_data_path = os.path.join(
-            self.report_path, "%s%s" % (
-                report_name, self.data_helper.DATA_REPORT_SUFFIX))
+        repeat = kwargs.get("repeat", 1)
+        repeat_round = kwargs.get("repeat_round", 1)
+        round_folder = f"round{repeat_round}" if repeat > 1 else ""
+        dir_path = os.path.join(self.report_path, round_folder)
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+        self.suite_data_path = os.path.join(dir_path, "{}{}".format(report_name, self.data_helper.DATA_REPORT_SUFFIX))
         self.kwargs = kwargs
         if not check_pub_key_exist() and Context.session().mode != ModeType.decc:
             SuiteReporter.suite_report_result.clear()
@@ -193,16 +199,27 @@ class SuiteReporter:
         test_case_elements = []
         for case_result in case_results:
             # initial test case element
-            test_case_element, test_case_attributes = self._initial_test_case(
-                case_result)
+            test_case_element, test_case_attributes = self._initial_test_case(case_result)
 
             # update attributes according to case result
-            self.update_attributes(case_result, test_case_attributes,
-                                   test_suite_attributes)
+            self.update_attributes(case_result, test_case_attributes, test_suite_attributes)
 
             # set test case attributes and add to test_suite_element
-            self.data_helper.set_element_attributes(test_case_element,
-                                                    test_case_attributes)
+            self.data_helper.set_element_attributes(test_case_element, test_case_attributes)
+
+            tests_result = getattr(case_result, "tests_result", None)
+            if not isinstance(tests_result, list):
+                tests_result = []
+            for index, test in enumerate(tests_result):
+                if index == 0:
+                    test_case_element.text = self.data_helper.LINE_BREAK + self.data_helper.INDENT * 3
+                # create test element and set element
+                test_element, test_attributes = self._initial_test_element(test)
+                if index == len(tests_result) - 1:
+                    test_element.tail = self.data_helper.LINE_BREAK + self.data_helper.INDENT * 2
+                self.data_helper.set_element_attributes(test_element, test_attributes)
+                test_case_element.append(test_element)
+
             test_case_elements.append(test_case_element)
         test_suite_attributes[ReportConstant.disabled] += max(int(
             test_suite_attributes.get(ReportConstant.tests) -
@@ -236,6 +253,11 @@ class SuiteReporter:
             test_case_attributes[ReportConstant.result] = ReportConstant.false
             test_suite_attributes[ReportConstant.ignored] = \
                 test_suite_attributes[ReportConstant.ignored] + 1
+        elif case_result.code == ResultCode.UNAVAILABLE.value:
+            test_case_attributes[ReportConstant.status] = ReportConstant.unavailable
+            test_case_attributes[ReportConstant.result] = ReportConstant.false
+            key = ReportConstant.unavailable
+            test_suite_attributes.update({key: test_suite_attributes.get(key, 0) + 1})
         else:  # ResultCode.UNKNOWN.value or other value
             test_case_attributes[ReportConstant.status] = \
                 ReportConstant.disable
@@ -280,8 +302,28 @@ class SuiteReporter:
         }
         result_content = getattr(case_result, ReportConstant.result_content, "")
         if result_content:
-            test_case_attributes.update({ReportConstant.result_content: result_content})
+            formated_value = f"<![CDATA[{json.dumps(result_content, separators=(',', ':'))}]]>"
+            test_case_attributes.update({ReportConstant.result_content: formated_value})
+        start_time = getattr(case_result, ReportConstant.start_time, "")
+        if start_time:
+            test_case_attributes.update({ReportConstant.start_time: start_time})
         return test_case_element, test_case_attributes
+
+    def _initial_test_element(self, test_result: dict):
+        test_element = self.data_helper.initial_test_element()
+        error = str(test_result.get("error", ""))
+        for char_index in range(32):
+            if char_index in [10, 13]:  # chr(10): LF, chr(13): CR
+                continue
+            error = error.replace(chr(char_index), "")
+        test_attributes = {
+            ReportConstant.name: test_result.get("name"),
+            ReportConstant.time: str(test_result.get("time")),
+            ReportConstant.result: "true" if test_result.get("result") == "Passed" else "false",
+            ReportConstant.result_kind: test_result.get("result"),
+            ReportConstant.message: error,
+        }
+        return test_element, test_attributes
 
     @classmethod
     def clear_report_result(cls):
@@ -319,7 +361,7 @@ class SuiteReporter:
             LOG.debug("%s is error", result_str)
             return
         element = element[0]
-        result, error_msg = get_case_result(element)
+        result, error_msg = Case.get_case_result(element)
         case_name = element.get(ReportConstant.name, "")
         try:
             from agent.decc import Handler

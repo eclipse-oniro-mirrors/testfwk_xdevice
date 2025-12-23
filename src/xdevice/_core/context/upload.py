@@ -21,21 +21,21 @@ import time
 from xml.etree import ElementTree
 
 from _core.constants import CaseResult
-from _core.constants import HostDrivenTestType
 from _core.constants import ModeType
-from _core.constants import DeviceTestType
+from _core.constants import UploadType
 from _core.context.center import Context
-from _core.context.handler import get_case_result
 from _core.logger import platform_logger
+from _core.report.reporter_helper import Case
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import ReportConstant
 from _core.utils import check_mode
 from _core.utils import get_filename_extension
+from _core.utils import convert_time
 from _core.utils import parse_xml_cdata
 
 LOG = platform_logger("Upload")
 
-MAX_VISIBLE_LENGTH = 256
+MAX_VISIBLE_LENGTH = 1024
 
 __all__ = ["Uploader"]
 
@@ -60,12 +60,12 @@ class Uploader:
         if not task_name:
             LOG.info("No need upload summary report")
             return
-
-        summary_data_report = os.path.join(task.config.report_path,
-                                           ReportConstant.summary_data_report)
+        task_report_path = task.config.report_path
+        summary_data_report = os.path.join(
+            task_report_path, ReportConstant.summary_data_report)
         if not os.path.exists(summary_data_report):
-            Uploader.upload_unavailable_result(str(error_message) or "summary report not exists",
-                                               task.config.report_path)
+            Uploader.upload_unavailable_result(
+                str(error_message) or "summary report not exists", task_report_path)
             return
 
         task_element = ElementTree.parse(summary_data_report).getroot()
@@ -78,8 +78,7 @@ class Uploader:
                     error_msg, "%s;" % child.get(ReportConstant.message))
         if error_msg:
             error_msg = error_msg[:-1]
-        report = Uploader._get_report_path(
-            task.config.report_path, ReportConstant.summary_vision_report)
+        report = os.path.join(task_report_path, ReportConstant.summary_vision_report)
         Uploader.upload_case_result(
             (task_name, task_result, error_msg, start_time, end_time, report))
 
@@ -209,24 +208,29 @@ class Uploader:
         return task_result
 
     @classmethod
-    def _get_report_path(cls, base_path, report=""):
-        """拼接报告路径
-        base_path: str, 报告基础路径
-        report   : str, 报告相对路径
-        """
-        report_path = os.path.join(base_path, report)
-        return report_path if report and os.path.exists(report_path) else base_path
+    def _get_report_path(cls, request, report=""):
+        task_report_path = request.config.report_path
+        report_path = os.path.join(task_report_path, report)
+        if report and os.path.exists(report_path):
+            return report_path
+        module_name = request.get_module_name()
+        repeat = request.config.repeat
+        repeat_round = request.get_repeat_round()
+        round_folder = f"round{repeat_round}" if repeat > 1 else ""
+        module_log_path = os.path.join(
+            task_report_path, "log", round_folder,
+            module_name, ReportConstant.module_run_log)
+        if os.path.exists(module_log_path):
+            return module_log_path
+        return os.path.join(task_report_path, "log", ReportConstant.task_run_log)
 
     @classmethod
     def _get_upload_params(cls, result_file, request):
         upload_params = []
-        report_path = result_file
-        testsuites_element = DataHelper.parse_data_report(report_path)
+        testsuites_element = DataHelper.parse_data_report(result_file)
         start_time, end_time = Uploader._get_time(testsuites_element)
         test_type = request.get_test_type()
-        test_type_list = [HostDrivenTestType.device_test, HostDrivenTestType.windows_test,
-                          DeviceTestType.stability_test, DeviceTestType.ux_test, DeviceTestType.ark_web_test]
-        if test_type in test_type_list:
+        if test_type in UploadType.test_type_list:
             for ele_testsuite in testsuites_element:
                 if len(ele_testsuite) == 0:
                     LOG.error(f"No testcase in result file: {result_file}")
@@ -234,26 +238,25 @@ class Uploader:
                     case_result, error = CaseResult.blocked, ele_testsuite.get(ReportConstant.message, "")
                 else:
                     ele_testcase = ele_testsuite[0]
-                    case_result, error = get_case_result(ele_testcase)
+                    case_result, error = Case.get_case_result(ele_testcase)
                 case_id = ele_testcase.get(ReportConstant.name, "")
                 if error and len(error) > MAX_VISIBLE_LENGTH:
                     error = "{}...".format(error[:MAX_VISIBLE_LENGTH])
                 report = Uploader._get_report_path(
-                    request.config.report_path, ele_testcase.get(ReportConstant.report, ""))
+                    request, ele_testcase.get(ReportConstant.report, ""))
                 result_content = ele_testcase.get(ReportConstant.result_content)
                 upload_params.append(
                     (case_id, case_result, error, start_time, end_time, report, result_content,))
         else:
             for testsuite_element in testsuites_element:
                 if check_mode(ModeType.developer):
-                    module_name = str(get_filename_extension(
-                        report_path)[0]).split(".")[0]
+                    module_name = str(get_filename_extension(result_file)[0]).split(".")[0]
                 else:
                     module_name = testsuite_element.get(ReportConstant.name,
                                                         "none")
                 for ele_testcase in testsuite_element:
                     case_id = Uploader._get_case_id(ele_testcase, module_name)
-                    case_result, error = get_case_result(ele_testcase)
+                    case_result, error = Case.get_case_result(ele_testcase)
                     if case_result == "Ignored":
                         LOG.info(
                             "Get upload params: {} result is ignored".format(case_id))
@@ -262,9 +265,14 @@ class Uploader:
                     if error and len(error) > MAX_VISIBLE_LENGTH:
                         error = "{}...".format(error[:MAX_VISIBLE_LENGTH])
                     report = Uploader._get_report_path(
-                        request.config.report_path,
-                        ele_testcase.get(ReportConstant.report, ""))
+                        request, ele_testcase.get(ReportConstant.report, ""))
                     result_content = ele_testcase.get(ReportConstant.result_content)
+                    cost_time = float(ele_testcase.get(ReportConstant.time, "0.0"))
+                    _start_time = ele_testcase.get(ReportConstant.start_time, "")
+                    if _start_time:
+                        _start = convert_time(_start_time)
+                        start_time = int(_start * 1000)
+                        end_time = int((_start + cost_time) * 1000)
                     upload_params.append(
                         (case_id, case_result, error, start_time, end_time, report, result_content,))
         return upload_params

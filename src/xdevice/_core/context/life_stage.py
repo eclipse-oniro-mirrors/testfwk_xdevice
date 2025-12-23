@@ -28,6 +28,7 @@ from _core.testkit.json_parser import JsonParser
 
 LOG = platform_logger("LifeStage")
 
+
 class StageEvent(ABC):
     def __init__(self):
         self._event_type: str = self._stage_name()
@@ -50,7 +51,6 @@ class StageEvent(ABC):
     @abstractmethod
     def _stage_name(self) -> str:
         pass
-
 
 
 class TaskStart(StageEvent):

@@ -34,7 +34,6 @@ from _core.interface import IListener
 from _core.report.suite_reporter import SuiteReporter
 from _core.report.suite_reporter import ResultCode
 
-
 __all__ = ["UniversalReportListener", "PlusReportListener"]
 
 
@@ -178,7 +177,7 @@ class ReportEventListener(AbsReportListener, ABC):
             return
         suite.run_time = test_result.run_time
         suite.code = test_result.code
-        suite.report = test_result.report
+        suite.report = test_result.report.replace("\\", "/")
         suite.test_num = max(test_result.test_num, len(self.tests))
         self._handle_suite_end_data(suite, kwargs)
 
@@ -199,7 +198,7 @@ class ReportEventListener(AbsReportListener, ABC):
         test.run_time = test_result.run_time
         test.stacktrace = test_result.stacktrace
         test.code = test_result.code
-        test.report = test_result.report
+        test.report = test_result.report.replace("\\", "/")
         test.is_completed = test_result.is_completed
 
     def _handle_test_suites_end(self, test_result, kwargs):
@@ -213,7 +212,10 @@ class ReportEventListener(AbsReportListener, ABC):
                 suites_name = test_result.suites_name
             else:
                 suites_name = kwargs.get("suites_name", "")
-            self._generate_data_report(result_dir, self.result, suites_name, message=message)
+            repeat = kwargs.get("repeat", 1)
+            repeat_round = kwargs.get("repeat_round", 1)
+            self._generate_data_report(result_dir, self.result, suites_name, message=message, repeat=repeat,
+                                       repeat_round=repeat_round)
 
     def _handle_case_skip(self, test_result):
         test = self._get_test_result(test_result=test_result, create=False)
@@ -272,9 +274,13 @@ class PlusReportListener(ReportEventListener, ABC):
         test.run_time = test_result.run_time
         test.stacktrace = test_result.stacktrace
         test.code = test_result.code
-        test.report = test_result.report
+        test.report = test_result.report.replace("\\", "/")
         if getattr(test_result, "result_content", ""):
             test.result_content = test_result.result_content
+        if getattr(test_result, "starttime", ""):
+            test.starttime = test_result.starttime
+        if getattr(test_result, "tests_result", []):
+            test.tests_result = test_result.tests_result
         if hasattr(self, "report_plus") and self.report_plus:
             self._update_result(test_result)
             test.normal_screen_urls = test_result.normal_screen_urls

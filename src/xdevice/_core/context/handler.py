@@ -16,20 +16,21 @@
 # limitations under the License.
 #
 
-import json
 import os
 import shutil
 import time
+import json
 from xml.etree import ElementTree
 
 from _core.constants import CaseResult
 from _core.constants import FilePermission
+from _core.context.upload import Uploader
 from _core.logger import platform_logger
 from _core.report.reporter_helper import ReportConstant
 
 __all__ = [
-    "handle_repeat_result", "update_report_xml",
-    "report_not_executed", "get_case_result"]
+    "handle_repeat_result", "update_report_xml", "report_not_executed"
+]
 
 LOG = platform_logger("Context")
 
@@ -101,25 +102,8 @@ def report_not_executed(report_path, test_drivers, error_message, task=None):
             ReportConstant.test_type: test.source.test_type
         }
         update_report_xml(report_file, update_props)
-
-
-def get_case_result(ele_case):
-    error_msg = ele_case.get(ReportConstant.message, "")
-    result_kind = ele_case.get(ReportConstant.result_kind, "")
-    if result_kind != "":
-        return result_kind, error_msg
-    result = ele_case.get(ReportConstant.result, "")
-    status = ele_case.get(ReportConstant.status, "")
-    # 适配HCPTest的测试结果，其用例失败时，会在testcase下新建failure节点，存放错误信息
-    if len(ele_case) > 0:
-        error_msg = "\n\n".join([failure.get(ReportConstant.message, "") for failure in ele_case])
-        return CaseResult.failed, error_msg
-    if result == ReportConstant.false and (status == ReportConstant.run or status == ""):
-        return CaseResult.failed, error_msg
-    if status in [ReportConstant.blocked, ReportConstant.disable, ReportConstant.error]:
-        return CaseResult.blocked, error_msg
-    if status in [ReportConstant.skip, ReportConstant.not_run]:
-        return CaseResult.ignored, error_msg
-    if status in [ReportConstant.unavailable]:
-        return CaseResult.unavailable, error_msg
-    return CaseResult.passed, ""
+        Uploader.upload_unavailable_result(
+            error_message,
+            case_id=module_name,
+            report_path=os.path.join(report_path, "log", ReportConstant.task_run_log)
+        )

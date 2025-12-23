@@ -1110,8 +1110,11 @@ class SmartPerfKit(ITestKit):
                 for rev in rev_list:
                     result = re.match(self._pattern, rev)
                     if result and result.group(1):
-                        names.append(result.group(1))
-                        cur.append(result.group(2))
+                        names.append(result.group(1).strip())
+                        try:
+                            cur.append(float(result.group(2).strip()))
+                        except:
+                            cur.append(result.group(2).strip())
                 sheet.append(names)
                 sheet.append(cur)
                 for pos in range(1, len(names) + 1):
@@ -1123,7 +1126,10 @@ class SmartPerfKit(ITestKit):
                 for rev in rev_list:
                     result = re.match(self._pattern, rev)
                     if result and result.group(1):
-                        cur.append(result.group(2))
+                        try:
+                            cur.append(float(result.group(2).strip()))
+                        except:
+                            cur.append(result.group(2).strip())
                 sheet.append(cur)
         book.save(xls_file)
 
@@ -1187,3 +1193,26 @@ class CommonPushKit(PushBase):
         for command in self.post_push:
             run_command(device, command)
         return self.pushed_file, dsts
+
+
+@Plugin(type=Plugin.TEST_KIT, id="FaultKit")
+class FaultKit(ITestKit):
+
+    def __init__(self):
+        self.fault_case = []
+        self.test_to_run = []
+        self.faults = []
+
+    def __check_config__(self, config):
+        self.fault_case = get_config_value('fault-case', config)
+
+    def __setup__(self, device, **kwargs):
+        LOG.info("Injecting fault start")
+        self.faults = kwargs.get("faults", [])
+        for fault in self.faults:
+            LOG.info("Injecting Faults {}".format(fault))
+
+    def __teardown__(self, device):
+        LOG.info("Rectify the fault start")
+        for fault in self.faults:
+            LOG.info("Rectify the fault {}".format(fault))

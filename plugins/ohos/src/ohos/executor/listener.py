@@ -116,7 +116,7 @@ class StackReportListener(UniversalReportListener):
     def __init__(self):
         super().__init__()
         self._suites_index_stack = list()
-        self._suite_name_mapping = dict()
+        self._suite_names_mapping = dict()
         self.cycle = 0
 
     def _get_test_result(self, test_result, create=False):
@@ -172,11 +172,12 @@ class StackReportListener(UniversalReportListener):
                     have_marked_list.append(cur_test.index)
             for have_marked in have_marked_list:
                 self.tests.pop(have_marked)
-            if suite.suite_name not in self._suite_name_mapping.keys():
-                self._suite_name_mapping.update({suite.suite_name: suite.index})
+
+            if suite.suite_name not in self._suite_names_mapping.keys():
+                self._suite_names_mapping.update({suite.suite_name: suite.index})
             if self.cycle > 0:
-                suite_index = self._suite_name_mapping.get(suite.suite_name, "")
-                if suite_index not in self.suite_distributions.keys():
+                suite_index = self._suite_names_mapping.get(suite.suite_name, "")
+                if suite_index in self.suite_distributions.keys():
                     for suite_item, result_list in self.result:
                         if suite_item.index != suite_index:
                             continue
@@ -189,5 +190,5 @@ class StackReportListener(UniversalReportListener):
                     self.suite_distributions.update({suite.index: len(self.result)})
                     self.result.append((self.suites.get(suite.index), results_of_same_suite))
             else:
-                self.suite_distributions.update({suite.index:  len(self.result)})
+                self.suite_distributions.update({suite.index: len(self.result)})
                 self.result.append((self.suites.get(suite.index), results_of_same_suite))

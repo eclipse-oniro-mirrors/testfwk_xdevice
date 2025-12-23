@@ -25,7 +25,6 @@ from collections import namedtuple
 
 from ohos.drivers import *
 from ohos.drivers.constants import get_xml_output
-from ohos.drivers.constants import ResultManager
 from ohos.environment.dmlib import process_command_ret
 from ohos.error import ErrorMessage
 from ohos.parser.jsunit_parser import _ACE_LOG_MARKER
@@ -96,7 +95,9 @@ class JSUnitTestDriver(IDriver):
             command = "target mount"
             self.config.device.connector_command(command)
             do_module_kit_setup(request, self.kits)
-            self.run_js_outer(config_file, json_config, request)
+            run_rules = ["not found" not in exe_out]
+            if any(run_rules):
+                self.run_js_outer(config_file, json_config, request)
         except Exception as exception:
             self.error_message = exception
             if not getattr(exception, "error_no", ""):
@@ -281,7 +282,6 @@ class JSUnitTestDriver(IDriver):
             return pid, True
         return pid, False
 
-
     def _jsunit_clear(self):
         self.config.device.execute_shell_command(
             "rm -r /%s/%s/%s/%s" % ("data", "local", "tmp", "ajur"))
@@ -362,13 +362,11 @@ class JSUnitTestDriver(IDriver):
         hilog_open = os.open(self.hilog, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                              0o755)
         # execute test case
-
         self.config.device.device_log_collector.add_log_address(None, self.hilog)
         with os.fdopen(hilog_open, "a") as hilog_file_pipe:
             self.log_proc, self.hilog_proc = self.config.device.device_log_collector. \
                 start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
-        command = "aa start -d 123 -a %s -b %s" \
-                  % (ability_name, package)
+        command = "aa start -d 123 -a %s -b %s" % (ability_name, package)
         result_value = self.config.device.execute_shell_command(command)
         if result_value and "start ability successfully" in \
                 str(result_value).lower():
@@ -445,7 +443,7 @@ class JSUnitTestDriver(IDriver):
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
 
+
 def _lock_screen(device):
     device.execute_shell_command("svc power stayon false")
     time.sleep(1)
-

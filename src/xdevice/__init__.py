@@ -24,6 +24,9 @@ from _core.variables import Variables
 from _core.plugin import Plugin
 from _core.plugin import get_plugin
 from _core.logger import platform_logger
+from _core.logger import redirect_driver_log_begin
+from _core.logger import redirect_driver_log_end
+from _core.logger import get_driver_log_path
 from _core.interface import IDriver
 from _core.interface import IDevice
 from _core.interface import IDeviceManager
@@ -34,6 +37,7 @@ from _core.interface import IShellReceiver
 from _core.interface import ITestKit
 from _core.interface import IListener
 from _core.interface import IReporter
+from _core.interface import IProxy
 from _core.exception import ParamError
 from _core.exception import DeviceError
 from _core.exception import LiteDeviceError
@@ -80,6 +84,7 @@ from _core.executor.bean import SuitesResult
 from _core.executor.bean import StateRecorder
 from _core.executor.listener import TestDescription
 from _core.executor.listener import CollectingTestListener
+from _core.executor.request import Request
 from _core.executor.request import Task
 from _core.testkit.json_parser import JsonParser
 from _core.testkit.kit import junit_para_parse
@@ -93,17 +98,16 @@ from _core.testkit.kit import unlock_screen
 from _core.testkit.kit import unlock_device
 from _core.testkit.kit import get_class
 from _core.testkit.kit import check_device_ohca
+from _core.testkit.kit import do_module_kit_setup
+from _core.testkit.kit import do_module_kit_teardown
+from _core.testkit.kit import get_kit_instances
 from _core.driver.parser_lite import ShellHandler
 from _core.report.encrypt import check_pub_key_exist
 from _core.utils import get_file_absolute_path
 from _core.utils import check_result_report
 from _core.utils import get_device_log_file
-from _core.utils import get_kit_instances
 from _core.utils import get_config_value
 from _core.utils import exec_cmd
-from _core.utils import check_device_name
-from _core.utils import do_module_kit_setup
-from _core.utils import do_module_kit_teardown
 from _core.utils import convert_serial
 from _core.utils import convert_mac
 from _core.utils import convert_ip
@@ -128,6 +132,8 @@ from _core.utils import get_netstat_proc_pid
 from _core.utils import calculate_elapsed_time
 from _core.utils import copy_folder
 from _core.utils import check_uitest_version
+from _core.utils import find_file
+from _core.utils import get_resource_path
 from _core.logger import LogQueue
 from _core.environment.manager_env import DeviceSelectionOption
 from _core.environment.manager_env import EnvironmentManager
@@ -168,11 +174,15 @@ __all__ = [
     "Variables",
     "Console",
     "platform_logger",
+    "redirect_driver_log_begin",
+    "redirect_driver_log_end",
+    "get_driver_log_path",
     "Plugin",
     "get_plugin",
     "IDriver",
     "IDevice",
     "IDeviceManager",
+    "IProxy",
     "IFilter",
     "IParser",
     "LifeCycle",
@@ -264,7 +274,6 @@ __all__ = [
     "get_kit_instances",
     "get_config_value",
     "exec_cmd",
-    "check_device_name",
     "do_module_kit_setup",
     "do_module_kit_teardown",
     "convert_serial",
@@ -301,10 +310,12 @@ __all__ = [
     "AgentMode",
     "copy_folder",
     "check_uitest_version",
+    "find_file",
+    "get_resource_path",
     "Error",
-    "ErrorCategory"
+    "ErrorCategory",
+    "Request"
 ]
-
 
 def __load_entry_point1(plugin_group, python_version):
     from importlib.metadata import entry_points
@@ -322,8 +333,8 @@ def __load_entry_point1(plugin_group, python_version):
 
 def __load_entry_point2(plugin_group):
     import pkg_resources
-    for entry_point in pkg_resources.iter_entry_points(group=plugin_group):
-        entry_point.load()
+    for ep in pkg_resources.iter_entry_points(group=plugin_group):
+        ep.load()
 
 
 def __load_external_plugins():

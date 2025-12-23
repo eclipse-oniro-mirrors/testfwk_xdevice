@@ -30,7 +30,8 @@ LOG = platform_logger("OptionUtil")
 def find_device_options(environment_config, options, test_source):
     devices_option = []
     index = 1
-    for device_dict in environment_config:
+    for item_dict in environment_config:
+        device_dict = dict(item_dict)
         label = device_dict.get("label", "")
         required_manager = device_dict.get("type", "device")
         required_manager = \

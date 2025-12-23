@@ -15,11 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import getpass
 import os
-import platform
+import pathlib
 import sys
-import tempfile
 from dataclasses import dataclass
 
 __all__ = ["Variables"]
@@ -68,8 +66,8 @@ def _init_global_config():
     Variables.res_dir = os.path.abspath(os.path.join(
         MODULES_DIR, "_core", "resource"))
 
-    # create xdevice temp folder  /temp
-    data_path = os.path.join(_get_temp_dir(), "xdevice_data")
+    home_path = pathlib.Path.home()
+    data_path = os.path.join(home_path, ".xdevice")
     os.makedirs(data_path, exist_ok=True)
     Variables.temp_dir = data_path
 
@@ -97,14 +95,6 @@ def _init_global_config():
     Variables.source_code_rootpath = get_source_code_rootpath(
         Variables.top_dir)
     _init_logger()
-
-
-def _get_temp_dir():
-    name = platform.system()
-    if name == "Linux":
-        return os.path.join(tempfile.gettempdir(), getpass.getuser())
-    else:
-        return tempfile.gettempdir()
 
 
 def _init_logger():

@@ -2,7 +2,7 @@
 # coding=utf-8
 
 #
-# Copyright (c) 2020-2022 Huawei Device Co., Ltd.
+# Copyright (c) 2022 Huawei Device Co., Ltd.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -60,7 +60,7 @@ class LTPPosixTestDriver(IDriver):
             suite_file = request.root.source.source_file
 
             if not suite_file:
-                raise ParamError(ErrorMessage.Common.Code_0301001(request.root.source.source_string))
+                raise ParamError(ErrorMessage.Common.Code_0301001.format(request.root.source.source_string))
 
             LOG.debug("Test case file path: %s" % suite_file)
             # avoid hilog service stuck issue
@@ -88,7 +88,7 @@ class LTPPosixTestDriver(IDriver):
     def _run_posix(self, config_file, request):
         try:
             if not os.path.exists(config_file):
-                err_msg = ErrorMessage.Common.Code_0301002(config_file)
+                err_msg = ErrorMessage.Common.Code_0301002.format(config_file)
                 LOG.error(err_msg)
                 raise ParamError(err_msg)
 
@@ -119,7 +119,7 @@ class LTPPosixTestDriver(IDriver):
                                  0o755)
             self.config.device.device_log_collector.add_log_address(None, self.hilog)
             with os.fdopen(hilog_open, "a") as hilog_file_pipe:
-                _, self.log_proc = self.config.device.device_log_collector.\
+                _, self.log_proc = self.config.device.device_log_collector. \
                     start_catch_device_log(hilog_file_pipe=hilog_file_pipe)
                 if hasattr(self.config, "history_report_path") and \
                         self.config.testargs.get("test"):
@@ -137,7 +137,7 @@ class LTPPosixTestDriver(IDriver):
             if len(test_item) != 2:
                 continue
             un_pass_list.append(test_item[1])
-        LOG.debug("LTP Posix un pass list: [{}]".format(un_pass_list))
+        LOG.debug("un pass list: [{}]".format(un_pass_list))
         self._do_test_run(request, un_pass_list)
 
     def _do_test_run(self, request, test_list):
@@ -183,3 +183,4 @@ def _ltp_output_method(handler, output, end_mark="\n"):
         # not return the tail element of this list contains unfinished str,
         # so we set position -1
         return lines
+

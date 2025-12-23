@@ -34,7 +34,6 @@ LOG = platform_logger("ConfigManager")
 
 
 def initialize(func):
-
     def wrapper(self, *args, **kwargs):
         name = "_" + func.__name__
         if not hasattr(self, name):
@@ -146,6 +145,7 @@ class UserConfigManager(object):
             <dir></dir>
             <loglevel>INFO</loglevel>
             <hdc>FALSE</hdc>
+            <suitecaselog>ON</suitecaselog>
         </devicelog>
         """
         tag = "devicelog"
@@ -162,27 +162,32 @@ class UserConfigManager(object):
             user_define = None
             try:
                 user_define = json.loads(self.pass_through).get("user_define")
-            except ValueError:
-                pass
+            except ValueError as error:
+                LOG.warning("error:{}".format(error))
             if user_define and isinstance(user_define, dict):
                 device_log = user_define.get(tag)
                 if device_log and isinstance(device_log, dict):
                     cfg.update(device_log)
 
         # 默认配置参数
-        data = {
+        default_cfg = {
             ConfigConst.tag_enable: "ON",
+            ConfigConst.tag_suite_case_log: "ON",
             ConfigConst.tag_clear: "TRUE",
             ConfigConst.tag_dir: "",
             ConfigConst.tag_loglevel: "INFO",
             ConfigConst.tag_hdc: "FALSE"
         }
-        # 刷新默认配置参数
-        for key in data.keys():
-            value = cfg.get(key)
-            if value:
-                data.update({key: value})
-        return data
+        for k, v in default_cfg.items():
+            value = cfg.get(k)
+            if not value:
+                cfg.update({k: v})
+                continue
+            if isinstance(value, bool):
+                value = str(value)
+            if k != ConfigConst.tag_dir and value.lower() in ['true', 'false', 'on', 'off']:
+                cfg.update({k: value.upper()})
+        return cfg
 
     @property
     @initialize
@@ -295,6 +300,30 @@ class UserConfigManager(object):
                 data.update({k: v})
         return data
 
+    def get_batch_run_size(self):
+        cfg_name = ConfigConst.TaskArgs.batch_run_size.value
+        default_size = 200
+        size = str(self.taskargs.get(cfg_name, default_size)).strip()
+        if not size or not size.isdigit():
+            return default_size
+        size = int(size)
+        return size if size > 0 else default_size
+
+    def get_max_log_line_in_html(self):
+        """控制用例html报告最多显示运行日志行数"""
+        cfg_name = ConfigConst.TaskArgs.max_log_line_in_html.value
+        # 默认的最多显示行数
+        max_line_default = 20000
+        if cfg_name not in self.taskargs:
+            return max_line_default
+        max_line = self.taskargs.get(cfg_name).strip()
+        if max_line == "None":
+            return None
+        if not max_line or not max_line.isdigit():
+            return max_line_default
+        max_line = int(max_line)
+        return max_line if max_line > max_line_default else max_line_default
+
     def get_wifi_config(self):
         wifi = self.taskargs.get("wifi")
         if wifi:
@@ -327,11 +356,7 @@ class UserConfigManager(object):
         if not isinstance(new_args, dict):
             return
         # 目前在用的参数列表
-        known_test_args = [
-            "agent_mode", ConfigConst.repeat, ConfigConst.pass_through,
-            "screenshot", "screenrecorder", ConfigConst.web_resource, "wifi",
-            "install_user0", "ui_adaptive", "kill_uitest"
-        ]
+        known_test_args = [i.value for i in ConfigConst.TaskArgs]
         # 更新同名参数
         keys = set(task_args.keys()) & set(new_args.keys()) | set(known_test_args)
         for key in keys:

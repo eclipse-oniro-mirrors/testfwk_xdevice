@@ -16,6 +16,7 @@
 # limitations under the License.
 #
 
+import enum
 import platform
 from dataclasses import dataclass
 
@@ -27,7 +28,7 @@ __all__ = ["DeviceOsType", "ProductForm", "TestType", "TestExecType",
            "ModeType", "ConfigConst", "FilePermission", "CommonParserType",
            "DeviceConnectorType", "ReportConst", "DeviceProperties", "AdvanceDeviceOption",
            "LoggerMethod", "LifeStage", "Platform", "HcpTestMode", "DeviceResult",
-           "AgentMode", "CaseResult", "Cluster", "State"]
+           "AgentMode", "CaseResult", "Cluster", "State", "UploadType"]
 
 
 @dataclass
@@ -49,8 +50,8 @@ class ProductForm(object):
     television = "tv"
     watch = "watch"
     tablet = 'tablet'
-    wearable = 'wearable'
     _2in1 = '2in1'
+    wearable = 'wearable'
 
 
 @dataclass
@@ -134,9 +135,6 @@ class DeviceTestType(object):
     ValidatorTest = "ValidatorTest"
     arkuix_jsunit_test = "ARKUIXJSUnitTest"
     oh_jslocal_test = "OHJSLocalTestDriver"
-    stability_test = "StabilityTest"
-    ux_test = "UXTest"
-    ark_web_test = "ArkWebTest"
 
 
 @dataclass
@@ -157,6 +155,7 @@ class HostDrivenTestType(object):
     device_testsuite = "DeviceTestSuite"
     windows_test = "WindowsTest"
     app_test = "AppTest"
+    decc_test = "Decc_DeviceTest"
 
 
 TEST_DRIVER_SET = {
@@ -174,8 +173,6 @@ TEST_DRIVER_SET = {
     DeviceTestType.oh_kernel_test,
     DeviceTestType.oh_jsunit_test,
     HostDrivenTestType.device_test,
-    DeviceTestType.ux_test,
-    DeviceTestType.stability_test
 }
 
 
@@ -328,6 +325,7 @@ class ConfigConst(object):
     tag_enable = "enable"
     tag_clear = "clear"
     tag_loglevel = "loglevel"
+    tag_suite_case_log = "suitecaselog"
     tag_hdc = "hdc"
 
     # Ignore testcase path
@@ -351,6 +349,21 @@ class ConfigConst(object):
     service_mode = "service_mode"
     service_port = "service_port"
     control_service_url = "control_service_url"
+
+    class TaskArgs(enum.Enum):
+        agent_mode = "agent_mode"
+        batch_run_size = "batch_run_size"
+        install_user0 = "install_user0"
+        kill_uitest = "kill_uitest"
+        max_log_line_in_html = "max_log_line_in_html"
+        max_driver_threads = "max_driver_threads"
+        pass_through = "pass_through"
+        repeat = "repeat"
+        screenrecorder = "screenrecorder"
+        screenshot = "screenshot"
+        ui_adaptive = "ui_adaptive"
+        web_resource = "web_resource"
+        wifi = "wifi"
 
 
 @dataclass
@@ -415,6 +428,7 @@ class DeviceProperties(object):
     version = "version"
     others = "others"
     alias = "alias"
+    reboot_timeout = "reboot_timeout"
 
 
 @dataclass
@@ -489,6 +503,14 @@ class CaseResult:
     blocked = "Blocked"
     ignored = "Ignored"
     unavailable = "Unavailable"
+
+
+@dataclass
+class UploadType:
+    test_type_list = [
+        HostDrivenTestType.device_test,
+        HostDrivenTestType.windows_test,
+    ]
 
 
 class Cluster:

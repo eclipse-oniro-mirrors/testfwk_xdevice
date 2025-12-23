@@ -160,3 +160,13 @@ class HapNotSupportTest(DeviceError):
 
     def __str__(self):
         return str(self.error_msg)
+
+
+class TestError(Exception):
+    def __init__(self, error_msg: str, error_no: str = ""):
+        super(TestError, self).__init__(error_msg, error_no)
+        self.error_msg = error_msg
+        self.error_no = error_no
+
+    def __str__(self):
+        return str(self.error_msg)

@@ -15,8 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import json
+
 import re
+import shlex
 import shutil
 import time
 import os
@@ -24,14 +25,10 @@ import threading
 import copy
 import platform
 import subprocess
-import sys
 import tempfile
-import warnings
 from typing import Tuple
-from xml.etree import ElementTree
 
 from xdevice import DeviceOsType
-from xdevice import Variables
 from xdevice import FilePermission
 from xdevice import ParamError
 from xdevice import ProductForm
@@ -54,20 +51,14 @@ from xdevice import DeviceProperties
 from xdevice import get_cst_time
 from xdevice import get_file_absolute_path
 from xdevice import Platform
-from xdevice import AppInstallError
 from xdevice import AgentMode
-from xdevice import check_uitest_version
 from xdevice import ShellCommandUnresponsiveException
+from xdevice import Variables
 from ohos.environment.dmlib import HdcHelper
 from ohos.environment.dmlib import CollectingOutputReceiver
 from ohos.utils import parse_strings_key_value
 from ohos.error import ErrorMessage
-from ohos.exception import OHOSRpcNotRunningError
-from ohos.exception import OHOSDeveloperModeNotTrueError
-from ohos.exception import OHOSRpcProcessNotFindError
-from ohos.exception import OHOSRpcPortNotFindError
-from ohos.exception import OHOSRpcStartFailedError
-from ohos.exception import HDCFPortError
+from ohos.constants import ConnectType
 
 __all__ = ["Device"]
 TIMEOUT = 300 * 1000
@@ -75,22 +66,19 @@ RETRY_ATTEMPTS = 2
 DEFAULT_UNAVAILABLE_TIMEOUT = 20 * 1000
 BACKGROUND_TIME = 2 * 60 * 1000
 LOG = platform_logger("Device")
-DEVICETEST_HAP_PACKAGE_NAME = "com.ohos.devicetest"
 DEVICE_TEMP_PATH = "/data/local/tmp"
 QUERY_DEVICE_PROP_BIN = "testcases/queryStandard"
-UITEST_NAME = "uitest"
-UITEST_SINGLENESS = "singleness"
-EXTENSION_NAME = "--extension-name"
-UITEST_PATH = "/system/bin/uitest"
-UITEST_SHMF = "/data/app/el2/100/base/{}/cache/shmf".format(DEVICETEST_HAP_PACKAGE_NAME)
-UITEST_COMMAND = "{} start-daemon 0123456789".format(UITEST_PATH)
 NATIVE_CRASH_PATH = "/data/log/faultlog/temp"
 JS_CRASH_PATH = "/data/log/faultlog/faultlogger"
 ROOT_PATH = "/data/log/faultlog"
 KINGKONG_PATH = "/data/local/tmp/kingkongDir"
 LOGLEVEL = ["DEBUG", "INFO", "WARN", "ERROR", "FATAL"]
 HILOG_PATH = "/data/log/hilog"
-SUCCESS_CODE = "0"
+
+
+class CaptureMode:
+    DEFAULT = "default"  # snapshot_display
+    HAP = "hap"          # hap
 
 
 def perform_device_action(func):
@@ -188,13 +176,9 @@ class Device(IDevice):
     reboot_timeout = 2 * 60 * 1000
     _device_log_collector = None
 
-    _proxy = None
-    _abc_proxy = None
     _agent_mode = AgentMode.bin
-    initdevice = True
-    d_port = 8011
-    abc_d_port = 8012
-    _uitestdeamon = None
+    is_oh = True
+    _arch = None
     rpc_timeout = 300
     device_id = None
     reconnecttimes = 0
@@ -205,6 +189,9 @@ class Device(IDevice):
     test_platform = Platform.ohos
     _webview = None
     _is_root = None
+    tmp_path = DEVICE_TEMP_PATH
+    _uitest_version = None
+    _use_unix_socket = None
 
     model_dict = {
         'default': ProductForm.phone,
@@ -212,9 +199,9 @@ class Device(IDevice):
         'car': ProductForm.car,
         'tv': ProductForm.television,
         'watch': ProductForm.watch,
-        'wearable': ProductForm.wearable,
         'tablet': ProductForm.tablet,
         '2in1': ProductForm._2in1,
+        'wearable': ProductForm.wearable,
         'nosdcard': ProductForm.phone
     }
 
@@ -254,7 +241,7 @@ class Device(IDevice):
         DeviceProperties.is_ark: "",
         DeviceProperties.mac: "",
         DeviceProperties.mobile_service: "ro.odm.config.modem_number",
-        DeviceProperties.model: "ohos.boot.hardware",
+        DeviceProperties.model: "const.product.model",
         DeviceProperties.rom: "",
         DeviceProperties.rooted: "",
         DeviceProperties.xres: "",
@@ -272,11 +259,20 @@ class Device(IDevice):
         self.win_proxy_listener = None
         self.device_props = {}
         self.device_description = {}
+        self.clean_proxy_function = []
+        self.reconnect_proxy_function = []
 
     def __eq__(self, other):
         return self.device_sn == other.__get_serial__() and \
             self.device_os_type == other.device_os_type and \
             self.host == other.host
+
+    @property
+    def connect_type(self):
+        if self.host == "127.0.0.1":
+            return ConnectType.local
+        else:
+            return ConnectType.remote
 
     def init_description(self):
         if self.device_description:
@@ -298,6 +294,34 @@ class Device(IDevice):
 
     def __get_serial__(self):
         return self.device_sn
+
+    @property
+    def arch(self):
+        if self._arch is None:
+            text = self.execute_shell_command("file /system/bin/uitest")
+            if "x86_64" in text or "x86-64" in text:
+                self._arch = "x86_64"
+            elif "64" in text:
+                self._arch = "64"
+            elif "32" in text:
+                self._arch = "32"
+            else:
+                self._arch = "64"
+        return self._arch
+
+    @property
+    def uitest_version(self):
+        if self._uitest_version is None:
+            self._uitest_version = self.execute_shell_command("/system/bin/uitest --version")
+            self._uitest_version = self._uitest_version.strip()
+            self.log.info(f"Uitest version is {self._uitest_version}")
+        return self._uitest_version
+
+    @property
+    def ui_socket_mode(self):
+        if self._use_unix_socket is None:
+            self._use_unix_socket = False
+        return self._use_unix_socket
 
     def extend_device_props(self):
         if self.device_props:
@@ -334,10 +358,47 @@ class Device(IDevice):
                 self.device_sn, ConfigConst.recover_state))
             return False
 
+        LOG.debug("Wait device %s to recover" % self.device_sn)
+        # tcpip类型的设备，需要connect成功后，才能被hdc list targets命令查询到
+        self.reconnect_tcpip_device()
+
         result = self.device_state_monitor.wait_for_device_available(self.reboot_timeout)
         if result:
             self.device_log_collector.restart_catch_device_log()
         return result
+
+    def reconnect_tcpip_device(self):
+        """运行tconn命令，连接tcpip类型的设备"""
+        pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+'
+        if not re.match(pattern, self.device_sn):
+            return
+
+        if self.host != "127.0.0.1":
+            cmd = [HdcHelper.CONNECTOR_NAME, "-s", "{}:{}".format(self.host, self.port), "tconn", self.device_sn]
+        else:
+            cmd = [HdcHelper.CONNECTOR_NAME, "tconn", self.device_sn]
+
+        timeout = self.reboot_timeout
+        LOG.debug(f"reconnect to device {self.device_sn}, timeout: {timeout}ms")
+
+        count, reconnect_result = 1, False
+        start_time = int(time.time() * 1000)
+        while int(time.time() * 1000) - start_time < timeout:
+            try:
+                LOG.debug(f"the {count} times to reconnect to device")
+                LOG.debug(" ".join(cmd))
+                out = exec_cmd(cmd, timeout=2)
+                LOG.debug(out)
+                # when device connected, output as: connected to ip:port
+                if "Connect OK" in out or "Target is connected" in out:
+                    reconnect_result = True
+                    break
+                time.sleep(5)
+                count += 1
+            except Exception as e:
+                LOG.error(f"reconnect to device error, {e}")
+        if not reconnect_result:
+            LOG.warning("reconnect to device failed")
 
     def _get_device_platform(self):
         self.test_platform = "OpenHarmony"
@@ -356,7 +417,7 @@ class Device(IDevice):
     def get_property(self, prop_name, retry=RETRY_ATTEMPTS,
                      abort_on_exception=False):
         """
-        Hdc command, ddmlib function.
+        Hdc command, dmlib function.
         """
         if not self.get_recover_state():
             return ""
@@ -422,6 +483,9 @@ class Device(IDevice):
             HdcHelper.execute_shell_command(
                 self, command, timeout=timeout,
                 receiver=collect_receiver, **kwargs)
+            if "Device not founded or connected" in collect_receiver.output:
+                LOG.info("Device is Disconnected")
+                raise ConnectionAbortedError
             return collect_receiver.output
         else:
             return HdcHelper.execute_shell_command(
@@ -450,14 +514,13 @@ class Device(IDevice):
 
     def _do_reboot(self):
         HdcHelper.reboot(self)
-        self.wait_for_boot_completion()
+        self.recover_device()
 
     def _reboot_until_online(self):
         self._do_reboot()
 
     def reboot(self):
         self._reboot_until_online()
-        self.device_log_collector.restart_catch_device_log()
 
     @perform_device_action
     def install_package(self, package_path, command=""):
@@ -488,15 +551,8 @@ class Device(IDevice):
                     str(ret).split()[0] == "0"):
                 self.execute_shell_command("mkdir -p %s" % remote, retry=0)
 
-        if self.host != "127.0.0.1":
-            self.connector_command("file send {} {}".format(local, remote), retry=0)
-        else:
-            is_create = kwargs.get("is_create", False)
-            timeout = kwargs.get("timeout", TIMEOUT)
-            HdcHelper.push_file(self, local, remote, is_create=is_create,
-                                timeout=timeout)
-            if not self.is_file_exist(remote):
-                self.connector_command("file send {} {}".format(local, remote), retry=0)
+        self.connector_command("file send {} {}".format(local, remote), retry=0)
+
         if not self.is_file_exist(remote):
             err_msg = ErrorMessage.Device.Code_0303004.format(local, remote)
             LOG.error(err_msg)
@@ -511,6 +567,7 @@ class Device(IDevice):
         """
         local = "\"{}\"".format(local)
         remote = "\"{}\"".format(remote)
+        # 改成走socket方式拉文件，hdc回应拉取成功，实际文件没有被拉下来，而使用命令方式，没有问题
         self.connector_command("file recv {} {}".format(remote, local), retry=0)
 
     @property
@@ -518,7 +575,7 @@ class Device(IDevice):
         if self._is_root is None:
             ret = self.execute_shell_command("whoami")
             LOG.debug(ret)
-            self._is_root = True if "root" in ret else False
+            self._is_root = True if ret and "root" in ret else False
         return self._is_root
 
     def is_directory(self, path):
@@ -548,7 +605,6 @@ class Device(IDevice):
             setattr(self, ConfigConst.recover_state, state)
             if not state:
                 self.test_device_state = TestDeviceState.NOT_AVAILABLE
-                self.device_allocation_state = DeviceAllocationState.unavailable
                 self.call_proxy_listener()
 
     def get_recover_state(self, default_state=True):
@@ -576,32 +632,15 @@ class Device(IDevice):
 
     def close(self):
         self.reconnecttimes = 0
-        try:
-            from devicetest.controllers.tools.recorder.record_agent import RecordAgent
-            if RecordAgent.instance:
-                RecordAgent.instance.terminate()
-        except Exception as error:
-            self.log.error(' RecordAgent terminate error: {}.'.format(str(error)))
 
     def reset(self):
         self.log.debug("start reset device...")
         self.call_proxy_listener()
-        if self._proxy is not None:
-            self._proxy.close()
-        self._proxy = None
-        if self._uitestdeamon is not None:
-            self._uitestdeamon = None
-        if self.is_bin and not self.kill_uitest:
-            self.stop_harmony_rpc(kill_uitest=False)
-        else:
-            self.stop_harmony_rpc()
-        self.remove_ports()
+        for function in self.clean_proxy_function:
+            function()
+        self.clean_proxy_function.clear()
+        self.reconnect_proxy_function.clear()
         self.device_log_collector.stop_restart_catch_device_log()
-
-    @property
-    def kill_uitest(self):
-        task_args = Variables.config.taskargs
-        return task_args.get("kill_uitest", "").lower() == "true"
 
     @property
     def is_bin(self):
@@ -610,90 +649,30 @@ class Device(IDevice):
         return False if self._agent_mode == AgentMode.hap else True
 
     def set_agent_mode(self, mode: AgentMode = AgentMode.bin):
-        if not mode:
-            mode = AgentMode.bin
-        if mode == AgentMode.hap and not self.is_root:
-            LOG.debug("Current device is not root, can not set hap mode, change to bin mode.")
-            self._agent_mode = AgentMode.bin
-        else:
-            self._agent_mode = mode
-
-        if self._agent_mode == AgentMode.hap:
+        if self.arch == "32":
+            self._agent_mode = AgentMode.hap
             LOG.debug("Current mode is normal mode.")
         else:
-            self._agent_mode = AgentMode.bin
-            LOG.debug("Current mode is binary mode.")
+            self._agent_mode = mode
+            LOG.debug("Current mode is {} mode.".format(mode))
 
-    def check_if_bin(self):
-        ret = False
-        self._agent_mode = AgentMode.abc
-        base_version = tuple("4.1.3.9".split("."))
-        uitest_version = self.execute_shell_command("/system/bin/uitest --version")
-        self.log.debug("uitest version is {}".format(uitest_version))
-        if check_uitest_version(uitest_version, base_version):
-            self._agent_mode = AgentMode.bin
-            ret = True
-        self.log.debug("{}".format("Binary agent run in {} mode".format(self._agent_mode)))
-        return ret
-
-    def _check_developer_mode_status(self):
-        if not self.is_root:
-            return True
-        status = self.execute_shell_command("param get const.security.developermode.state")
-        self.log.debug(status)
-        if status and status.strip() == "true":
-            return True
-        else:
-            return False
-
-    @property
-    def proxy(self):
-        """The first rpc session initiated on this device. None if there isn't
-        one.
-        """
-        try:
-            if self._proxy is None:
-                self.log.debug("{}".format("Hap agent run in {} mode".format(self._agent_mode)))
-                # check uitest
-                self.check_uitest_status()
-                self._proxy = self.get_harmony()
-        except HDCFPortError as error:
-            raise error
-        except AppInstallError as error:
-            raise error
-        except OHOSRpcNotRunningError as error:
-            raise error
-        except Exception as error:
-            self._proxy = None
-            self.log.error("DeviceTest-10012 proxy:%s" % str(error))
-        return self._proxy
 
     @property
     def abc_proxy(self):
-        """The first rpc session initiated on this device. None if there isn't
-        one.
-        """
-        try:
-            if self._abc_proxy is None:
-                # check uitest
-                self.check_uitest_status()
-                self._abc_proxy = self.get_harmony(start_abc=True)
-        except HDCFPortError as error:
-            raise error
-        except OHOSRpcNotRunningError as error:
-            raise error
-        except Exception as error:
-            self._abc_proxy = None
-            self.log.error("DeviceTest-10012 abc_proxy:%s" % str(error))
-        return self._abc_proxy
+        # ui operation agent
+        return self.ui_proxy
 
     @property
-    def uitestdeamon(self):
-        from devicetest.controllers.uitestdeamon import \
-            UiTestDeamon
-        if self._uitestdeamon is None:
-            self._uitestdeamon = UiTestDeamon(self)
-        return self._uitestdeamon
+    def ui_proxy(self):
+        # ui operation agent
+        ui_proxy = getattr(self, "_ui_proxy", None)
+        if ui_proxy is None:
+            from ohos.proxy.ui_proxy import UIProxy
+            self._ui_proxy = UIProxy()
+            self._ui_proxy.__set_device__(self)
+            self._ui_proxy.__init_proxy__()
+            self.clean_proxy_function.append(self._ui_proxy.__clean_proxy__)
+        return self._ui_proxy.rpc_proxy
 
     @classmethod
     def set_module_package(cls, module_packag):
@@ -703,285 +682,12 @@ class Device(IDevice):
     def set_moudle_ablity_name(cls, module_ablity_name):
         cls.module_ablity_name = module_ablity_name
 
-    @property
-    def is_oh(self):
-        return True
-
-    def get_harmony(self, start_abc=False):
-        if self.initdevice:
-            if start_abc:
-                self.start_abc_rpc(re_install_rpc=True)
-            else:
-                self.start_harmony_rpc(re_install_rpc=True)
-        # clear old port,because abc and fast mode will not remove port
-        self.fport_tcp_port(start_abc=start_abc)
-        rpc_proxy = None
-        try:
-            from devicetest.controllers.openharmony import OpenHarmony
-            rpc_proxy = OpenHarmony(port=self._h_port, addr=self.host, timeout=self.rpc_timeout, device=self)
-        except Exception as error:
-            self.log.error(' proxy init error: {}.'.format(str(error)))
-        return rpc_proxy
-
-    def start_uitest(self):
-        result = ""
-        if self.is_bin:
-            result = self.execute_shell_command("{} start-daemon singleness".format(UITEST_PATH))
-        else:
-            share_mem_mode = False
-            base_version = [3, 2, 2, 2]
-            uitest_version = self.execute_shell_command("{} --version".format(UITEST_PATH))
-            if uitest_version and re.match(r'^\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}', uitest_version):
-                uitest_version = uitest_version.split(".")
-                for index, _ in enumerate(uitest_version):
-                    if int(uitest_version[index]) > base_version[index]:
-                        share_mem_mode = True
-                        break
-            else:
-                share_mem_mode = True
-            if share_mem_mode:
-                if not self.is_file_exist(UITEST_SHMF):
-                    self.log.debug('Path {} not exist, create it.'.format(UITEST_SHMF))
-                    self.execute_shell_command("echo abc > {}".format(UITEST_SHMF))
-                    self.execute_shell_command("chmod -R 666 {}".format(UITEST_SHMF))
-                result = self.execute_shell_command("{} start-daemon {}".format(UITEST_PATH, UITEST_SHMF))
-            else:
-                result = self.execute_shell_command(UITEST_COMMAND)
-        self.log.debug('start uitest, {}'.format(result))
-
-    def start_harmony_rpc(self, re_install_rpc=False, reconnect=False):
-        if not self._check_developer_mode_status():
-            raise OHOSDeveloperModeNotTrueError(ErrorMessage.Device.Code_0303015, device=self)
-
-        if not reconnect and self.check_rpc_status(check_abc=False, check_times=1) == SUCCESS_CODE:
-            if (hasattr(sys, ConfigConst.env_pool_cache) and
-                getattr(sys, ConfigConst.env_pool_cache, False)) \
-                    or not re_install_rpc:
-                self.log.debug('Harmony rpc already start!!!!')
-                return
-        if re_install_rpc:
-            try:
-                from devicetest.controllers.openharmony import OpenHarmony
-                OpenHarmony.install_harmony_rpc(self)
-            except ImportError as error:  # pylint:disable=undefined-variable
-                self.log.debug(str(error))
-                self.log.error('please check devicetest extension module is exist.')
-                raise Exception(ErrorMessage.Config.Code_0302006)
-            except AppInstallError as error:
-                raise error
-            except Exception as error:
-                self.log.debug(str(error))
-                self.log.error('root device init RPC error.')
-                raise Exception(ErrorMessage.Config.Code_0302006)
-        if not self.is_bin:
-            self.stop_harmony_rpc(reconnect=reconnect)
-        else:
-            self.log.debug('Binary mode, kill hap if hap is running.')
-            self.stop_harmony_rpc(kill_uitest=False, reconnect=reconnect)
-        cmd = "aa start -a {}.ServiceAbility -b {}".format(DEVICETEST_HAP_PACKAGE_NAME, DEVICETEST_HAP_PACKAGE_NAME)
-        result = self.execute_shell_command(cmd)
-        self.log.debug('start devicetest ability, {}'.format(result))
-        if "successfully" not in result:
-            raise OHOSRpcStartFailedError(ErrorMessage.Device.Code_0303016.format(
-                "system" if self.is_bin else "normal", result), device=self)
-        if not self.is_bin:
-            self.start_uitest()
-        time.sleep(1)
-        check_result = self.check_rpc_status(check_abc=False)
-        self.raise_exception(check_result)
-
-    def raise_exception(self, error_code: str):
-        if error_code == SUCCESS_CODE:
-            return
-        rpc_mode = "system" if self.is_bin else "normal"
-        if error_code == ErrorMessage.Device.Code_0303025.code:
-            raise OHOSRpcProcessNotFindError(ErrorMessage.Device.Code_0303025, device=self)
-        elif error_code == ErrorMessage.Device.Code_0303026.code:
-            raise OHOSRpcPortNotFindError(ErrorMessage.Device.Code_0303026, device=self)
-        elif error_code == ErrorMessage.Device.Code_0303027.code:
-            raise OHOSRpcProcessNotFindError(ErrorMessage.Device.Code_0303023.format(rpc_mode), device=self)
-        elif error_code == ErrorMessage.Device.Code_0303028.code:
-            raise OHOSRpcPortNotFindError(ErrorMessage.Device.Code_0303024.format(rpc_mode), device=self)
-
-    def start_abc_rpc(self, re_install_rpc=False, reconnect=False):
-        if re_install_rpc:
-            try:
-                from devicetest.controllers.openharmony import OpenHarmony
-                OpenHarmony.init_agent_resource(self)
-            except ImportError as error:  # pylint:disable=undefined-variable
-                self.log.debug(str(error))
-                self.log.error('please check devicetest extension module is exist.')
-                raise error
-            except Exception as error:
-                self.log.debug(str(error))
-                self.log.error('root device init abc RPC error.')
-                raise error
-        if reconnect:
-            self.stop_harmony_rpc(kill_hap=False, reconnect=reconnect)
-        if self.is_bin and self.check_rpc_status(check_abc=True, check_times=1) == SUCCESS_CODE:
-            self.log.debug('Harmony abc rpc already start!!!!')
-            return
-        self.start_uitest()
-        time.sleep(1)
-        check_result = self.check_rpc_status(check_abc=True)
-        self.raise_exception(check_result)
-
-    def stop_harmony_rpc(self, kill_uitest=True, kill_hap=True, reconnect=False):
-        if not self.get_recover_state():
-            LOG.warning("device state is false, skip stop harmony rpc.")
-            return
-        proc_pids = self.get_devicetest_proc_pid()
-        for index, pid in enumerate(proc_pids):
-            if not kill_uitest and kill_hap and index == 1:
-                continue
-            if not kill_hap and kill_uitest and index == 2:
-                continue
-            if pid != "":
-                if reconnect:
-                    name = "uitest" if index != 2 else "devicetest"
-                    self._dump_pid_info(pid, name)
-                cmd = 'kill -9 {}'.format(pid)
-                ret = self.execute_shell_command(cmd)
-                if index == 2 and "Operation not permitted" in ret:
-                    stop_hap = 'aa force-stop {}'.format(DEVICETEST_HAP_PACKAGE_NAME)
-                    self.execute_shell_command(stop_hap)
-        self.wait_listen_port_disappear()
-
-    def wait_listen_port_disappear(self):
-        end_time = time.time() + 5
-        times = 0
-        while time.time() < end_time:
-            if times == 0:
-                is_print = True
-            else:
-                is_print = False
-            if not self.is_harmony_rpc_socket_running(self.d_port, is_print=is_print):
-                break
-            times += 1
-        if times > 0:
-            self.is_harmony_rpc_socket_running(self.d_port, is_print=True)
-
-    def _dump_pid_info(self, pid, name):
-        try:
-            path = os.path.join(self._device_report_path, "log", "pid_info")
-            if not os.path.exists(path):
-                os.makedirs(path)
-            file_path = os.path.join(path, "{}_pid_info_{}.txt".format(name, pid))
-            pid_info_file = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, FilePermission.mode_755)
-            ret = self.execute_shell_command("dumpcatcher -p {}".format(pid))
-            with os.fdopen(pid_info_file, "a") as pid_info_file_pipe:
-                pid_info_file_pipe.write(ret)
-        except Exception as e:
-            LOG.error("Dump {} pid info fail. Error: {}".format(pid, e))
-
-    # check uitest if running well, otherwise kill it first
-    def check_uitest_status(self):
-        if not self.is_root:
-            ret = self.execute_shell_command("uitest --version")
-            if "inaccessible or not found" in ret:
-                raise OHOSDeveloperModeNotTrueError(ErrorMessage.Device.Code_0303021, device=self)
-        self.log.debug('Check uitest running status.')
-        proc_pids = self.get_devicetest_proc_pid()
-        if proc_pids[2] != "" and not self._proxy:
-            self.execute_shell_command('kill -9 {}'.format(proc_pids[2]))
-        if self.is_bin and proc_pids[0] != "":
-            self.execute_shell_command('kill -9 {}'.format(proc_pids[0]))
-            self.log.debug('Uitest is running in normal mode, current mode is bin/abc, wait it exit.')
-        if not self.is_bin and proc_pids[1] != "":
-            self.execute_shell_command('kill -9 {}'.format(proc_pids[1]))
-            self.log.debug('Uitest is running in abc mode, current mode is normal, wait it exit.')
-        self.log.debug('Finish check uitest running status.')
-
-    def get_devicetest_proc_pid(self):
-        # # 0-uitest 1-uitest-sigleness 2-hap
-        proc_pids = [""] * 3
-        if not self.is_bin:
-            proc_pids[0] = self.execute_shell_command("pidof {}".format(UITEST_NAME)).strip()
-        else:
-            cmd = 'ps -ef | grep {}'.format(UITEST_SINGLENESS)
-            proc_running = self.execute_shell_command(cmd).strip()
-            proc_running = proc_running.split("\n")
-            for data in proc_running:
-                if UITEST_SINGLENESS in data and "grep" not in data and EXTENSION_NAME not in data:
-                    data = data.split()
-                    proc_pids[1] = data[1]
-        proc_pids[2] = self.execute_shell_command("pidof {}".format(DEVICETEST_HAP_PACKAGE_NAME)).strip()
-
-        return proc_pids
-
-    def is_harmony_rpc_running(self, check_abc=False):
-        proc_pids = self.get_devicetest_proc_pid()
-        if not self.is_bin:
-            self.log.debug('is_proc_running: agent pid: {}, uitest pid: {}'.format(proc_pids[2], proc_pids[0]))
-            if proc_pids[2] != "" and proc_pids[0] != "":
-                return True
-        else:
-            if check_abc:
-                self.log.debug('is_proc_running: uitest pid: {}'.format(proc_pids[1]))
-                if proc_pids[1] != "":
-                    return True
-            else:
-                self.log.debug('is_proc_running: agent pid: {}'.format(proc_pids[2]))
-                if proc_pids[2] != "":
-                    return True
-        return False
-
-    def is_harmony_rpc_socket_running(self, port: int, check_server: bool = True, is_print: bool = True) -> bool:
-        if not self.is_root:
-            return True
-        out = self.execute_shell_command("netstat -atn | grep :{}".format(port))
-        if is_print:
-            self.log.debug(out)
-        if out:
-            out = out.split("\n")
-            for data in out:
-                if check_server:
-                    if "LISTEN" in data and str(port) in data:
-                        return True
-                else:
-                    if "hdcd" in data and str(port) in data:
-                        return True
-        return False
-
-    def check_rpc_status(self, check_abc: bool = False, check_server: bool = True, check_times: int = 3) -> str:
-        port = self.d_port if not check_abc else self.abc_d_port
-        for i in range(check_times):
-            if self.is_harmony_rpc_running(check_abc):
-                break
-            else:
-                self.log.debug("check harmony rpc failed {} times, If is check bin(abc): {}, "
-                               "try to check again in 1 seconds".format(i + 1, check_abc))
-                time.sleep(1)
-        else:
-            self.log.debug(f"{check_times} times check failed.")
-            self.log.debug('Harmony rpc is not running!!!! If is check bin(abc): {}'.format(check_abc))
-            if check_abc:
-                return ErrorMessage.Device.Code_0303025.code
-            else:
-                return ErrorMessage.Device.Code_0303027.code
-
-        for i in range(check_times):
-            if self.is_harmony_rpc_socket_running(port, check_server=check_server):
-                break
-            else:
-                self.log.debug("Harmony rpc port is not find {} times, If is check bin(abc): {}, "
-                               "try to find again in 1 seconds".format(i + 1, check_abc))
-                time.sleep(1)
-        else:
-            self.log.debug('Harmony rpc port is not find!!!! If is check bin(abc): {}'.format(check_abc))
-            if check_abc:
-                return ErrorMessage.Device.Code_0303026.code
-            else:
-                return ErrorMessage.Device.Code_0303028.code
-        self.log.debug('Harmony rpc is running!!!! If is check abc: {}'.format(check_abc))
-        return SUCCESS_CODE
-
     def call_proxy_listener(self):
-        if ((self.is_bin and self._abc_proxy) or
-                (not self.is_bin and self._proxy)):
+        if ((self.is_bin and getattr(self, "_ui_proxy", None)) or
+                (not self.is_bin and getattr(self, "_hap_proxy", None))):
             if self.proxy_listener is not None:
                 self.proxy_listener(is_exception=True)
-        if self._proxy:
+        if getattr(self, "_hap_proxy", None):
             if self.win_proxy_listener is not None:
                 self.win_proxy_listener(is_exception=True)
 
@@ -1008,126 +714,26 @@ class Device(IDevice):
             self.log.error('DeviceTest-20013 uninstall: %s' % str(err))
             return False
 
-    def check_need_install_bin(self):
-        # check if agent.so exist
-        if self._agent_mode == AgentMode.bin:
-            ret = self.execute_shell_command("ls -l /data/local/tmp/agent.so")
-        else:
-            ret = self.execute_shell_command("ls -l /data/local/tmp/app.abc")
-        LOG.debug(ret)
-        if ret is None or "No such file or directory" in ret:
-            return True
-        return False
-
     def reconnect(self, waittime=60, proxy=None):
         """
         @summary: Reconnect the device.
         """
         self.call_proxy_listener()
 
-        if not self.wait_for_boot_completion():
-            if self._proxy:
-                self._proxy.close()
-            self._proxy = None
-            if self._abc_proxy:
-                self._abc_proxy.close()
-            self._abc_proxy = None
-            self._uitestdeamon = None
-            self.remove_ports()
+        if not self.recover_device():
+            for function in self.clean_proxy_function:
+                function()
             raise Exception("Reconnect timed out.")
 
-        if not self.is_root and self._agent_mode == AgentMode.hap:
-            LOG.debug("Reconnect device is not root, change hap mode to bin mode.")
-            self._agent_mode = AgentMode.bin
 
-        if self._proxy and (proxy is None or proxy == AgentMode.hap):
-            self.start_harmony_rpc(re_install_rpc=True, reconnect=True)
-            self.fport_tcp_port(start_abc=False)
-            try:
-                self._proxy.init(port=self._h_port, addr=self.host, device=self)
-            except Exception as _:
-                time.sleep(3)
-                self._proxy.init(port=self._h_port, addr=self.host, device=self)
+        ui_proxy = getattr(self, "_ui_proxy", None)
+        if ui_proxy and (proxy is None or proxy == AgentMode.bin):
+            ui_proxy.__reconnect_proxy__()
 
-        if self.is_bin and self._abc_proxy and (proxy is None or proxy == AgentMode.bin):
-            re_install = self.check_need_install_bin()
-            self.start_abc_rpc(re_install_rpc=re_install, reconnect=True)
-            self.fport_tcp_port(start_abc=True)
-            try:
-                self._abc_proxy.init(port=self._h_port, addr=self.host, device=self)
-            except Exception as _:
-                time.sleep(3)
-                self._abc_proxy.init(port=self._h_port, addr=self.host, device=self)
+        for function in self.reconnect_proxy_function:
+            function()
 
-        if self._uitestdeamon is not None:
-            self._uitestdeamon.init(self)
-
-        if self._proxy:
-            return self._proxy
-        return None
-
-    def fport_tcp_port(self, start_abc: bool = False) -> bool:
-        filter_ports = []
-        for i in range(3):
-            host_port = self.get_local_port(start_abc=start_abc, filter_ports=filter_ports)
-            remote_port = self.abc_d_port if start_abc else self.d_port
-            cmd = "fport tcp:{} tcp:{}".format(host_port, remote_port)
-            result = self.connector_command(cmd)
-            if "Fail" not in result:
-                self._h_port = host_port
-                LOG.debug(f"hdc fport success, get_proxy host_port: {host_port}, remote_port: {remote_port}")
-                return True
-            filter_ports.append(host_port)
-            LOG.debug(f"The {i + 1} time HDC fport tcp port fail.")
-            from devicetest.utils.util import check_port_state
-            check_port_state(host_port)
-        else:
-            err_msg = ErrorMessage.Device.Code_0303022
-            LOG.error(err_msg)
-            raise HDCFPortError(err_msg)
-
-    def get_local_port(self, start_abc: bool, filter_ports: list = None):
-        if filter_ports is None:
-            filter_ports = []
-        from devicetest.utils.util import get_forward_port
-        host = self.host
-        port = None
-        h_port = get_forward_port(self, host, port, filter_ports)
-        if start_abc:
-            self.remove_ports(normal=False)
-            self.forward_ports_abc.append(h_port)
-        else:
-            self.remove_ports(abc=False)
-            self.forward_ports.append(h_port)
-        self.log.info("tcp forward port: {} for {}".format(
-            h_port, convert_serial(self.device_sn)))
-        return h_port
-
-    def remove_ports(self, abc: bool = True, normal: bool = True):
-        if abc:
-            for port in self.forward_ports_abc:
-                cmd = "fport rm tcp:{} tcp:{}".format(
-                    port, self.abc_d_port)
-                self.connector_command(cmd)
-            self.forward_ports_abc.clear()
-        if normal:
-            for port in self.forward_ports:
-                cmd = "fport rm tcp:{} tcp:{}".format(
-                    port, self.d_port)
-                self.connector_command(cmd)
-            self.forward_ports.clear()
-
-    def remove_history_ports(self, port):
-        cmd = "fport ls"
-        res = self.connector_command(cmd, is_print=False)
-        res = res.split("\n")
-        for data in res:
-            if str(port) in data:
-                data = data.split('\t')
-                cmd = "fport rm {}".format(data[0][1:-1])
-                self.connector_command(cmd, is_print=False)
-
-    def take_picture(self, name):
+    def take_picture(self, name: str, display_id: int = 0):
         """
         @summary: 截取手机屏幕图片并保存
         @param  name: 保存的图片名称,通过getTakePicturePath方法获取保存全路径
@@ -1136,23 +742,26 @@ class Device(IDevice):
         try:
             if self._device_report_path is None:
                 from xdevice import EnvPool
-                self._device_report_path = EnvPool.report_path
+                self._device_report_path = EnvPool.report_path if EnvPool.generate_report else None
+            if self._device_report_path is None:
+                return False
             temp_path = os.path.join(self._device_report_path, "temp")
             if not os.path.exists(temp_path):
                 os.makedirs(temp_path)
             path = os.path.join(temp_path, name)
             picture_name = os.path.basename(name)
-            out = self.execute_shell_command("snapshot_display -f /data/local/tmp/{}".format(picture_name))
+            out = self.execute_shell_command(
+                "snapshot_display -f {}/{} -i {}".format(self.tmp_path, picture_name, display_id))
             self.log.debug("result: {}".format(out))
             if "error" in out and "success" not in out:
                 return False
             else:
-                self.pull_file("/data/local/tmp/{}".format(picture_name), path)
+                self.pull_file("{}/{}".format(self.tmp_path, picture_name), path)
         except Exception as error:
             self.log.error("devicetest take_picture: {}".format(str(error)))
         return path
 
-    def capture(self, link: str, path: str, ext: str = ".png") -> Tuple[str, str]:
+    def capture(self, link: str, path: str, ext: str = ".png", display_id: int = 0) -> Tuple[str, str]:
         """
         截图步骤实现，未使用参数是保持一致
         :param link: 链接
@@ -1160,12 +769,15 @@ class Device(IDevice):
         :param ext: 后缀
         :return: link path 链接
         """
-        remote = "/data/local/tmp/xdevice_screenshot{}".format(ext)
+
         new_ext = ".jpeg"
         link = link[:link.rfind(ext)] + new_ext
         path = path[:path.rfind(ext)] + new_ext
+
+
+        remote = "{}/xdevice_screenshot{}".format(self.tmp_path, ext)
         remote = remote[:remote.rfind(ext)] + new_ext
-        result = self.execute_shell_command("snapshot_display -f {}".format(remote), timeout=60000)
+        result = self.execute_shell_command("snapshot_display -f {} -i {}".format(remote, display_id), timeout=60000)
         LOG.debug("{}".format(result))
         # 适配非root
         if not self.is_root:
@@ -1192,22 +804,16 @@ class Device(IDevice):
             self.device_params[DeviceProperties.sn] = self.device_sn
             try:
                 result = self.execute_shell_command(
-                    "snapshot_display -f /data/local/tmp/screen.png")
+                    "snapshot_display -f {}/screen.png".format(self.tmp_path))
                 if "success" not in result or "successfully" not in result:
                     result = self.execute_shell_command(
-                        "snapshot_display -f /data/local/tmp/screen.jpeg")
+                        "snapshot_display -f {}/screen.jpeg".format(self.tmp_path))
                 pattern = re.search(r"width \d+. height \d+", result)
                 resolution = re.findall(r"\d+", pattern.group())
                 self.device_params[DeviceProperties.xres] = resolution[0]
                 self.device_params[DeviceProperties.yres] = resolution[1]
-            except Exception as error:
-                resolution = self.uitestdeamon.get_display_density()
-                if resolution:
-                    resolution = json.loads(resolution)
-                    self.device_params[DeviceProperties.xres] = resolution.get("X",
-                                                                               "")
-                    self.device_params[DeviceProperties.yres] = resolution.get("Y",
-                                                                               "")
+            except Exception:
+                pass
         return copy.deepcopy(self.device_params)
 
     def execute_shell_in_daemon(self, command):
@@ -1223,12 +829,22 @@ class Device(IDevice):
         else:
             command = command.strip()
             cmd.extend(command.split(" "))
-        sys_type = platform.system()
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                   shell=False,
-                                   preexec_fn=None if sys_type == "Windows"
-                                   else os.setsid,
-                                   close_fds=True)
+        if platform.system() == "Darwin":
+            # 执行spawn模式
+            if isinstance(cmd, list):
+                cmd = " ".join(cmd)
+            unix_shell = '/bin/sh'
+            cmd = [unix_shell, "-c"] + [cmd]
+            close_fds = False
+            preexec_fn = None
+        elif platform.system() == "Windows":
+            close_fds = True
+            preexec_fn = None
+        else:
+            close_fds = True
+            preexec_fn = os.setsid
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False, close_fds=close_fds, preexec_fn=preexec_fn)
         return process
 
     def check_advance_option(self, extend_value, **kwargs):
@@ -1409,7 +1025,25 @@ class DeviceLogCollector:
 
     def start_hilog_task(self, **kwargs):
         """启动日志抓取任务。若设备没有在抓取日志，则设置启动抓取（不删除历史日志，以免影响其他组件运行）"""
-        log_size = kwargs.get("log_size", "10M").upper()
+        log_size = (kwargs.get("log_size") or "4M").upper()
+        r = re.match(r'(\d+)([KM])$', log_size)
+        if r:
+            size, unit = int(r.group(1)), r.group(2)
+            if size == 0:
+                log_size = "4M"
+            elif unit == "K" and size < 64:
+                self.device.log.warning("invalid log size {}, it should be in range [64K, 512M], "
+                                        "use the min value 64K".format(log_size))
+                log_size = "64K"
+            elif unit == "M" and size > 512:
+                self.device.log.warning("invalid log size {}, it should be in range [64K, 512M], "
+                                        "use the max value 512M".format(log_size))
+                log_size = "512M"
+        else:
+            self.device.log.warning("invalid log size {}, it should be in range [64K, 512M], "
+                                    "use the default value 4M".format(log_size))
+            log_size = "4M"
+
         if re.search("^[0-9]+[K?]$", log_size) is None \
                 and re.search("^[0-9]+[M?]$", log_size) is None:
             self.device.log.debug("hilog task Invalid size string {}. Use default 10M".format(log_size))
@@ -1431,12 +1065,27 @@ class DeviceLogCollector:
         # 启动日志任务
         out = self.device.execute_shell_command('hilog -w query')
         LOG.debug(out)
+        cur_size = ''
+        ret = re.search(r'/data/log/hilog/\S+ (\d+\.\d+)([KM]) 1000', out)
+        if ret:
+            cur_size = f'{int(float(ret.group(1)))}{ret.group(2)}'
         if 'No running persistent task' in out:
             # 启动hilog日志任务
-            self.device.execute_shell_command('hilog -w start -l {} -n 1000'.format(log_size))
-        if 'kmsg' not in out:
+            r = self.device.execute_shell_command('hilog -w start -l {} -n 1000'.format(log_size))
+            LOG.debug(r)
             # 启动kmsg日志任务
-            self.device.execute_shell_command('hilog -w start -t kmsg -l {} -n 1000'.format(log_size))
+            r = self.device.execute_shell_command('hilog -w start -t kmsg -l {} -n 100'.format(log_size))
+            LOG.debug(r)
+        elif cur_size != log_size:
+            # 日志文件大小不一致，先停止日志任务，再重启hilog日志任务
+            r = self.device.execute_shell_command('hilog -w stop')
+            LOG.debug(r)
+            time.sleep(2)
+            r = self.device.execute_shell_command('hilog -w start -l {} -n 1000'.format(log_size))
+            LOG.debug(r)
+            # 启动kmsg日志任务
+            r = self.device.execute_shell_command('hilog -w start -t kmsg -l {} -n 100'.format(log_size))
+            LOG.debug(r)
 
     def stop_hilog_task(self, log_name, repeat=1, repeat_round=1, **kwargs):
         module_name = kwargs.get("module_name", "")
@@ -1457,7 +1106,9 @@ class DeviceLogCollector:
             LOG.debug(out)
             log_dicts = out.strip().replace('\r', '').split('\n') if out else []
             if log_dicts:
-                self.device.pull_file(HILOG_PATH + '/' + log_dicts[0], hilog_local, retry=0)
+                dict_file_name = log_dicts[0]
+                self.device.pull_file(HILOG_PATH + '/' + dict_file_name, hilog_local, retry=0)
+                self._parse_hilog(hilog_local, dict_file_name, **kwargs)
             else:
                 LOG.warning("hilog_dict does not exist, and it won't be pulled")
 
@@ -1512,8 +1163,40 @@ class DeviceLogCollector:
                 remotes.update({base_path: ""})
         self.get_period_log(remotes, crash_path)
 
-    def clear_crash_log(self):
-        warnings.warn('this function is no longer supported', DeprecationWarning)
+    @staticmethod
+    def _parse_hilog(log_path, dict_file_name, **kwargs):
+        dict_file = os.path.join(log_path, dict_file_name)
+        enable1 = kwargs.get('parse_hilog', 'false').lower() == 'true'
+        enable2 = Variables.config.devicelog.get('parse_hilog', 'false').lower() == 'true'
+        # 解析hilog
+        if not os.path.exists(dict_file) or not (enable1 or enable2):
+            return
+        if not shutil.which('hilogtool'):
+            LOG.warning("because the hilogtool command is unavailable, the log cannot be parsed")
+            return
+        cmd = f'hilogtool parse -d {dict_file_name}'
+        LOG.debug(f'parse hilog files. command: {cmd}')
+        if platform.system() != "Windows":
+            cmd = shlex.split(cmd)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=log_path)
+        out, _ = proc.communicate()
+        out = out.decode()
+        LOG.debug(out)
+        ret = re.search(r'Result: successNum: \d+, failNum: (\d+)', out)
+        fail_num = int(ret.group(1))
+        if fail_num > 0:
+            return
+        LOG.debug('remove the local original hilog, dicts files')
+        try:
+            for file_name in os.listdir(log_path):
+                if file_name.startswith('hilog.') and file_name.endswith('.gz'):
+                    os.remove(os.path.join(log_path, file_name))
+            os.remove(dict_file)
+            dict_folder_path = os.path.join(log_path, 'dict')
+            if os.path.exists(dict_folder_path):
+                shutil.rmtree(dict_folder_path)
+        except Exception as e:
+            LOG.warning(f'remove the local original hilog, dicts files failed. {e}')
 
     def _sync_device_time(self):
         # 先同步PC和设备的时间
@@ -1551,10 +1234,6 @@ class DeviceLogCollector:
             remotes.update({item: on_folder})
         self.get_period_log(remotes, extra_log_path)
 
-    def clear_device_logs(self):
-        """清除设备侧日志"""
-        warnings.warn('this function is no longer supported', DeprecationWarning)
-
     def clear_kingking_dir_log(self):
         def execute_clear_cmd(path: str, prefix: list):
             for pre in prefix:
@@ -1562,9 +1241,6 @@ class DeviceLogCollector:
                 self.device.execute_shell_command(clear_cmd)
 
         execute_clear_cmd(KINGKONG_PATH, ["data", "fault_route", "screenshots"])
-
-    def get_abnormal_hilog(self, local_hilog_path):
-        warnings.warn('this function is no longer supported', DeprecationWarning)
 
     def get_period_log(self, remotes: dict, local_path: str, begin_time: float = None, find_cmd: str = None):
         """在目录下查找一段时间内有更改的文件，并将文件拉到本地
@@ -1582,7 +1258,7 @@ class DeviceLogCollector:
             LOG.warning('当前日志打印的时间先与开始抓取日志的时间')
             return
         if minutes > 0:
-            units = '%dm' % minutes
+            units = '%dm' % (minutes + 1)
         else:
             units = '%ds' % seconds
 
@@ -1601,7 +1277,9 @@ class DeviceLogCollector:
             os.chmod(local_dir, FilePermission.mode_755)
             for log_file in log_files:
                 # 避免将整个文件夹拉下来和重复拉取文件
-                if log_file == remote_dir and self.device.is_directory(log_file) \
+                if '.persisterInfo' in log_file \
+                        or 'hilog_diag.log' in log_file \
+                        or log_file == remote_dir and self.device.is_directory(log_file) \
                         or os.path.exists(log_file) and os.path.isfile(log_file):
                     continue
                 self.device.pull_file(log_file, local_dir, retry=0)

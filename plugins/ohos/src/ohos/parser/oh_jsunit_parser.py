@@ -293,6 +293,8 @@ class OHJSUnitTestParser(IParser):
             test_des_list = self.runner.expect_tests_dict.get(
                 suite.suite_name, [])
             pos = report_listener.suite_distributions.get(suite.index)
+            if not pos:
+                continue
             list_in_result = report_listener.result[pos][1]
             if len(test_des_list) == len(list_in_result):
                 continue

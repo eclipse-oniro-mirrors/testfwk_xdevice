@@ -17,7 +17,9 @@
 #
 import re
 import threading
+import platform
 
+from xdevice import DeviceProperties
 from xdevice import ManagerType
 from xdevice import Plugin
 from xdevice import get_plugin
@@ -37,6 +39,7 @@ from xdevice import DeviceAllocationState
 from xdevice import DeviceStateMonitor
 from xdevice import convert_serial
 from xdevice import check_mode_in_sys
+from xdevice import exec_cmd
 from xdevice import DeviceNode
 from xdevice import DeviceSelector
 from xdevice import Variables
@@ -73,16 +76,26 @@ class ManagerDevice(IDeviceManager, IFilter):
         self.global_device_filter = []
         self.lock_con = threading.Condition()
         self.list_con = threading.Condition()
-        self.device_connectors = []
+        self.device_connectors = dict()
         self.usb_type = "usb-hdc"
         self.managed_device_listener = None
         self.support_labels = ["phone", "watch", "car", "tv", "tablet", "ivi", "2in1"]
         self.support_types = ["device"]
         self.wait_times = 0
-        self.__device_alias = {}
+        self.devices_config = {}
 
     def init_environment(self, environment: str = "", user_config_file: str = "") -> bool:
-        return self._start_device_monitor(environment, user_config_file)
+        device_monitor = self._start_device_monitor(environment, user_config_file)
+        local_device = self._start_init_local_device()
+        return device_monitor or local_device
+
+    def _start_init_local_device(self):
+        if platform.system() == "HarmonyOS":
+            from ohos.environment.native_device import NativeDevice
+            self.devices_list.append(NativeDevice())
+            return True
+        else:
+            return False
 
     def env_stop(self):
         self._stop_device_monitor()
@@ -93,39 +106,36 @@ class ManagerDevice(IDeviceManager, IFilter):
             config_file=user_config_file, env=environment)
         devices = ohos_manager.get_devices("environment/device")
         if devices:
-            self.__set_device_alias(devices)
-            try:
-                for device in devices:
-                    device_connector = DeviceConnector(
-                        device.get("ip"), device.get("port"), device.get("usb_type"))
-                    self.device_connectors.append(device_connector)
-                    self.global_device_filter.extend(
-                        ohos_manager.get_sn_list(device.get("sn")))
-                    device_connector.add_device_change_listener(
-                        self.managed_device_listener)
-                    device_connector.start()
-            except (ParamError, FileNotFoundError) as error:
-                self.env_stop()
-                for device in devices:
-                    LOG.debug("Start %s error: %s" % (
-                        device.get("usb_type"), error))
-                    device_connector = DeviceConnector(
-                        device.get("ip"), device.get("port"),
-                        DeviceConnectorType.hdc)
-                    self.device_connectors.append(device_connector)
-                    device_connector.add_device_change_listener(self.managed_device_listener)
-                    device_connector.start()
+            self.init_devices_config(self.devices_config, devices, self.global_device_filter)
+            for device in devices:
+                label = (device.get("ip"), device.get("port"))
+                if label in self.device_connectors.keys():
+                    continue
+                try:
+                    self.connect_tcpip_device(device)
+                    device_connector = self._create_device_connector(label, device.get("usb_type"))
+                except (ParamError, FileNotFoundError) as error:
+                    LOG.debug("Start %s error: %s" % (device.get("usb_type"), error))
+                    device_connector = self._create_device_connector(label, DeviceConnectorType.hdc)
+                self.device_connectors.update({label: device_connector})
             return True
         else:
-            LOG.error("OHOS Manager device is not supported, please check config user_config.xml", error_no="00108")
+            LOG.warning("OHOS Manager device is not supported, please check config user_config.xml", error_no="00108")
             return False
 
+    def _create_device_connector(self, label, usb_type):
+        device_connector = DeviceConnector(label[0], label[1], usb_type, self.global_device_filter)
+        device_connector.add_device_change_listener(self.managed_device_listener)
+        device_connector.start()
+        return device_connector
+
     def _stop_device_monitor(self):
-        for device_connector in self.device_connectors:
-            device_connector.monitor_lock.acquire(1)
+        for device_connector in self.device_connectors.values():
+            device_connector.monitor_lock.acquire(timeout=10)
             device_connector.remove_device_change_listener(self.managed_device_listener)
             device_connector.terminate()
             device_connector.monitor_lock.release()
+        self.device_connectors.clear()
 
     def apply_device(self, device_option, timeout=3):
         cnt = 0
@@ -250,7 +260,13 @@ class ManagerDevice(IDeviceManager, IFilter):
                 device_sn = idevice.device_sn
                 device_instance = device.__class__()
                 device_instance.__set_serial__(device_sn)
-                device_instance.device_id = self.__device_alias.get(device_sn, "")
+                device_config = self.devices_config.get(device_sn, {})
+                reboot_timeout_all = self.devices_config.get(DeviceProperties.reboot_timeout, "")
+                reboot_timeout_dev = device_config.get(DeviceProperties.reboot_timeout, "")
+                reboot_timeout = reboot_timeout_dev if reboot_timeout_dev else reboot_timeout_all
+                if reboot_timeout:
+                    device_instance.reboot_timeout = float(reboot_timeout) * 1000
+                device_instance.device_id = device_config.get(DeviceProperties.alias, "")
                 device_instance.host = idevice.host
                 device_instance.port = idevice.port
                 device_instance.usb_type = self.usb_type
@@ -329,8 +345,8 @@ class ManagerDevice(IDeviceManager, IFilter):
         pass
 
     def list_devices(self):
-        for device_connector in self.device_connectors:
-            device_connector.monitor_lock.acquire(1)
+        for device_connector in self.device_connectors.values():
+            device_connector.monitor_lock.acquire(timeout=1)
         try:
             if check_mode_in_sys(ConfigConst.app_test):
                 return self.get_device_info()
@@ -350,8 +366,24 @@ class ManagerDevice(IDeviceManager, IFilter):
                             device.host, device.port))
                 return ""
         finally:
-            for device_connector in self.device_connectors:
+            for device_connector in self.device_connectors.values():
                 device_connector.monitor_lock.release()
+
+    @staticmethod
+    def connect_tcpip_device(device: dict):
+        """tcpip类型的设备，需要connect成功后，才能被设备管理器查询到。此需要配置设备的connect属性作为判断条件"""
+        if "connect" not in device.keys():
+            return
+        pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+'
+        for sn in device.get("sn").split(";"):
+            sn = sn.strip()
+            if not re.match(pattern, sn):
+                continue
+            LOG.debug("connect device via TCP/IP")
+            cmd = f"hdc tconn {sn}"
+            LOG.debug(f"execute connect command: {cmd}")
+            out = exec_cmd(cmd.split(" "), timeout=2)
+            LOG.debug(f"connect output: {out}")
 
     def get_device_info(self):
         devices_info = []
@@ -359,12 +391,6 @@ class ManagerDevice(IDeviceManager, IFilter):
             result = device.get_device_params()
             devices_info.append(result)
         return devices_info
-
-    def __set_device_alias(self, devices):
-        for device in devices:
-            sn, alias = device.get("sn"), device.get("alias")
-            if sn and alias:
-                self.__device_alias.update({sn: alias})
 
     def __filter_selector__(self, selector):
         if isinstance(selector, DeviceSelector):
@@ -443,6 +469,9 @@ class ManagedDeviceListener(object):
                                              DeviceEvent.DISCONNECTED)
             test_device.device_state_monitor.set_state(
                 TestDeviceState.NOT_AVAILABLE)
+            # 此处不用set_recover_state原因是掉线后，直接设为False将导致设备不会进行等待重连。等待重连超时后才真正设为False
+            if hasattr(test_device, "call_proxy_listener"):
+                test_device.call_proxy_listener()
         LOG.debug("Device disconnected: %s %s %s %s" % (
             convert_serial(idevice.device_sn), idevice.device_os_type,
             idevice.host, idevice.port))

@@ -38,10 +38,8 @@ from _core.plugin import Plugin
 from _core.utils import calculate_elapsed_time
 from _core.utils import check_mode
 from _core.utils import get_file_absolute_path
-from _core.utils import get_kit_instances
-from _core.utils import check_device_name
-from _core.utils import check_device_env_index
 from _core.utils import get_repeat_round
+from _core.variables import Variables
 from _core.exception import ParamError
 from _core.exception import ExecuteTerminate
 from _core.exception import DeviceError
@@ -50,11 +48,16 @@ from _core.report.reporter_helper import ReportConstant
 from _core.report.reporter_helper import DataHelper
 from _core.report.reporter_helper import Suite
 from _core.report.reporter_helper import Case
+from _core.report.result_reporter import ResultReporter
+from _core.report.suite_reporter import SuiteReporter
 from _core.context.center import Context
 from _core.context.handler import handle_repeat_result
 from _core.context.handler import update_report_xml
 from _core.context.upload import Uploader
 from _core.testkit.json_parser import JsonParser
+from _core.testkit.kit import do_common_module_kit_setup
+from _core.testkit.kit import do_common_module_kit_teardown
+from _core.testkit.kit import get_kit_instances
 
 LOG = platform_logger("Concurrent")
 
@@ -97,7 +100,6 @@ class DriversThread(threading.Thread):
         self.environment = environment
         self.message_queue = message_queue
         self.error_message = ""
-        self.module_config_kits = None
         self.repeat = 1
         self.repeat_round = 1
         self.start_time = time.time()
@@ -125,9 +127,10 @@ class DriversThread(threading.Thread):
             driver, test = self.test_driver
         if driver is None or test is None:
             return
-        redirect_driver_log_begin(self.ident, self.get_driver_log_file(test))
+        redirect_driver_log_begin(self.name, self.get_driver_log_file(test))
         LOG.debug("Thread %s start" % self.name)
         execute_message = ExecuteMessage('', self.environment, self.test_driver, self.name)
+        driver_request = None
         try:
             # construct params
             driver_request = self._get_driver_request(test, execute_message)
@@ -151,9 +154,9 @@ class DriversThread(threading.Thread):
             self.error_message = str(exception)
 
         finally:
-            self._do_commom_module_kit_teardown()
+            do_common_module_kit_teardown(driver_request)
             self._handle_finally(driver, test, execute_message)
-        redirect_driver_log_end(self.ident)
+        redirect_driver_log_end(self.name)
 
     @staticmethod
     def reset_device(config):
@@ -210,38 +213,6 @@ class DriversThread(threading.Thread):
         self.message_queue.put(execute_message)
         LOG.info("Thread %s end", self.name)
 
-    def _do_common_module_kit_setup(self, driver_request):
-        for device in self.environment.devices:
-            setattr(device, ConfigConst.common_module_kits, [])
-
-        for kit in self.module_config_kits:
-            run_flag = False
-            for device in self.environment.devices:
-                if not Context.is_executing():
-                    raise ExecuteTerminate()
-                if not check_device_env_index(device, kit):
-                    continue
-                if check_device_name(device, kit):
-                    run_flag = True
-                    kit_copy = copy.deepcopy(kit)
-                    module_kits = getattr(device, ConfigConst.common_module_kits)
-                    module_kits.append(kit_copy)
-                    kit_copy.__setup__(device, request=driver_request)
-            if not run_flag:
-                err_msg = ErrorMessage.Common.Code_0101004.format(kit.__class__.__name__)
-                LOG.error(err_msg)
-                raise ParamError(err_msg)
-
-    def _do_commom_module_kit_teardown(self):
-        try:
-            for device in self.environment.devices:
-                for kit in getattr(device, ConfigConst.common_module_kits, []):
-                    if check_device_name(device, kit, step="teardown"):
-                        kit.__teardown__(device)
-                setattr(device, ConfigConst.common_module_kits, [])
-        except Exception as e:
-            LOG.error("common module kit teardown error: {}".format(e))
-
     def _do_task_setup(self, driver_request):
         if check_mode(ModeType.decc) or getattr(
                 driver_request.config, ConfigConst.check_device, False):
@@ -254,14 +225,12 @@ class DriversThread(threading.Thread):
                 getattr(driver_request.config, ConfigConst.module_config, None)):
             module_config_path = getattr(driver_request.config, ConfigConst.module_config, None)
             LOG.debug("Common module config path: {}".format(module_config_path))
-            from xdevice import Variables
             config_path = get_file_absolute_path(module_config_path,
                                                  [os.path.join(Variables.exec_dir, "config")])
             json_config = JsonParser(config_path)
-            self.module_config_kits = get_kit_instances(json_config,
-                                                        driver_request.config.resource_path,
-                                                        driver_request.config.testcases_path)
-            self._do_common_module_kit_setup(driver_request)
+            module_config_kits = get_kit_instances(
+                json_config, driver_request.config.resource_path, driver_request.config.testcases_path)
+            do_common_module_kit_setup(driver_request, module_config_kits)
 
         for device in self.environment.devices:
             if not getattr(device, ConfigConst.need_kit_setup, True):
@@ -338,13 +307,12 @@ class DriversThread(threading.Thread):
     @classmethod
     def _get_unpassed_test_params(cls, history_report_path, module_name):
         unpassed_test_params = []
-        from _core.report.result_reporter import ResultReporter
         params = ResultReporter.get_task_info_params(history_report_path)
         if not params:
             return unpassed_test_params
         failed_list = []
         try:
-            from devicetest.agent.decc import Handler
+            from agent.decc import Handler
             if Handler.DAV.retry_select:
                 for i in Handler.DAV.case_id_list:
                     failed_list.append(i + "#" + i)
@@ -420,13 +388,15 @@ class DriversThread(threading.Thread):
         else:
             LOG.info("Inherit history execute result: %s",
                      history_execute_result)
-        self._inherit_element(history_testsuites_element, testsuites_element)
+        DataHelper.merge_result_xml(testsuites_element, history_testsuites_element)
+        testsuites_element = history_testsuites_element
 
         if check_mode(ModeType.decc):
-            from xdevice import SuiteReporter
             SuiteReporter.append_report_result(
                 (execute_result, DataHelper.to_string(testsuites_element)))
         else:
+            if os.path.exists(execute_result):
+                os.remove(execute_result)
             # generate inherit execute result
             DataHelper.generate_report(testsuites_element, execute_result)
         return execute_result
@@ -507,7 +477,6 @@ class DriversThread(threading.Thread):
         history_report_path = \
             getattr(self.task.config, "history_report_path", "")
         if history_report_path:
-            from _core.report.result_reporter import ResultReporter
             params = ResultReporter.get_task_info_params(history_report_path)
             if params:
                 report_data_dict = dict(params[ReportConst.data_reports])
@@ -521,7 +490,6 @@ class DriversThread(threading.Thread):
 
     @classmethod
     def _get_real_execute_result(cls, execute_result):
-        from xdevice import SuiteReporter
         LOG.debug("Get real execute result length is: %s" %
                   len(SuiteReporter.get_report_result()))
         if check_mode(ModeType.decc):
@@ -537,7 +505,6 @@ class DriversThread(threading.Thread):
     @classmethod
     def _get_real_history_execute_result(cls, history_execute_result,
                                          module_name):
-        from xdevice import SuiteReporter
         LOG.debug("Get real history execute result: %s" %
                   SuiteReporter.history_report_result)
         if check_mode(ModeType.decc):
@@ -765,7 +732,7 @@ class ModuleThread(DriversThread):
             driver, test = self.test_driver
         if driver is None or test is None:
             return
-        redirect_driver_log_begin(self.ident, self.get_driver_log_file(test))
+        redirect_driver_log_begin(self.name, self.get_driver_log_file(test))
         LOG.debug("Thread %s start" % self.name)
         execute_message = ExecuteMessage('', self.environment, self.test_driver, self.name)
         driver, test = None, None
@@ -802,7 +769,7 @@ class ModuleThread(DriversThread):
             # do common kit teardown
             self.__do_common_kit_teardown()
             self._handle_finally(driver, test, execute_message)
-        redirect_driver_log_end(self.ident)
+        redirect_driver_log_end(self.name)
 
     def _do_common_kit_setup(self, environment, task, test_driver):
         LOG.info("Do common setup kit")
