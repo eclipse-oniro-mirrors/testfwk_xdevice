@@ -127,6 +127,7 @@ class ResultReporter(IReporter):
         LOG.info("**************************************************")
         LOG.info("")
 
+        self._data_reports.clear()
         if self._check_params(report_path, **kwargs):
             # generate data report
             self._generate_data_report()

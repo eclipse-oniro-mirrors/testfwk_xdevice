@@ -1044,20 +1044,6 @@ class DeviceLogCollector:
                                     "use the default value 4M".format(log_size))
             log_size = "4M"
 
-        if re.search("^[0-9]+[K?]$", log_size) is None \
-                and re.search("^[0-9]+[M?]$", log_size) is None:
-            self.device.log.debug("hilog task Invalid size string {}. Use default 10M".format(log_size))
-            log_size = "10M"
-        matcher = re.match("^[0-9]+", log_size)
-        if log_size.endswith("K") and int(matcher.group(0)) < 64:
-            self.device.log.debug("hilog task file size should be "
-                                  "in range [64.0K, 512.0M], use min value 64K, now is {}".format(log_size))
-            log_size = "64K"
-        if log_size.endswith("M") and int(matcher.group(0)) > 512:
-            self.device.log.debug("hilog task file size should be "
-                                  "in range [64.0K, 512.0M], use min value 512M, now is {}".format(log_size))
-            log_size = "512M"
-
         self._sync_device_time()
         self._set_device_log_level(**kwargs)
         self._set_hilog_begin_time()
@@ -1285,7 +1271,7 @@ class DeviceLogCollector:
                 self.device.pull_file(log_file, local_dir, retry=0)
 
     def start_catch_log(self, request, **kwargs):
-        hilog_size = kwargs.get("hilog_size", "10M")
+        hilog_size = kwargs.get("hilog_size") or "4M"
         log_level = request.config.device_log.get(ConfigConst.tag_loglevel, "INFO")
         pull_hdc_log_status = request.config.device_log.get(ConfigConst.tag_hdc, None)
         self.need_pull_hdc_log = False if pull_hdc_log_status and pull_hdc_log_status.lower() == "false" else True
