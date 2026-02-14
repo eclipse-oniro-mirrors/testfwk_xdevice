@@ -107,4 +107,4 @@ class DriverType(object):
 
 
 class InstallErrorCode:
-    code_9568413 = "code:9568413"
+    CODE_9568413 = "code:9568413"
