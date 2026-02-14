@@ -502,16 +502,22 @@ def convert_port(port):
 
 
 def convert_serial(serial):
-    if getattr(sys, "decc_mode", False):
-        if serial.startswith("local_"):
-            return "local_" + '*' * (len(serial) - 6)
-        else:
-            length = len(serial) // 3
-            return serial[0:length] + "*" * (len(serial) - length * 2) + serial[-length:]
-    if serial.startswith("remote_"):
-        return "remote_{}_{}".format(convert_ip(serial.split("_")[1]),
-                                     convert_port(serial.split("_")[-1]))
-    return serial
+    serial = str(serial)
+    should_convert = True
+    should_convert |= getattr(sys, "decc_mode", False)
+    if not should_convert:
+        return serial
+    sn_len = len(serial)
+    if serial.startswith("local_"):
+        length = (sn_len - 6) // 2
+        new_serial = f"local_{'x' * length}{serial[length + 6:]}"
+    elif serial.startswith("remote_"):
+        items = serial.split("_")
+        new_serial = f"remote_{convert_ip(items[1])}_{convert_port(items[-1])}"
+    else:
+        length = sn_len // 3
+        new_serial = f"{serial[:length]}{'x' * (sn_len - length * 2)}{serial[-length:]}"
+    return new_serial
 
 
 def convert_mac(message):

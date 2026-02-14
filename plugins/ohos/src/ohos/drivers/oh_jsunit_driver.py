@@ -158,7 +158,7 @@ class OHJSCoverage:
                 continue
             for file_name in files:
                 file_path = os.path.join(top, file_name)
-                temp_path = file_path.replace(output_dir + os.sep, "").replace("\\", "/")
+                temp_path = file_path.replace(f"{output_dir}{os.sep}", "").replace("\\", "/")
                 if re.search(exclude, temp_path) is not None:
                     continue
                 z.write(file_path, temp_path)
@@ -512,21 +512,18 @@ class OHJSUnitTestDriver(IDriver):
         else:
             new_fault_case = build_new_fault_case(fault_kit.fault_case, case_list)
             elements = []
-
             for test in new_fault_case:
                 _class = test.get("class", None)
                 if not _class:
                     continue
                 faults = test.get("faults", [])
-                fault_name = "#" + "#".join(faults) if faults else ""
-
+                fault_name = f"#{'#'.join(faults)}" if faults else ""
                 with setup_teardown(self.config.device, fault_kit, faults=faults):
                     self.runner.add_arg("class", ",".join(_class))
                     self.runner.expect_tests_dict = test.get("tests_dict", {})
                     self.runner.run(listener)
                     self.runner.notify_finished()
                     parse_and_modify_report(self.result, fault_name, elements)
-
             else:
                 build_xml(self.result, elements)
 
@@ -961,10 +958,11 @@ class OHJSLocalTestRunner:
                 if output == b'' and proc.poll() is not None:
                     break
                 if output and b'OHOS_REPORT' in output:
+                    out = output.strip().decode('utf-8')
                     if receiver:
-                        receiver.__read__(output.strip().decode('utf-8') + "\n")
+                        receiver.__read__(f'{out}\n')
                     else:
-                        LOG.debug(output.strip().decode('utf-8'))
+                        LOG.debug(out)
                 if b'The AbilityDelegator.finishTest' in output:
                     break
             if stop_event.is_set():
@@ -1129,14 +1127,11 @@ def _ohjs_run_test(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], reque
             notclass = test.get("notclass", None)
             faults = test.get("faults", [])
             modify_class_and_notclass(request, _class, notclass)
-            fault_name = "#" + "#".join(faults) if faults else ""
-
-            with setup_teardown(driver.config.device, fault_kit, faults):
+            fault_name = f"#{'#'.join(faults)}" if faults else ""
+            with setup_teardown(driver.config.device, fault_kit, faults=faults):
                 _start_run_test()
                 parse_and_modify_report(driver.result, fault_name, elements)
-
         else:
             build_xml(driver.result, elements)
-
     else:
         _start_run_test()

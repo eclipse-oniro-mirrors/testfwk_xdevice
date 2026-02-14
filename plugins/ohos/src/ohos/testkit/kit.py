@@ -805,7 +805,7 @@ class AppInstallKit(ITestKit):
             err_msg = ErrorMessage.Device.Code_0303007.format(push_dest, device.__get_serial__(), output)
             # 部分模块安装hap应用报错，需要在测试报告上，将模块的结果显示为ignored。如：
             # 1、code:9568413, error: check syscap failed and device type is not supported.
-            if InstallErrorCode.code_9568413 in output:
+            if InstallErrorCode.CODE_9568413 in output:
                 raise HapNotSupportTest(err_msg)
             raise AppInstallError(err_msg)
 
