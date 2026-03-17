@@ -402,7 +402,7 @@ def _create_descriptor(config_file, filename, test_source, test_type, config, mo
     error_message = ""
     if not test_type:
         error_message = "no driver to execute '%s'" % test_source
-        LOG.error(error_message, error_no="00112")
+        LOG.debug(error_message)
         if Context.session().mode != ModeType.decc:
             return None
 
