@@ -37,6 +37,7 @@ from _core.plugin import get_plugin
 from _core.plugin import Plugin
 from _core.utils import calculate_elapsed_time
 from _core.utils import check_mode
+from _core.utils import check_result_report
 from _core.utils import get_file_absolute_path
 from _core.utils import get_repeat_round
 from _core.variables import Variables
@@ -137,9 +138,9 @@ class DriversThread(threading.Thread):
             if driver_request is None:
                 return
             # setup device
+            self._preset_devices(driver_request.config)
             self._do_task_setup(driver_request)
             # driver execute
-            self.reset_device(driver_request.config)
             driver.__execute__(driver_request)
         except Exception as exception:
             error_no = getattr(exception, "error_no", "00000")
@@ -152,17 +153,40 @@ class DriversThread(threading.Thread):
                         self.environment.__get_serial__(), exception),
                     exc_info=False, error_no=error_no)
             self.error_message = str(exception)
-
+            report_path = driver_request.config.report_path
+            result_file = os.path.join(report_path, "result", f"{driver_request.get_module_name()}.xml")
+            if not os.path.exists(result_file):
+                check_result_report(report_path, result_file, self.error_message, request=driver_request)
+                setattr(driver, "result", result_file)
         finally:
             do_common_module_kit_teardown(driver_request)
+            self._reset_devices()
             self._handle_finally(driver, test, execute_message)
         redirect_driver_log_end(self.name)
 
-    @staticmethod
-    def reset_device(config):
-        if getattr(config, "reboot_per_module", False):
-            for device in config.environment.devices:
+    def _preset_devices(self, config):
+        if self.environment is None:
+            return
+        test_args = getattr(config, ConfigConst.testargs, {})
+        for device in self.environment.devices:
+            if getattr(config, ConfigConst.reboot_per_module, False):
                 device.reboot()
+            user_id = test_args.get(ConfigConst.user_id, [])
+            if user_id and isinstance(user_id, list):
+                user_id = user_id[0]
+                if not user_id.isdigit():
+                    raise ParamError(ErrorMessage.Common.Code_0101033.format(user_id))
+                setattr(device, ConfigConst.specify_user_id, user_id)
+
+    def _reset_devices(self):
+        if self.environment is None:
+            return
+        try:
+            for device in self.environment.devices:
+                if getattr(device, ConfigConst.specify_user_id, None):
+                    delattr(device, ConfigConst.specify_user_id)
+        except Exception as e:
+            LOG.debug(f'reset device error, {e}')
 
     def _handle_finally(self, driver, test, execute_message):
         source_content = test.source.source_file or test.source.source_string
@@ -172,31 +196,32 @@ class DriversThread(threading.Thread):
 
         # inherit history report under retry mode
         if driver and test:
-            execute_result = driver.__result__()
-            # move result file to round folder when repeat > 1
-            if self.repeat > 1:
-                execute_result = handle_repeat_result(
-                    execute_result, self.task.config.report_path,
-                    round_folder=f"round{self.repeat_round}")
-            LOG.debug("Execute result: %s" % execute_result)
+            execute_result = driver.__result__() or getattr(driver, "result", "")
+            if execute_result and os.path.exists(execute_result):
+                # move result file to round folder when repeat > 1
+                if self.repeat > 1:
+                    execute_result = handle_repeat_result(
+                        execute_result, self.task.config.report_path,
+                        round_folder=f"round{self.repeat_round}")
+                LOG.debug("Execute result: %s" % execute_result)
 
-            # update result xml
-            update_props = {
-                ReportConstant.start_time: time.strftime(
-                    ReportConstant.time_format, time.localtime(int(self.start_time))),
-                ReportConstant.end_time: time.strftime(
-                    ReportConstant.time_format, time.localtime(int(end_time))),
-                ReportConstant.repeat: str(self.repeat),
-                ReportConstant.round: str(self.repeat_round),
-                ReportConstant.test_type: test.source.test_type
-            }
-            if self.environment is not None:
-                update_props.update({ReportConstant.devices: self.environment.get_description()})
-            update_report_xml(execute_result, update_props)
+                # update result xml
+                update_props = {
+                    ReportConstant.start_time: time.strftime(
+                        ReportConstant.time_format, time.localtime(int(self.start_time))),
+                    ReportConstant.end_time: time.strftime(
+                        ReportConstant.time_format, time.localtime(int(end_time))),
+                    ReportConstant.repeat: str(self.repeat),
+                    ReportConstant.round: str(self.repeat_round),
+                    ReportConstant.test_type: test.source.test_type
+                }
+                if self.environment is not None:
+                    update_props.update({ReportConstant.devices: self.environment.get_description()})
+                update_report_xml(execute_result, update_props)
 
-            if getattr(self.task.config, "history_report_path", ""):
-                execute_result = self._inherit_execute_result(execute_result, test)
-            execute_message.set_result(execute_result)
+                if getattr(self.task.config, "history_report_path", ""):
+                    execute_result = self._inherit_execute_result(execute_result, test)
+                execute_message.set_result(execute_result)
 
         # set execute state
         if self.error_message:
@@ -217,16 +242,13 @@ class DriversThread(threading.Thread):
         if check_mode(ModeType.decc) or getattr(
                 driver_request.config, ConfigConst.check_device, False):
             return
-
         if self.environment is None:
             return
-
-        if (hasattr(driver_request.config, ConfigConst.module_config) and
-                getattr(driver_request.config, ConfigConst.module_config, None)):
-            module_config_path = getattr(driver_request.config, ConfigConst.module_config, None)
+        module_config_path = getattr(driver_request.config, ConfigConst.module_config, None)
+        if module_config_path:
             LOG.debug("Common module config path: {}".format(module_config_path))
-            config_path = get_file_absolute_path(module_config_path,
-                                                 [os.path.join(Variables.exec_dir, "config")])
+            config_path = get_file_absolute_path(
+                module_config_path, [os.path.join(Variables.exec_dir, "config")])
             json_config = JsonParser(config_path)
             module_config_kits = get_kit_instances(
                 json_config, driver_request.config.resource_path, driver_request.config.testcases_path)

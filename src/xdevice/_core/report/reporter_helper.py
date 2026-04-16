@@ -68,6 +68,7 @@ class ReportConstant:
     log_path_title = "Log Path"
     execute_time = "execute_time"
     device_label = "device_label"
+    user_id = "user_id"
 
     # summary constants
     product_info = "productinfo"
@@ -513,7 +514,7 @@ class ExecInfo:
     keys = [ReportConstant.platform, ReportConstant.test_type,
             ReportConstant.device_name, ReportConstant.host_info,
             ReportConstant.test_time, ReportConstant.execute_time,
-            ReportConstant.device_label]
+            ReportConstant.device_label, ReportConstant.user_id]
     test_type = ""
     device_name = ""
     host_info = ""
@@ -524,6 +525,7 @@ class ExecInfo:
     product_info = dict()
     device_label = ""
     repeat = 1
+    user_id = "-"
 
 
 class Result:
@@ -731,6 +733,7 @@ class VisionHelper:
                                          ReportConstant.device_label,
                                          "None")
         exec_info.log_path = os.path.abspath(os.path.join(report_path, "log"))
+        exec_info.user_id = getattr(task_info, "user_id", '-')
 
         try:
             product_info = self.summary_element.get(

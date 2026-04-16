@@ -641,6 +641,8 @@ class OHJSUnitTestRunner:
                 continue
             if key == 'wait_time':
                 args_commands.append(f'-w {value}')
+            elif key == 'userId':
+                args_commands.append(f'-u {value}')
             else:
                 args_commands.append(f'-s {key} {value}')
         # 处理拓展的运行参数
@@ -1136,7 +1138,15 @@ def _ohjs_runner_config(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], 
     runner.compile_mode = get_config_value('compile-mode', driver_json_config, False)
     if driver_config.coverage:
         runner.add_arg('coverage', 'true')
-    user_id = '100'
+    user_id = get_config_value('user-id', driver_json_config, False, default='100')
+    if not user_id:
+        user_id = '100'
+    device = getattr(driver_config, 'device', None)
+    if device:
+        specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
+        if specify_user_id:
+            user_id = specify_user_id
+            runner.add_arg('userId', specify_user_id)
     bundle_name = get_config_value('bundle-name', driver_json_config, False)
     screenshot_fail = get_config_value('screenshot_fail', test_args, False, default='false')
     if screenshot_fail == 'true':

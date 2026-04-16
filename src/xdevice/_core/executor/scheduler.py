@@ -140,9 +140,11 @@ class Scheduler(BaseScheduler):
             thread.join()
 
     def generate_task_report(self, task):
+        task_config = task.config
         task_info = ExecInfo()
-        test_type = getattr(task.config, "testtype", [])
-        task_name = getattr(task.config, "task", "")
+        test_args = getattr(task_config, ConfigConst.testargs, {})
+        test_type = getattr(task_config, "testtype", [])
+        task_name = getattr(task_config, "task", "")
         if task_name:
             task_info.test_type = str(task_name).upper()
         else:
@@ -166,10 +168,12 @@ class Scheduler(BaseScheduler):
             task_info.device_name = "None"
             task_info.platform = "None"
             task_info.device_label = "None"
-        task_info.repeat = getattr(task.config, ConfigConst.repeat, 1)
-        task_info.test_time = task.config.start_time
+        task_info.repeat = getattr(task_config, ConfigConst.repeat, 1)
+        task_info.test_time = task_config.start_time
         task_info.product_info = getattr(task, "product_info", "")
-
+        user_id = test_args.get(ConfigConst.user_id, [])
+        if user_id:
+            task_info.user_id = user_id[0]
         return task_info
 
     def __allocate_environment__(self, options, test_driver):

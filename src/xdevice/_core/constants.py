@@ -315,6 +315,8 @@ class ConfigConst(object):
     component_mapper = "_component_mapper"
     component_base_kit = "component_base_kit"
     support_component = "support_component"
+    specify_user_id = "_specify_user_id"
+    user_id = "userId"
 
     # Device log
     device_log = "device_log"

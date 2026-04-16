@@ -164,6 +164,9 @@ class _CommonErr:
     Code_0101032 = Error(**{"error": "Resource file/dir does not exist, file: {}",
                             "category": ErrorCategory.Script,
                             "code": "0101032"})
+    Code_0101033 = Error(**{"error": "Invalid user id, current id: {}",
+                            "category": ErrorCategory.Environment,
+                            "code": "0101033"})
 
 
 class _InterfaceImplementErr:

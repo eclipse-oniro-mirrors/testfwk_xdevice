@@ -255,6 +255,7 @@ class ResultReporter(IReporter):
             "execute_time": execute_time,
             "test_type": test_type,
             "host_info": host_info,
+            "user_id": self.task_info.user_id,
             "logs": self._get_task_log()
         }
         return info

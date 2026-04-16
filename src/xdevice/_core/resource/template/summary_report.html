@@ -33,9 +33,8 @@
           <el-descriptions-item label="Test Type">{{
             summary.test_type
             }}</el-descriptions-item>
-          <el-descriptions-item label="Host Info" span="2">{{
-            summary.host_info
-            }}</el-descriptions-item>
+          <el-descriptions-item label="Host Info">{{summary.host_info}}</el-descriptions-item>
+          <el-descriptions-item label="User ID">{{summary.user_id}}</el-descriptions-item>
           <el-descriptions-item label="Logs">
             <div>
               <el-link v-for="(item, index) in summary.logs" :key="index" :href="item" target="_blank" type="primary">
