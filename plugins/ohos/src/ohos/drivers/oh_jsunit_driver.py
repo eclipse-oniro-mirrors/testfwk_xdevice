@@ -202,7 +202,7 @@ class OHJSUnitTestDriver(IDriver):
 
     def __init__(self):
         self.timeout = 80 * 1000
-        self.start_time = None
+        self.start_time = time.time()
         self.result = ""
         self.error_message = ""
         self.kits = []
@@ -1078,11 +1078,11 @@ def _ohjs_get_snapshot_data(driver: OHJSUnitTestDriver, request: Request):
             return
         LOG.debug('get snapshot data files')
         device = driver_config.device
+        cost_time = f'{int(time.time() - driver.start_time)}s'
+        find_cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -mtime -{cost_time}'
         remote_files = []
-        cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -name *.json'
-        remote_files.extend(get_remote_files(device, cmd))
-        cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -name *.png'
-        remote_files.extend(get_remote_files(device, cmd))
+        remote_files.extend(get_remote_files(device, f'{find_cmd} -name *.json'))
+        remote_files.extend(get_remote_files(device, f'{find_cmd} -name *.png'))
         if not remote_files:
             return
         request_config = request.config
@@ -1137,8 +1137,11 @@ def _ohjs_runner_config(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], 
     bundle_name = get_config_value('bundle-name', driver_json_config, False)
     screenshot_fail = get_config_value('screenshot_fail', test_args, False, default='false')
     if screenshot_fail == 'true':
-        runner.add_arg('snapshotWhenFail', 'true')
-        driver_config.snapshot_data_path = f'/data/app/el2/{user_id}/base/{bundle_name}/'
+        if bundle_name:
+            runner.add_arg('snapshotWhenFail', 'true')
+            driver_config.snapshot_data_path = f'/data/app/el2/{user_id}/base/{bundle_name}/'
+        else:
+            LOG.warning('screenshot_fail is true but bundle_name is empty, skip snapshot')
 
 
 def _ohjs_run_test(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], request: Request, **kwargs):
