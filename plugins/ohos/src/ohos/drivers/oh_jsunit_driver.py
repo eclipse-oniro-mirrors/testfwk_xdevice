@@ -108,6 +108,9 @@ class OHJSCoverage:
         base_dir = os.path.dirname(self.request.root.source.config_file)
         source_dir = os.path.join(base_dir, "source")
         test_dir = os.path.join(base_dir, ".test")
+        if not os.path.exists(test_dir):
+            LOG.error(".test dir for generating coverage report does not exist")
+            return
 
         copy_coverage_files = []
         init_coverage_jsons = []
