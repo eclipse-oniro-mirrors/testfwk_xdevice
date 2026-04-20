@@ -26,6 +26,7 @@ import shutil
 import stat
 from dataclasses import dataclass
 
+from xdevice import ConfigConst
 from xdevice import DeviceOsType
 from xdevice import ReportException
 from xdevice import ExecuteTerminate
@@ -840,7 +841,10 @@ class HdcHelper:
     @staticmethod
     def uninstall_package(device, package_name):
         receiver = CollectingOutputReceiver()
-        command = "bm uninstall -n %s " % package_name
+        command = f"bm uninstall -n {package_name}"
+        specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
+        if specify_user_id:
+            command += f" -u {specify_user_id}"
         device.log.info("%s %s" % (convert_serial(device.device_sn), command))
         HdcHelper.execute_shell_command(device, command, INSTALL_TIMEOUT,
                                         receiver)

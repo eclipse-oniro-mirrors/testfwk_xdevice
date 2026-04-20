@@ -108,6 +108,9 @@ class OHJSCoverage:
         base_dir = os.path.dirname(self.request.root.source.config_file)
         source_dir = os.path.join(base_dir, "source")
         test_dir = os.path.join(base_dir, ".test")
+        if not os.path.exists(test_dir):
+            LOG.error(".test dir for generating coverage report does not exist")
+            return
 
         copy_coverage_files = []
         init_coverage_jsons = []
@@ -202,7 +205,7 @@ class OHJSUnitTestDriver(IDriver):
 
     def __init__(self):
         self.timeout = 80 * 1000
-        self.start_time = None
+        self.start_time = time.time()
         self.result = ""
         self.error_message = ""
         self.kits = []
@@ -638,6 +641,8 @@ class OHJSUnitTestRunner:
                 continue
             if key == 'wait_time':
                 args_commands.append(f'-w {value}')
+            elif key == 'userId':
+                args_commands.append(f'-u {value}')
             else:
                 args_commands.append(f'-s {key} {value}')
         # 处理拓展的运行参数
@@ -1078,11 +1083,11 @@ def _ohjs_get_snapshot_data(driver: OHJSUnitTestDriver, request: Request):
             return
         LOG.debug('get snapshot data files')
         device = driver_config.device
+        cost_time = f'{int(time.time() - driver.start_time)}s'
+        find_cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -mtime -{cost_time}'
         remote_files = []
-        cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -name *.json'
-        remote_files.extend(get_remote_files(device, cmd))
-        cmd = f'find {snapshot_data_path} -type f -maxdepth 1 -name *.png'
-        remote_files.extend(get_remote_files(device, cmd))
+        remote_files.extend(get_remote_files(device, f'{find_cmd} -name *.json'))
+        remote_files.extend(get_remote_files(device, f'{find_cmd} -name *.png'))
         if not remote_files:
             return
         request_config = request.config
@@ -1133,12 +1138,23 @@ def _ohjs_runner_config(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], 
     runner.compile_mode = get_config_value('compile-mode', driver_json_config, False)
     if driver_config.coverage:
         runner.add_arg('coverage', 'true')
-    user_id = '100'
+    user_id = get_config_value('user-id', driver_json_config, False, default='100')
+    if not user_id:
+        user_id = '100'
+    device = getattr(driver_config, 'device', None)
+    if device:
+        specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
+        if specify_user_id:
+            user_id = specify_user_id
+            runner.add_arg('userId', specify_user_id)
     bundle_name = get_config_value('bundle-name', driver_json_config, False)
     screenshot_fail = get_config_value('screenshot_fail', test_args, False, default='false')
     if screenshot_fail == 'true':
-        runner.add_arg('snapshotWhenFail', 'true')
-        driver_config.snapshot_data_path = f'/data/app/el2/{user_id}/base/{bundle_name}/'
+        if bundle_name:
+            runner.add_arg('snapshotWhenFail', 'true')
+            driver_config.snapshot_data_path = f'/data/app/el2/{user_id}/base/{bundle_name}/'
+        else:
+            LOG.warning('screenshot_fail is true but bundle_name is empty, skip snapshot')
 
 
 def _ohjs_run_test(driver: Union[OHJSUnitTestDriver, OHJSLocalTestDriver], request: Request, **kwargs):

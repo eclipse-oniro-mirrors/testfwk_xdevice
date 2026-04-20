@@ -790,14 +790,19 @@ class AppInstallKit(ITestKit):
             push_dest = "{}/{}".format(push_dest, os.path.basename(hap_file))
             device.push_file(hap_file, push_dest)
             self.pushed_hap_file.add(push_dest)
-            output = device.execute_shell_command("bm install -p {} {}".format(push_dest, self.ex_args))
+            app_install_cmd = f"bm install -p {push_dest}"
+            if self.ex_args:
+                app_install_cmd += f" {self.ex_args}"
+            specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
+            if specify_user_id:
+                app_install_cmd += f" -u {specify_user_id}"
+            output = device.execute_shell_command(app_install_cmd)
             if output.startswith("Success") or "successfully" in output:
                 LOG.debug("Install %s success" % push_dest)
                 return
             if "[ERROR_GET_BUNDLE_INSTALLER_FAILED]" in output:
                 LOG.info("[ERROR_GET_BUNDLE_INSTALLER_FAILED] occurs, retry install hap")
-                output = self.retry_install_hap(
-                    device, "bm install -p {} {}".format(push_dest, self.ex_args))
+                output = self.retry_install_hap(device, app_install_cmd)
                 if output.startswith("Success") or "successfully" in output:
                     LOG.debug("Install %s success" % push_dest)
                     return
