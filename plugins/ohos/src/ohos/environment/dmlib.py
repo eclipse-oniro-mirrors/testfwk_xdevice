@@ -79,6 +79,13 @@ DEFAULT_STD_PORT = 8710
 HDC_NAME = "hdc"
 HDC_STD_NAME = "hdc_std"
 HDC_UDS_ADDRESS = "/data/hdc/hdc_debug/hdc_server"
+# 需要指定userId的命令。key是命令前缀，value是命令参数
+NEED_SPECIFY_USER_ID_CMDS = {
+    "aa start": "-u",
+    "aa test": "-u",
+    "bm install": "-u",
+    "bm uninstall": "-u",
+}
 LOG = platform_logger("Hdc")
 
 
@@ -842,9 +849,6 @@ class HdcHelper:
     def uninstall_package(device, package_name):
         receiver = CollectingOutputReceiver()
         command = f"bm uninstall -n {package_name}"
-        specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
-        if specify_user_id:
-            command += f" -u {specify_user_id}"
         device.log.info("%s %s" % (convert_serial(device.device_sn), command))
         HdcHelper.execute_shell_command(device, command, INSTALL_TIMEOUT,
                                         receiver)
@@ -878,6 +882,7 @@ class HdcHelper:
             command output, the method will throw
             ShellCommandUnresponsiveException (ms).
         """
+        command = HdcHelper.add_userid_cmd_opt(command, device)
         try:
             if not timeout:
                 timeout = DEFAULT_TIMEOUT
@@ -1120,6 +1125,18 @@ class HdcHelper:
     @staticmethod
     def is_hdc_std():
         return HDC_STD_NAME in HdcHelper.CONNECTOR_NAME
+
+    @staticmethod
+    def add_userid_cmd_opt(cmd: str, device):
+        """为命令指定userId"""
+        specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
+        if not specify_user_id:
+            return cmd
+        for cmd_tag, cmd_opt in NEED_SPECIFY_USER_ID_CMDS.items():
+            # 当命令未指定userId参数时，才为其添加
+            if cmd.startswith(cmd_tag) and cmd_opt not in cmd:
+                cmd += f" {cmd_opt} {specify_user_id}"
+        return cmd
 
 
 class DeviceConnector(object):
