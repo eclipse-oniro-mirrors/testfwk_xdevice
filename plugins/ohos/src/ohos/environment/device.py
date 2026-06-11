@@ -1053,6 +1053,7 @@ class DeviceLogCollector:
 
         # 启动日志任务
         out = self.device.execute_shell_command('hilog -w query')
+        out = str(out)
         LOG.debug(out)
         cur_size = ''
         ret = re.search(r'/data/log/hilog/\S+ (\d+\.\d+)([KM]) 1000', out)
@@ -1292,6 +1293,7 @@ class DeviceLogCollector:
             find = find_cmd if find_cmd else 'find {}'.format(remote_dir)
             cmd = '{} -type f -mtime -{}'.format(find, units)
             out = self.device.execute_shell_command(cmd)
+            out = str(out)
             if 'No such file or directory' in out:
                 continue
             LOG.debug(out)
