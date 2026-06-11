@@ -793,9 +793,6 @@ class AppInstallKit(ITestKit):
             app_install_cmd = f"bm install -p {push_dest}"
             if self.ex_args:
                 app_install_cmd += f" {self.ex_args}"
-            specify_user_id = getattr(device, ConfigConst.specify_user_id, None)
-            if specify_user_id:
-                app_install_cmd += f" -u {specify_user_id}"
             output = device.execute_shell_command(app_install_cmd)
             if output.startswith("Success") or "successfully" in output:
                 LOG.debug("Install %s success" % push_dest)
@@ -972,19 +969,20 @@ def keep_screen_on(device):
 
 
 def run_command(device, command):
+    command = command.strip()
     LOG.debug("The command:{} is running".format(command))
     stdout = None
-    if command.strip() == "remount":
+    if command == "remount":
         remount(device)
-    elif command.strip() == "target mount":
+    elif command == "target mount":
         device.connector_command(command.split(" "))
-    elif command.strip() == "reboot":
+    elif command == "reboot":
         device.reboot()
-    elif command.strip() == "reboot-delay":
+    elif command == "reboot-delay":
         pass
-    elif command.strip().endswith("&"):
-        device.execute_shell_in_daemon(command.strip())
-    elif command.strip().startswith("push"):
+    elif command.endswith("&"):
+        device.execute_shell_in_daemon(command)
+    elif command.startswith("push"):
         if check_device_ohca(device):
             command_list = command.split(" ")
             if command_list and \
@@ -995,7 +993,7 @@ def run_command(device, command):
                                                                 command_list[len(command_list) - 1])
                 command = " ".join(command_list)
         stdout = device.execute_shell_command(command)
-    elif command.strip().startswith("cp"):
+    elif command.startswith("cp"):
         if check_device_ohca(device):
             regex = re.compile('^/data/*')
             command_list = command.split(" ")
