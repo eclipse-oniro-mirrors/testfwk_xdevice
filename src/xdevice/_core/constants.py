@@ -135,6 +135,7 @@ class DeviceTestType(object):
     ValidatorTest = "ValidatorTest"
     arkuix_jsunit_test = "ARKUIXJSUnitTest"
     oh_jslocal_test = "OHJSLocalTestDriver"
+    validator_lite = "ValidatorLite"
 
 
 @dataclass
@@ -172,6 +173,7 @@ TEST_DRIVER_SET = {
     DeviceTestType.ltp_posix_test,
     DeviceTestType.oh_kernel_test,
     DeviceTestType.oh_jsunit_test,
+    DeviceTestType.validator_lite,
     HostDrivenTestType.device_test,
 }
 

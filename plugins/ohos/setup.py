@@ -55,7 +55,8 @@ setup(
             'c_driver_lite=ohos.drivers.c_driver_lite',
             'opensource_driver_lite=ohos.drivers.opensource_driver_lite',
             'build_only_driver_lite=ohos.drivers.build_only_driver_lite',
-            'vulkan_driver=ohos.drivers.vulkan_driver'
+            'vulkan_driver=ohos.drivers.vulkan_driver',
+            'validator_driver_lite=ohos.drivers.validator_driver_lite'
         ],
         'listener': [
             'listener=ohos.executor.listener',
