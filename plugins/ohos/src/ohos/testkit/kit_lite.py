@@ -322,7 +322,10 @@ class MountKit(ITestKit):
         if device.label == "ipcamera":
             if self.type_kernel and \
                     self.type_kernel in [DeviceLiteKernel.linux_kernel, DeviceLiteKernel.lite_kernel]:
-                commands = linux_commands
+                if self.type_kernel == DeviceLiteKernel.lite_kernel:
+                    commands = liteos_commands
+                else:
+                    commands = linux_commands
                 device.__set_device_kernel__(self.type_kernel)
             else:
                 env_result, status, _ = device.execute_command_with_timeout(
