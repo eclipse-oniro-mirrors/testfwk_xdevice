@@ -74,7 +74,7 @@ def _poll_serial_loop(com, serial_buffer, stop_flag):
         if com.in_waiting > 0:
             _read_one_batch(com, serial_buffer)
         else:
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 def _read_one_batch(com, serial_buffer):
@@ -292,7 +292,47 @@ class ValidatorLiteDriver(IDriver):
         if remaining:
             serial_buffer[0] = "{}{}".format(serial_buffer[0], remaining)
 
+        file_report = self._read_report_file()
+        if file_report:
+            LOG.info("Read report from device file: %d chars" % len(file_report))
+            serial_buffer[0] = file_report
+        else:
+            LOG.warning("No report file on device, using serial output only")
+
         return serial_buffer[0]
+
+    def _read_report_file(self):
+        device = self.config.device
+        bundle_name = getattr(self, 'bundle_name', '')
+        data_path = "/storage/app/data/%s" % bundle_name
+        report_path = "%s/report.txt" % data_path
+        try:
+            result, status, _ = device.execute_command_with_timeout(
+                command="cat %s" % report_path, timeout=5)
+            if status and result and "[report]" in result:
+                return result
+            LOG.warning("Report file not found or empty: %s" % report_path)
+        except Exception as e:
+            LOG.warning("Failed to read report file: %s" % str(e))
+        return ""
+
+    def _cleanup_report_file(self, device):
+        bundle_name = getattr(self, 'bundle_name', '')
+        data_path = "/storage/app/data/%s" % bundle_name
+        report_path = "%s/report.txt" % data_path
+        try:
+            device.execute_command_with_timeout(
+                command="rm -f %s" % report_path, timeout=3)
+        except Exception:
+            pass
+
+    def _suppress_kernel_log(self, device):
+        try:
+            device.execute_command_with_timeout(
+                command="echo 1 > /proc/sys/kernel/printk", timeout=3)
+            LOG.info("Kernel log level lowered to KERN_ALERT only")
+        except Exception:
+            pass
 
     def _copy_aa_to_device(self, device, storage_prefix):
         aa_src = "%s/test_root/aa" % storage_prefix
@@ -309,11 +349,29 @@ class ValidatorLiteDriver(IDriver):
                 LOG.info("ability assistant copied OK: %s" % ls_result.strip())
                 device.execute_command_with_timeout(
                     command="chmod +x %s" % aa_dst, timeout=3)
-                return
+                break
             LOG.warning("ability assistant copy attempt %d failed, retrying..." % (retry + 1))
             time.sleep(2)
-        LOG.warning("ability assistant not found at %s after 3 retries. Will skip start."
-                     "Serial output: %s" % (aa_dst, ls_result))
+        else:
+            LOG.warning("ability assistant not found at %s after 3 retries. Will skip start."
+                         "Serial output: %s" % (aa_dst, ls_result))
+
+        bm_src = "%s/test_root/bm" % storage_prefix
+        bm_dst = "/storage/bm"
+        LOG.info("Copying bm from %s to %s" % (bm_src, bm_dst))
+        for retry in range(3):
+            device.execute_command_with_timeout(
+                command="cp %s %s" % (bm_src, bm_dst), timeout=5)
+            ls_result, ls_status, _ = device.execute_command_with_timeout(
+                command="ls %s" % bm_dst, timeout=3)
+            if self._is_file_present(ls_result, ls_status):
+                LOG.info("bm copied OK: %s" % ls_result.strip())
+                device.execute_command_with_timeout(
+                    command="chmod +x %s" % bm_dst, timeout=3)
+                return
+            LOG.warning("bm copy attempt %d failed, retrying..." % (retry + 1))
+            time.sleep(2)
+        LOG.warning("bm not found at %s after 3 retries." % bm_src)
 
     def _copy_aa_to_nfs(self, request):
         nfs_info = get_nfs_server(request)
@@ -326,18 +384,36 @@ class ValidatorLiteDriver(IDriver):
         aa_local = self._find_local_aa(request)
         if not aa_local:
             LOG.warning("ability assistant not found in testcases/tools/ or dev_tools/bin/")
-            return
+        else:
+            aa_dst = os.path.join(nfs_dir, "aa")
+            is_remote = nfs_info.get("remote", "false")
+            try:
+                if is_remote.lower() == "true":
+                    self._copy_aa_remote(nfs_info, aa_local, aa_dst)
+                else:
+                    self._copy_aa_local(aa_local, aa_dst)
+                LOG.info("ability assistant copied to NFS: %s -> %s" % (aa_local, aa_dst))
+            except Exception as e:
+                LOG.error("Failed to copy ability assistant to NFS: %s" % str(e))
 
-        aa_dst = os.path.join(nfs_dir, "aa")
-        is_remote = nfs_info.get("remote", "false")
-        try:
-            if is_remote.lower() == "true":
-                self._copy_aa_remote(nfs_info, aa_local, aa_dst)
-            else:
-                self._copy_aa_local(aa_local, aa_dst)
-            LOG.info("ability assistant copied to NFS: %s -> %s" % (aa_local, aa_dst))
-        except Exception as e:
-            LOG.error("Failed to copy ability assistant to NFS: %s" % str(e))
+        tools_dir = os.path.join(request.config.testcases_path, "tools")
+        bm_local = os.path.join(tools_dir, "bm")
+        if not os.path.isfile(bm_local):
+            bm_local = os.path.join(request.config.testcases_path,
+                                    "acts_validator_lite", "tools", "bm")
+        if os.path.isfile(bm_local):
+            bm_dst = os.path.join(nfs_dir, "bm")
+            is_remote = nfs_info.get("remote", "false")
+            try:
+                if is_remote.lower() == "true":
+                    self._copy_aa_remote(nfs_info, bm_local, bm_dst)
+                else:
+                    self._copy_aa_local(bm_local, bm_dst)
+                LOG.info("bm copied to NFS: %s -> %s" % (bm_local, bm_dst))
+            except Exception as e:
+                LOG.error("Failed to copy bm to NFS: %s" % str(e))
+        else:
+            LOG.warning("bm not found in testcases/tools/")
 
     def _generate_report(self, request, results):
         if not results:
@@ -392,12 +468,31 @@ class ValidatorLiteDriver(IDriver):
         if not self.hap_file:
             return True
         hap_dir = "%s/test_root" % storage_prefix
-        LOG.info("Copying HAP from %s/%s to %s/%s" % (hap_dir, self.hap_file, self.preset_dir, self.hap_file))
         local_hap_path = os.path.join(request.config.testcases_path,
                                        "acts_validator_lite", self.hap_file)
         expected_size = os.path.getsize(local_hap_path) if os.path.exists(local_hap_path) else 0
         LOG.info("Expected HAP size: %d bytes" % expected_size)
 
+        bm_path = "/storage/bm"
+        use_bm = (kernel == DeviceLiteKernel.linux_kernel)
+        if use_bm:
+            bm_check, _, _ = device.execute_command_with_timeout(
+                command="ls %s" % bm_path, timeout=3)
+            use_bm = (bm_check and "No such file" not in bm_check
+                     and bm_check.strip())
+        if use_bm:
+            LOG.info("Using bm install to install HAP")
+            hap_remote = "%s/test_root/%s" % (storage_prefix, self.hap_file)
+            install_result, install_status, _ = device.execute_command_with_timeout(
+                command="/storage/bm install -p %s" % hap_remote, timeout=60)
+            LOG.info("bm install result: %s" % str(install_result)[:200])
+            if install_status and "success" in install_result.lower():
+                LOG.info("HAP installed via bm, skip reboot")
+                self.reboot_after = False
+                return True
+            LOG.warning("bm install failed, falling back to cp method")
+
+        LOG.info("Copying HAP from %s/%s to %s/%s" % (hap_dir, self.hap_file, self.preset_dir, self.hap_file))
         device.execute_command_with_timeout(command="cd %s" % hap_dir, timeout=3)
         for retry in range(3):
             LOG.info("HAP copy attempt %d" % (retry + 1))
@@ -520,6 +615,9 @@ class ValidatorLiteDriver(IDriver):
         device = self.config.device
         kernel = self._detect_kernel(device)
 
+        self._cleanup_report_file(device)
+        self._suppress_kernel_log(device)
+
         result = self._launch_app(device)
         self.config.command_result = result
 
@@ -578,6 +676,22 @@ class ValidatorLiteDriver(IDriver):
 
         try:
             device.connect()
+            kernel = device.__get_device_kernel__() or DeviceLiteKernel.linux_kernel
+
+            bm_path = "/storage/bm"
+            use_bm = (kernel == DeviceLiteKernel.linux_kernel)
+            if use_bm:
+                bm_check, _, _ = device.execute_command_with_timeout(
+                    command="ls %s" % bm_path, timeout=3)
+                use_bm = (bm_check and "No such file" not in bm_check
+                         and bm_check.strip())
+            if use_bm:
+                LOG.info("Cleanup: bm uninstall %s" % self.bundle_name)
+                device.execute_command_with_timeout(
+                    command="/storage/bm uninstall -n %s" % self.bundle_name, timeout=30)
+                LOG.info("Cleanup: bm uninstall done, skip reboot")
+                return
+
             LOG.info("Cleanup: rm %s/%s" % (self.preset_dir, self.hap_file))
             device.execute_command_with_timeout("cd /", timeout=1)
             device.execute_command_with_timeout(
@@ -586,7 +700,6 @@ class ValidatorLiteDriver(IDriver):
             device.execute_command_with_timeout(
                 command="rm -r /storage/app/etc/bundles", timeout=10)
             LOG.info("Cleanup: rebooting for uninstall to take effect")
-            kernel = device.__get_device_kernel__() or DeviceLiteKernel.linux_kernel
             device.execute_command_with_timeout(self._get_reboot_cmd(kernel), timeout=5)
         except Exception as e:
             LOG.warning("Teardown error: %s" % str(e))
