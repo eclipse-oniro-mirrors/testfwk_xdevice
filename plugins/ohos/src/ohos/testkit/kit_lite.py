@@ -128,6 +128,44 @@ def get_file_from_nfs(nfs_config, src, dst):
         LOG.error(f"Get file from nfs server failed, {e}")
 
 
+def ensure_nfs_dir(nfs_config):
+    """
+    Ensure the nfs dir exists. The dir is per-device (sn appended), so it
+    must be created before copying/mounting to avoid FileNotFoundError on
+    local copy and mount failure on the board.
+    Parameters:
+        nfs_config: dict, the nfs server config with sn-appended dir
+    """
+    nfs_dir = nfs_config.get("dir", "")
+    if not nfs_dir:
+        return
+    if str(nfs_config.get("remote", "false")).lower() == "true":
+        # mkdir on remote nfs server (parent already exists)
+        client = None
+        try:
+            LOG.info(f"Trying to create nfs dir {nfs_dir} on remote server")
+            import paramiko
+            client = paramiko.Transport(nfs_config.get("ip"),
+                                        int(nfs_config.get("port")))
+            client.connect(username=nfs_config.get("username"),
+                           password=nfs_config.get("password"))
+            sftp = paramiko.SFTPClient.from_transport(client)
+            try:
+                sftp.mkdir(nfs_dir)
+            except IOError:
+                pass  # already exists
+        except OSError as e:
+            LOG.warning(f"Create nfs dir on remote server failed, {e}")
+        finally:
+            if client is not None:
+                client.close()
+    else:
+        try:
+            os.makedirs(nfs_dir, exist_ok=True)
+        except OSError as e:
+            LOG.warning(f"Create nfs dir failed, {e}")
+
+
 def execute_query(device, query, request):
     if not query:
         LOG.debug("query bin is none")
@@ -188,7 +226,7 @@ class DeployKit(ITestKit):
 
     def __check_config__(self, config):
         self.timeout = str(int(get_config_value(
-            'timeout', config, is_list=False, default=0)) // 1000)
+            'timeout', config, is_list=False, default=0)) * 1000)
         self.burn_file = get_config_value('burn_file', config, is_list=False)
         burn_command = get_config_value('burn_command', config, is_list=False,
                                         default=RESET_CMD)
@@ -306,7 +344,7 @@ class MountKit(ITestKit):
 
         linux_host = remote_info.get("ip", "")
         linux_directory = remote_info.get("dir", "")
-        is_remote = remote_info.get("remote", "false")
+        is_remote = str(remote_info.get("remote", "")).strip() or "false"
         liteos_commands = ["cd /", "umount device_directory",
                            "mount nfs_ip:nfs_directory device_directory nfs"]
         linux_commands = ["cd /{}".format("storage"),
@@ -441,6 +479,7 @@ class MountKit(ITestKit):
         if not ip or not port or not remote_dir:
             LOG.warning("Nfs server's ip or port or dir is empty")
             return []
+        ensure_nfs_dir(remote_info)
         for _file in file_local_paths:
             copy_file_to_nfs(remote_info, _file)
             self.file_name_list.append(os.path.basename(_file))
