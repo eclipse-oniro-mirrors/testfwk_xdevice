@@ -58,6 +58,17 @@ def get_nfs_server(request):
         err_msg = ErrorMessage.Config.Code_0302018
         LOG.error(err_msg)
         raise ParamError(err_msg)
+    # Append the device sn to the nfs dir so that each device owns an
+    # isolated directory, avoiding read/write conflicts when multiple
+    # devices run concurrently.
+    devices = request.get_devices()
+    if not devices:
+        return remote_info
+    device = devices[0]
+    if device is not None:
+        nfs_dir = remote_info.get("dir", "")
+        if nfs_dir:
+            remote_info.update({"dir": "/".join([nfs_dir, device.__get_serial__()])})
     return remote_info
 
 
@@ -70,8 +81,14 @@ def init_remote_server(lite_instance, request=None):
     if linux_dict:
         setattr(lite_instance, "linux_host", linux_dict.get("ip"))
         setattr(lite_instance, "linux_port", linux_dict.get("port"))
-        setattr(lite_instance, "linux_directory", linux_dict.get("dir"))
-
+        linux_directory = linux_dict.get("dir")
+        # Append the device sn to the nfs dir so that each device owns an
+        # isolated directory, avoiding read/write conflicts when multiple
+        # devices run concurrently.
+        device = lite_instance.config.device
+        if device is not None and linux_directory:
+            linux_directory = "/".join([linux_directory, device.__get_serial__()])
+        setattr(lite_instance, "linux_directory", linux_directory)
     else:
         raise ParamError(ErrorMessage.Config.Code_0302019)
 
