@@ -162,7 +162,7 @@ def ensure_nfs_dir(nfs_config):
     else:
         try:
             os.makedirs(nfs_dir, exist_ok=True)
-        except (OSError, PermissionError) as e:
+        except OSError as e:
             LOG.warning(f"Create nfs dir failed, {e}")
 
 
