@@ -66,12 +66,12 @@ class JSUnitParserLite(IParser):
             elif line.endswith(_START_JSUNIT_SUITE_END_MARKER):
                 self.handle_suite_ended_tag()
             elif _PASS_JSUNIT_MARKER in line or _FAIL_JSUNIT_MARKER \
-                    in line:
+                    in line or "[ignore]" in line:
                 self.handle_one_test_tag(line.strip())
             self.last_line = line
 
     def parse_test_description(self, message):
-        pattern = r"\[(pass|fail)\]"
+        pattern = r"\[(pass|fail|ignore)\]"
         year = time.strftime("%Y")
         filter_message = message.split("[Console Info]")[1].strip()
         end_time = "%s-%s" % \
