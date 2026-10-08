@@ -142,10 +142,14 @@ class ResultReporter(IReporter):
             # generate summary ini
             self._generate_summary()
 
+            self._transact_all()
+
+            # generate independent custom summary reports before copying,
+            # so they are included in the reports/latest snapshot
+            self._generate_custom_summary_reports()
+
             # copy reports to reports/latest folder
             self._copy_report()
-
-            self._transact_all()
 
         LOG.info("")
         LOG.info("**************************************************")
@@ -153,6 +157,16 @@ class ResultReporter(IReporter):
         LOG.info("**************************************************")
         LOG.info("")
         show_current_environment()
+
+    def _generate_custom_summary_reports(self):
+        try:
+            from _core.report.custom_summary_reporter import generate_all_custom_summary_reports
+            from _core.executor.scheduler import Scheduler
+            generate_all_custom_summary_reports(
+                self.report_path,
+                suite_dir=getattr(Scheduler, "task_testcases_dir", ""))
+        except Exception as e:
+            LOG.warning("Failed to generate custom summary reports: %s" % e)
 
     def _check_params(self, report_path, **kwargs):
         task_info = kwargs.get("task_info", "")
