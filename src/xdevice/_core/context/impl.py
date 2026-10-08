@@ -192,7 +192,7 @@ class BaseScheduler(Sub, ABC):
             self._queue_monitor_thread = self._start_queue_monitor(*params)
             while test_drivers:
                 if len(current_driver_threads) > self.max_driver_threads_size():
-                    time.sleep(3)
+                    self._wait_sched_event(3)
                     continue
                 # clear remaining test drivers when scheduler is terminated
                 if not self.is_executing():
@@ -201,8 +201,13 @@ class BaseScheduler(Sub, ABC):
                     break
                 # 处理监控线程
                 # get test driver and device
-                self._run(run_func, task, *params)
+                dispatched = self._run(run_func, task, *params)
                 self.peek_monitor(*params)
+                if dispatched is False:
+                    # head's devices are busy: keep it queued and retry on
+                    # the next device-available wakeup
+                    self._wait_sched_event(0.5)
+                    continue
                 test_drivers.pop(0)
             while True:
                 if not self._queue_monitor_thread.is_alive():
@@ -211,6 +216,23 @@ class BaseScheduler(Sub, ABC):
         finally:
             if callable(loop_finally):
                 loop_finally()
+
+    @staticmethod
+    def _get_sched_event():
+        try:
+            from _core.executor.scheduler import Scheduler
+            return Scheduler.sched_event
+        except Exception as error:
+            LOG.debug("Get sched event failed: %s" % error)
+            return None
+
+    def _wait_sched_event(self, timeout):
+        sched_event = self._get_sched_event()
+        if sched_event is None:
+            time.sleep(timeout)
+            return
+        with sched_event:
+            sched_event.wait(timeout)
 
     def is_monitor_alive(self):
         return self._queue_monitor_thread and self._queue_monitor_thread.is_alive()
@@ -234,7 +256,8 @@ class BaseScheduler(Sub, ABC):
 
     def _run(self, run_func, task, message_queue, test_drivers, current_driver_threads):
         if callable(run_func):
-            run_func(task, test_drivers, current_driver_threads, message_queue)
+            return run_func(task, test_drivers, current_driver_threads, message_queue)
+        return None
 
     @staticmethod
     def _start_queue_monitor(message_queue, test_drivers,
@@ -307,6 +330,10 @@ class BaseScheduler(Sub, ABC):
     def _call_terminate(cls):
         cls.set_repeat_index(0)
         cls._auto_retry = 0
+        sched_event = cls._get_sched_event()
+        if sched_event is not None:
+            with sched_event:
+                sched_event.notify_all()
         return cls._terminate()
 
     @classmethod

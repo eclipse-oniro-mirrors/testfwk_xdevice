@@ -29,7 +29,7 @@ from _core.utils import get_local_ip
 from _core.constants import ConfigConst
 from _core.constants import Cluster
 
-__all__ = ["UserConfigManager"]
+__all__ = ["UserConfigManager", "ConfigManager"]
 LOG = platform_logger("ConfigManager")
 
 
@@ -464,3 +464,119 @@ class UserConfigManager(object):
             return 8
         value = int(self.taskargs.get("max_driver_threads"))
         return value if value > 0 else 8
+
+    @classmethod
+    def _find_suite_config_file(cls, suite_dir, filename):
+        candidate_paths = []
+        if suite_dir:
+            if os.path.isfile(suite_dir):
+                if os.path.basename(suite_dir) == filename:
+                    return os.path.abspath(suite_dir)
+                dir_name = os.path.dirname(suite_dir)
+            else:
+                dir_name = suite_dir
+            candidate_paths.extend([
+                os.path.join(dir_name, "testcases", "config", filename),
+                os.path.join(dir_name, "config", filename),
+                os.path.join(dir_name, filename),
+            ])
+        try:
+            from xdevice import Variables
+            if hasattr(Variables, "config") and Variables.config:
+                tc_dir = Variables.config.get_testcases_dir()
+                if tc_dir:
+                    candidate_paths.extend([
+                        os.path.join(tc_dir, "config", filename),
+                        os.path.join(os.path.dirname(tc_dir), "testcases", "config", filename),
+                        os.path.join(tc_dir, filename),
+                    ])
+            if getattr(Variables, "exec_dir", ""):
+                candidate_paths.extend([
+                    os.path.join(Variables.exec_dir, "testcases", "config", filename),
+                    os.path.join(Variables.exec_dir, "config", filename),
+                ])
+            if getattr(Variables, "top_dir", ""):
+                candidate_paths.extend([
+                    os.path.join(Variables.top_dir, "testcases", "config", filename),
+                    os.path.join(Variables.top_dir, "config", filename),
+                ])
+        except Exception as e:
+            LOG.debug("Error retrieving candidate paths from Variables: %s" % e)
+
+        for path in candidate_paths:
+            if os.path.isfile(path):
+                return os.path.abspath(path)
+        return ""
+
+    @classmethod
+    def load_prio_sched_suites(cls, suite_dir=""):
+        """
+        Load prioritized scheduling suites whitelist from testcases/config/prio_sched_suites.json.
+        Format: [{"suite_name": duration}, ...]
+        Returns a list of tuples: [(suite_name, duration_seconds), ...]
+        Returns [] safely on missing file, corrupted JSON, or invalid format.
+        """
+        file_path = cls._find_suite_config_file(suite_dir, "prio_sched_suites.json")
+        if not file_path or not os.path.exists(file_path):
+            LOG.debug("prio_sched_suites.json not found")
+            return []
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                LOG.warning("prio_sched_suites.json content is not a list")
+                return []
+            suites = []
+            seen_names = set()
+            for item in data:
+                if not isinstance(item, dict) or not item:
+                    continue
+                for suite_name, duration in item.items():
+                    try:
+                        duration_int = int(duration)
+                        if duration_int >= 0:
+                            name = str(suite_name).strip()
+                            if name in seen_names:
+                                LOG.warning("Duplicate suite %s in prio_sched_suites.json, "
+                                            "keep the first occurrence" % name)
+                                continue
+                            seen_names.add(name)
+                            suites.append((name, duration_int))
+                    except (ValueError, TypeError):
+                        LOG.warning("Invalid duration for suite %s: %s" % (suite_name, duration))
+            return suites
+        except Exception as e:
+            LOG.warning("Failed to load prio_sched_suites.json: %s" % e)
+            return []
+
+    @classmethod
+    def load_sched_config(cls, suite_dir=""):
+        """
+        Load universal schedule configuration from testcases/config/sched_config.json.
+        Format: {"time_threshold": 3600}
+        Returns integer time_threshold in seconds, or None on missing/invalid config.
+        """
+        file_path = cls._find_suite_config_file(suite_dir, "sched_config.json")
+        if not file_path or not os.path.exists(file_path):
+            LOG.debug("sched_config.json not found")
+            return None
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                LOG.warning("sched_config.json content is not a dict")
+                return None
+            if "time_threshold" not in data:
+                LOG.warning("time_threshold not found in sched_config.json")
+                return None
+            threshold = int(data["time_threshold"])
+            if threshold <= 0:
+                LOG.warning("Invalid time_threshold: %s" % threshold)
+                return None
+            return threshold
+        except Exception as e:
+            LOG.warning("Failed to load sched_config.json: %s" % e)
+            return None
+
+
+ConfigManager = UserConfigManager
