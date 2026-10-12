@@ -296,7 +296,7 @@ class JSunitLiteDriver(IDriver):
         LOG.info("Expected HAP size: %d bytes" % expected_size)
 
         bm_path = "/storage/bm"
-        use_bm = (kernel == DeviceLiteKernel.linux_kernel)
+        use_bm = True
         if use_bm:
             bm_check, _, _ = device.execute_command_with_timeout(
                 command="ls %s" % bm_path, timeout=3)
@@ -306,13 +306,19 @@ class JSunitLiteDriver(IDriver):
             LOG.info("Using bm install to install HAP")
             hap_remote = "%s/test_root/%s" % (storage_prefix, self.hap_file)
             _drain_serial_before_command(device)
+            if kernel == DeviceLiteKernel.linux_kernel:
+                install_cmd = "/storage/bm install -p %s" % hap_remote
+            else:
+                device.execute_command_with_timeout(
+                    command="cd /storage", timeout=1)
+                install_cmd = "./bm install -p %s" % hap_remote
             install_result, install_status, _ = device.execute_command_with_timeout(
-                command="/storage/bm install -p %s" % hap_remote, timeout=60)
+                command=install_cmd, timeout=60)
             extra = _collect_serial_after_command(device, delay=2)
             if extra:
                 install_result = str(install_result) + extra
             LOG.info("bm install result: %s" % str(install_result)[:200])
-            if install_status and "success" in str(install_result).lower() and "install" in str(install_result).lower():
+            if (install_status and "success" in str(install_result).lower() and "install" in str(install_result).lower()) or "already exist" in str(install_result).lower():
                 LOG.info("HAP installed via bm, skip reboot")
                 self.reboot_after = False
                 return True
@@ -655,7 +661,7 @@ class JSunitLiteDriver(IDriver):
             kernel = device.__get_device_kernel__() or DeviceLiteKernel.linux_kernel
 
             bm_path = "/storage/bm"
-            use_bm = (kernel == DeviceLiteKernel.linux_kernel)
+            use_bm = True
             if use_bm:
                 bm_check, _, _ = device.execute_command_with_timeout(
                     command="ls %s" % bm_path, timeout=3)
@@ -704,8 +710,13 @@ class JSunitLiteDriver(IDriver):
         time.sleep(1)
         LOG.info("Cleanup: bm uninstall %s" % self.bundle_name)
         _drain_serial_before_command(device)
+        uninstall_cmd = "/storage/bm uninstall -n %s" % self.bundle_name
+        if kernel != DeviceLiteKernel.linux_kernel:
+            device.execute_command_with_timeout(
+                command="cd /storage", timeout=1)
+            uninstall_cmd = "./bm uninstall -n %s" % self.bundle_name
         uninstall_result, uninstall_status, _ = device.execute_command_with_timeout(
-            command="/storage/bm uninstall -n %s" % self.bundle_name, timeout=30)
+            command=uninstall_cmd, timeout=30)
         extra = _collect_serial_after_command(device, delay=2)
         if extra:
             uninstall_result = str(uninstall_result) + extra
