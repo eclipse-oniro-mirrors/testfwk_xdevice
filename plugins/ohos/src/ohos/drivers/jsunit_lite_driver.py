@@ -712,9 +712,10 @@ class JSunitLiteDriver(IDriver):
         _drain_serial_before_command(device)
         uninstall_cmd = "/storage/bm uninstall -n %s" % self.bundle_name
         if kernel != DeviceLiteKernel.linux_kernel:
-            device.execute_command_with_timeout(
-                command="cd /storage", timeout=1)
-            uninstall_cmd = "./bm uninstall -n %s" % self.bundle_name
+            # LiteOS cannot execute absolute paths directly but `exec` can;
+            # the "exec" prefix also bypasses the dmlib "./" command branch
+            # which has no uninstall end marker and would wait for timeout.
+            uninstall_cmd = "exec /storage/bm uninstall -n %s" % self.bundle_name
         uninstall_result, uninstall_status, _ = device.execute_command_with_timeout(
             command=uninstall_cmd, timeout=30)
         extra = _collect_serial_after_command(device, delay=2)
