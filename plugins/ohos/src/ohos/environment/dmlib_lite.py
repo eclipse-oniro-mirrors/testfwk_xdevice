@@ -46,6 +46,7 @@ CPP_TEST_MOUNT_SIGN = "not mount properly"
 _START_JSUNIT_RUN_MARKER = "[start] start run suites"
 _END_JSUNIT_RUN_MARKER = "[end] run suites end"
 INSTALL_END_MARKER = "resultMessage is install success !"
+UNINSTALL_END_MARKER = "resultMessage is uninstall success !"
 PRODUCT_PARAMS_START = "To Obtain Product Params Start"
 PRODUCT_PARAMS_END = "To Obtain Product Params End"
 
@@ -82,6 +83,8 @@ def check_read_test_end(result=None, input_command=None):
 
         if result_output.find(INSTALL_END_MARKER) != -1:
             return True
+        if result_output.find(UNINSTALL_END_MARKER) != -1:
+            return True
         if (result_output.find(CPP_TEST_MOUNT_SIGN) != -1
                 and result_output.find(CPP_TEST_STOP_SIGN) != -1):
             LOG.info("Find test stop")
@@ -101,7 +104,13 @@ def check_read_test_end(result=None, input_command=None):
         if PRODUCT_PARAMS_END in result_output:
             return True
     else:
-        if "OHOS #" in result_output or "# " in result_output:
+        # Prompt detection must be line-anchored: console log noise (e.g.
+        # "Socket# destroyList") contains '# ' mid-line and must not be
+        # mistaken for the shell prompt, otherwise commands return early
+        # with empty results on devices with persistent log flooding.
+        cleaned_output = PATTERN.sub('', result_output)
+        if "OHOS #" in cleaned_output or \
+                re.search(r'#[ \t]*$', cleaned_output, re.MULTILINE):
             if input_command == "reboot" or input_command == "reset":
                 return False
             if input_command.startswith("mount"):
