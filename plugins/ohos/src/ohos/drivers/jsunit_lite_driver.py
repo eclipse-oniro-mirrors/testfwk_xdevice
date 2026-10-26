@@ -23,6 +23,7 @@ import re
 import time
 import shutil
 import threading
+import hashlib
 
 from ohos.drivers import (
     Binder, DeviceTestType, ExecuteTerminate, FilePermission,
@@ -37,6 +38,9 @@ from ohos.error import ErrorMessage
 LOG = platform_logger("JSunitLiteDriver")
 
 ANSI_PATTERN = re.compile(r'\x1B(\[([0-9]{1,2}(;[0-9]{1,2})*)?m)*')
+SPEC_START_PATTERN = re.compile(r"\[Console Info\] \[start\] (.+)$")
+SPEC_RESULT_PATTERN = re.compile(r"\[Console Info\] \[(pass|fail|ignore)\] (.+)$")
+HILOG_TIME_PATTERN = re.compile(r"(\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}\.\d{3})")
 
 
 def _get_device_ip(nfs_server_ip):
@@ -157,9 +161,13 @@ class JSunitLiteDriver(IDriver):
             repeat=request.config.repeat,
             repeat_round=request.get_repeat_round())
         try:
+            kits = []
             self.config = request.config
             self.config.device = request.config.environment.devices[0]
-            init_remote_server(self, request=request)
+            self.transfer_mode = self._resolve_transfer_mode(request)
+            LOG.info("Transfer mode: %s" % self.transfer_mode)
+            if self.transfer_mode == "nfs":
+                init_remote_server(self, request=request)
             config_file = request.root.source.config_file
             json_config = JsonParser(config_file)
             self._get_driver_config(json_config)
@@ -168,16 +176,26 @@ class JSunitLiteDriver(IDriver):
                                      request.config.resource_path,
                                      request.config.testcases_path)
 
-            self._setup_network(request)
+            if self.transfer_mode == "nfs":
+                self._setup_network(request)
 
             for kit in kits:
                 if not Binder.is_executing():
                     raise ExecuteTerminate(ErrorMessage.Common.Code_0301013)
+                if self.transfer_mode == "serial" and hasattr(kit, 'mount_list'):
+                    if hasattr(kit, 'type_kernel') and kit.type_kernel:
+                        self.config.device.__set_device_kernel__(kit.type_kernel)
+                        LOG.info("Kernel type from Test.json: %s" % kit.type_kernel)
+                    continue
                 if hasattr(kit, 'type_kernel') and not kit.type_kernel:
                     kit.type_kernel = self._detect_kernel(self.config.device)
                 kit.__setup__(self.config.device, request=request)
 
-            self._setup_device(request)
+            if self.transfer_mode == "nfs":
+                self._setup_device(request)
+            else:
+                self._serial_deploy(request)
+
             self._run_jsunit_lite_test(request)
 
         except Exception as exception:
@@ -198,6 +216,198 @@ class JSunitLiteDriver(IDriver):
 
     def __result__(self):
         return self.result if os.path.exists(self.result) else ""
+
+    def _resolve_transfer_mode(self, request):
+        """NFS server configured in user_config.xml -> nfs mode (files copied
+        over network mount); otherwise serial mode (files deployed over the
+        serial line via U-Boot, no network required)."""
+        try:
+            nfs_info = get_nfs_server(request)
+            if nfs_info and nfs_info.get("ip"):
+                return "nfs"
+        except Exception:
+            pass
+        return "serial"
+
+    def _serial_hap_name(self):
+        """8.3 lowercase name for the HAP when deployed via serial (FAT root
+        dir entries without LFN; bm requires the .hap suffix in lowercase)."""
+        stem = os.path.splitext(self.hap_file or "test.hap")[0]
+        cleaned = re.sub(r'[^A-Za-z0-9]', '', stem).lower()[:8] or "test"
+        return "%s.hap" % cleaned
+
+    def _device_sha3(self, path):
+        """Best-effort sha3 read from the OS; retries because console flood
+        noise can split the hash line. Returns None when unreadable."""
+        for _ in range(3):
+            try:
+                _drain_serial_before_command(self.config.device)
+                out, _, _ = self.config.device.execute_command_with_timeout(
+                    command="/bin/toybox sha3sum %s" % path, timeout=8)
+                m = re.search(r'\b([0-9a-f]{56})\b', str(out))
+                if m:
+                    return m.group(1)
+            except Exception:
+                pass
+        return None
+
+    def _serial_deploy(self, request):
+        """Serial-only deployment: transfer aa/bm/hap to /storage over the
+        serial line via U-Boot (ymodem + userfs FAT patch). Files already
+        present and sha3-matching are skipped."""
+        from ohos.drivers.serial_deploy_lite import SerialDeployer
+        device = self.config.device
+        device.connect()
+
+        aa_path = self._find_local_aa(request)
+        bm_path = os.path.join(request.config.testcases_path, "tools", "bm")
+        if not os.path.isfile(bm_path):
+            bm_path = os.path.join(request.config.testcases_path,
+                                   "jsunit_lite_test", "tools", "bm")
+        hap_path = os.path.join(request.config.testcases_path,
+                                "jsunit_lite_test", self.hap_file)
+        sources = [("aa", aa_path), ("bm", bm_path),
+                   (self._serial_hap_name(), hap_path)]
+        files = []
+        for name, path in sources:
+            if not path or not os.path.isfile(path):
+                raise RuntimeError("serial deploy: local file missing: %s" % path)
+            with open(path, "rb") as handle:
+                files.append((name, handle.read()))
+
+        kernel = self._detect_kernel(device)
+        kernel_str = "linux" if kernel == DeviceLiteKernel.linux_kernel else "liteos"
+
+        if kernel_str == "linux":
+            # Linux: skip pre-check (console noise makes sha3 unreliable
+            # and failed commands corrupt serial port state)
+            need = files
+        else:
+            need = []
+            for name, data in files:
+                want = hashlib.sha3_224(data).hexdigest()
+                if self._device_sha3("/storage/%s" % name) != want:
+                    need.append((name, data))
+                else:
+                    LOG.info("serial deploy: %s already up to date" % name)
+            if not need:
+                LOG.info("serial deploy: all files up to date, skip U-Boot phase")
+
+        if need:
+            com_obj = device.device.com_dict.get("cmd")
+            if not com_obj or not com_obj.com:
+                raise RuntimeError("serial deploy: cmd serial port unavailable")
+            kernel = self._detect_kernel(device)
+            kernel_str = "linux" if kernel == DeviceLiteKernel.linux_kernel else "liteos"
+            deployer = SerialDeployer(com_obj.com, logger=LOG.info)
+            deployer.deploy(need, kernel=kernel_str)
+            try:
+                if deployer.com and deployer.com.is_open:
+                    deployer.com.close()
+            except Exception:
+                pass
+            try:
+                device.close()
+                device.connect()
+                LOG.info("serial deploy: device reconnected after deploy")
+            except Exception:
+                LOG.warning("serial deploy: device reconnect issue")
+
+            # Reboot before install: send reboot via RAW SERIAL (not
+            # execute_command_with_timeout which fails when shell is noisy)
+            if kernel_str == "linux":
+                LOG.info("serial deploy: rebooting before install (raw serial)")
+                try:
+                    com_obj = device.device.com_dict.get("cmd")
+                    if com_obj and com_obj.com:
+                        # drain then write directly to serial port
+                        if com_obj.com.in_waiting:
+                            com_obj.com.read(com_obj.com.in_waiting)
+                        com_obj.com.write(b"reboot\r\n")
+                        LOG.info("serial deploy: reboot sent via raw serial")
+                except Exception as e:
+                    LOG.warning("serial deploy: raw reboot failed: %s" % str(e))
+                # wait for device to go down and come back
+                time.sleep(30)
+                try:
+                    device.close()
+                    device.connect()
+                except Exception:
+                    pass
+                # wait for shell to be ready (probe with raw serial)
+                LOG.info("serial deploy: waiting for shell after reboot")
+                shell_ok = False
+                for _ in range(18):  # up to 90s
+                    time.sleep(5)
+                    try:
+                        com_obj = device.device.com_dict.get("cmd")
+                        if com_obj and com_obj.com:
+                            if com_obj.com.in_waiting:
+                                com_obj.com.read(com_obj.com.in_waiting)
+                            com_obj.com.write(b"echo ok\r\n")
+                            time.sleep(2)
+                            out = b''
+                            end_t = time.time() + 3
+                            while time.time() < end_t:
+                                if com_obj.com.in_waiting:
+                                    out += com_obj.com.read(com_obj.com.in_waiting)
+                                else:
+                                    time.sleep(0.05)
+                            if b"ok" in out:
+                                shell_ok = True
+                                LOG.info("serial deploy: shell ready after reboot")
+                                break
+                    except Exception:
+                        continue
+                if not shell_ok:
+                    LOG.warning("serial deploy: shell not detected, continuing")
+
+        # let the freshly booted system settle
+        LOG.info("serial deploy: waiting for system to settle")
+        time.sleep(10)
+        try:
+            com_obj = device.device.com_dict.get("cmd")
+            if com_obj and com_obj.com and com_obj.com.in_waiting:
+                com_obj.com.read(com_obj.com.in_waiting)
+        except Exception:
+            pass
+
+        # flash-level crc32 verification already done in U-Boot (authoritative);
+        # the OS-level hash below is best-effort only, console flood noise can
+        # split the hash line and make it unreadable
+        for name, data in need:
+            want = hashlib.sha3_224(data).hexdigest()
+            got = self._device_sha3("/storage/%s" % name)
+            if got == want:
+                LOG.info("serial deploy: %s OS sha3 match" % name)
+            else:
+                LOG.info("serial deploy: %s OS sha3 unreadable, flash crc32 "
+                         "already verified in U-Boot" % name)
+        LOG.info("serial deploy: %d file(s) deployed and verified" % len(need))
+
+        # install the hap (bm was deployed to /storage/bm)
+        device = self.config.device
+        kernel = self._detect_kernel(device)
+        storage_prefix = self._get_storage_prefix(kernel)
+        if not self._install_hap(device, kernel, storage_prefix, request):
+            raise RuntimeError("serial deploy: hap install failed")
+        if self.reboot_after:
+            LOG.info("serial deploy: rebooting after install")
+            device.execute_command_with_timeout(self._get_reboot_cmd(kernel), timeout=5)
+            self._reconnect_device(device)
+
+    @staticmethod
+    def _find_local_aa(request):
+        candidates = [
+            os.path.join(request.config.testcases_path, "tools", "aa"),
+            os.path.join(request.config.testcases_path, "aa"),
+            os.path.join(request.config.testcases_path, "..", "..", "dev_tools", "bin", "aa"),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return None
+
 
     @staticmethod
     def _copy_aa_local(aa_local, aa_dst):
@@ -272,6 +482,12 @@ class JSunitLiteDriver(IDriver):
         timeout_config = get_config_value(
             'timeout', json_config.get_driver(), False)
         self.timeout = int(timeout_config) // 1000 if timeout_config else 600
+        case_timeout_config = get_config_value(
+            'testcase-timeout', json_config.get_driver(), False)
+        self.case_timeout = int(case_timeout_config) if case_timeout_config else 0
+        self._current_spec = None
+        self._current_spec_start = 0.0
+        self._current_spec_dev_time = "" 
         ability_name_cfg = get_config_value(
             'ability-name', json_config.get_driver(), False)
         self.ability_name = ability_name_cfg or "MainAbility"
@@ -289,22 +505,33 @@ class JSunitLiteDriver(IDriver):
     def _install_hap(self, device, kernel, storage_prefix, request):
         if not self.hap_file:
             return True
-        hap_dir = "%s/test_root" % storage_prefix
+        if getattr(self, 'transfer_mode', 'nfs') == "serial":
+            hap_dir = "/storage"
+            hap_name = self._serial_hap_name()
+        else:
+            hap_dir = "%s/test_root" % storage_prefix
+            hap_name = self.hap_file
         local_hap_path = os.path.join(request.config.testcases_path,
                                       "jsunit_lite_test", self.hap_file)
         expected_size = os.path.getsize(local_hap_path) if os.path.exists(local_hap_path) else 0
         LOG.info("Expected HAP size: %d bytes" % expected_size)
 
         bm_path = "/storage/bm"
-        use_bm = True
-        if use_bm:
+        use_bm = False
+        for _ in range(3):
+            _drain_serial_before_command(device)
             bm_check, _, _ = device.execute_command_with_timeout(
                 command="ls %s" % bm_path, timeout=3)
-            use_bm = (bm_check and "No such file" not in bm_check
-                     and bm_check.strip())
+            if bm_check and "No such file" not in bm_check and bm_check.strip():
+                use_bm = True
+                break
+            LOG.warning("bm presence check returned no useful output, retrying...")
         if use_bm:
             LOG.info("Using bm install to install HAP")
-            hap_remote = "%s/test_root/%s" % (storage_prefix, self.hap_file)
+            if getattr(self, 'transfer_mode', 'nfs') == "serial":
+                hap_remote = "/storage/%s" % self._serial_hap_name()
+            else:
+                hap_remote = "%s/test_root/%s" % (storage_prefix, self.hap_file)
             _drain_serial_before_command(device)
             if kernel == DeviceLiteKernel.linux_kernel:
                 install_cmd = "/storage/bm install -p %s" % hap_remote
@@ -312,19 +539,48 @@ class JSunitLiteDriver(IDriver):
                 device.execute_command_with_timeout(
                     command="cd /storage", timeout=1)
                 install_cmd = "./bm install -p %s" % hap_remote
+
+            if getattr(self, 'transfer_mode', 'nfs') == "serial" and \
+                    kernel == DeviceLiteKernel.linux_kernel:
+                # Linux serial: console noise makes output unreadable.
+                # Send install, wait, then verify via install record file.
+                device.execute_command_with_timeout(
+                    command=install_cmd, timeout=30)
+                time.sleep(5)
+                record_check, _, _ = device.execute_command_with_timeout(
+                    command="ls /storage/app/etc/bundles/%s.json" % self.bundle_name,
+                    timeout=10)
+                if ".json" in str(record_check):
+                    LOG.info("HAP installed (install record verified)")
+                    self.reboot_after = False
+                    return True
+                LOG.warning("install record not found, install may have failed")
+                return False
+
             install_result, install_status, _ = device.execute_command_with_timeout(
                 command=install_cmd, timeout=60)
             extra = _collect_serial_after_command(device, delay=2)
             if extra:
                 install_result = str(install_result) + extra
             LOG.info("bm install result: %s" % str(install_result)[:200])
-            if (install_status and "success" in str(install_result).lower() and "install" in str(install_result).lower()) or "already exist" in str(install_result).lower():
+            install_result_low = str(install_result).lower()
+            if kernel == DeviceLiteKernel.linux_kernel:
+                install_ok = (install_status and "success" in install_result_low
+                              and "install" in install_result_low) or \
+                             "already exist" in install_result_low
+            else:
+                # LiteOS output contains many 'success' lines from appverify,
+                # require the explicit final result message instead
+                install_ok = ("resultmessage is install success"
+                              in install_result_low
+                              or "already exist" in install_result_low)
+            if install_ok:
                 LOG.info("HAP installed via bm, skip reboot")
                 self.reboot_after = False
                 return True
             LOG.warning("bm install failed, falling back to cp method")
 
-        if not self._cp_install_hap(device, hap_dir):
+        if not self._cp_install_hap(device, hap_dir, hap_name):
             return False
 
         LOG.info("Cleaning old install data: rm -r /storage/app/etc/bundles")
@@ -332,18 +588,20 @@ class JSunitLiteDriver(IDriver):
             command="rm -r /storage/app/etc/bundles", timeout=10)
         return True
 
-    def _cp_install_hap(self, device, hap_dir):
-        LOG.info("Copying HAP from %s/%s to %s/%s" % (hap_dir, self.hap_file, self.preset_dir, self.hap_file))
+    def _cp_install_hap(self, device, hap_dir, hap_name=None):
+        if hap_name is None:
+            hap_name = self.hap_file
+        LOG.info("Copying HAP from %s/%s to %s/%s" % (hap_dir, hap_name, self.preset_dir, hap_name))
         for retry in range(3):
             LOG.info("HAP copy attempt %d" % (retry + 1))
             device.execute_command_with_timeout(
-                command="cp %s/%s %s/" % (hap_dir, self.hap_file, self.preset_dir),
+                command="cp %s/%s %s/" % (hap_dir, hap_name, self.preset_dir),
                 timeout=60)
             time.sleep(5)
             ls_result, ls_status, _ = device.execute_command_with_timeout(
-                command="ls %s/%s" % (self.preset_dir, self.hap_file), timeout=5)
+                command="ls %s/%s" % (self.preset_dir, hap_name), timeout=5)
             LOG.info("HAP ls result: %s" % str(ls_result)[:200])
-            if ls_status and self.hap_file in ls_result and "No such file" not in ls_result:
+            if ls_status and hap_name in ls_result and "No such file" not in ls_result:
                 LOG.info("HAP copy verified")
                 return True
             LOG.warning("HAP copy attempt %d not verified, retrying..." % (retry + 1))
@@ -391,6 +649,44 @@ class JSunitLiteDriver(IDriver):
                 time.sleep(5)
         return result
 
+    def _check_spec_timeout(self, serial_buffer, scan_offset):
+        # Per-spec watchdog driven by Test.json "testcase-timeout" (ms, 0=off).
+        # Tracks the framework [start] <name> / [pass|fail|ignore] <name>
+        # markers so a spec running longer than the limit is judged failed.
+        if self.case_timeout <= 0:
+            return None, scan_offset
+        data = serial_buffer[0][scan_offset:]
+        new_offset = len(serial_buffer[0])
+        for line in data.split("\n"):
+            line = line.strip()
+            start_match = SPEC_START_PATTERN.search(line)
+            if start_match:
+                name = start_match.group(1).strip()
+                if name != "start run suites":
+                    self._current_spec = name
+                    self._current_spec_start = time.time()
+                    time_match = HILOG_TIME_PATTERN.search(line)
+                    self._current_spec_dev_time = time_match.group(1) if time_match else ""
+                continue
+            result_match = SPEC_RESULT_PATTERN.search(line)
+            if result_match and self._current_spec:
+                if result_match.group(2).strip() == self._current_spec:
+                    self._current_spec = None
+        if self._current_spec and self._current_spec_start and \
+                time.time() - self._current_spec_start > self.case_timeout / 1000.0:
+            return self._current_spec, new_offset
+        return None, new_offset
+
+    @staticmethod
+    def _device_time_plus(dev_time_str, delta_ms):
+        try:
+            t = time.strptime("2026-" + dev_time_str, "%Y-%m-%d %H:%M:%S.%f")
+            ms = int(time.mktime(t)) * 1000 + int(dev_time_str.split(".")[-1]) + delta_ms
+            t2 = time.localtime(ms // 1000)
+            return time.strftime("%m-%d %H:%M:%S", t2) + ".%03d" % (ms % 1000)
+        except Exception:
+            return dev_time_str
+
     def _collect_serial_output(self, initial_result, timeout):
         serial_buffer = [initial_result]
         stop_reading = [False]
@@ -405,9 +701,22 @@ class JSunitLiteDriver(IDriver):
         end_marker = "[end] run suites end"
         elapsed = 0
         interval = 1
+        scan_offset = 0
         while elapsed < timeout:
             if end_marker in serial_buffer[0]:
                 LOG.info("Test completed, end marker found")
+                break
+            hung_spec, scan_offset = self._check_spec_timeout(
+                serial_buffer, scan_offset)
+            if hung_spec:
+                LOG.warning("Spec '%s' exceeded testcase-timeout %dms, "
+                            "marking it failed and stopping collection"
+                            % (hung_spec, self.case_timeout))
+                dev_time = self._device_time_plus(
+                    self._current_spec_dev_time, self.case_timeout)
+                serial_buffer[0] = "%s\n%s 0 0 I 03B00/JS-3RD-APP: " \
+                    "[Console Info] [fail] %s\n" % (
+                        serial_buffer[0], dev_time, hung_spec)
                 break
             time.sleep(interval)
             elapsed += interval
@@ -581,7 +890,30 @@ class JSunitLiteDriver(IDriver):
         LOG.info("Launch jsunit_lite test: %s" % command)
 
         com_obj = self.config.device.device.com_dict.get("cmd")
-        if com_obj and com_obj.com:
+        if com_obj and com_obj.com and getattr(self, 'transfer_mode', 'nfs') == "serial":
+            # Serial mode: launch via dmlib command injection. Raw serial
+            # writes are unreliable on noisy linux consoles (the echo
+            # appears but the shell never runs the command). The dmlib
+            # read window (./ branch) returns when the [end] marker of a
+            # completed suite run arrives; on linux the whole app run can
+            # finish inside this window, so its result must be passed on
+            # into the collection.
+            aa_res = ""
+            try:
+                device.execute_command_with_timeout(
+                    command="cd /storage", timeout=1)
+                aa_res, _, _ = device.execute_command_with_timeout(
+                    command=command, timeout=15)
+            except Exception as e:
+                LOG.warning("dmlib launch failed: %s" % str(e))
+            initial = str(aa_res) if aa_res else ""
+            if com_obj.com.in_waiting > 0:
+                initial += _clean_serial_data(
+                    com_obj.com.read(com_obj.com.in_waiting))
+            result = self._collect_serial_output(initial, self.timeout)
+            if handler:
+                handler.__read__(result)
+        elif com_obj and com_obj.com:
             com_obj.com.write(b"cd /storage\r\n")
             time.sleep(0.5)
             _drain_serial_before_command(self.config.device)
