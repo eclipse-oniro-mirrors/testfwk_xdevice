@@ -74,11 +74,22 @@ class JSUnitParserLite(IParser):
         pattern = r"\[(pass|fail|ignore)\]"
         year = time.strftime("%Y")
         filter_message = message.split("[Console Info]")[1].strip()
-        end_time = "%s-%s" % \
-                   (year, re.match(self.pattern, message).group().strip())
-        start_time = "%s-%s" % \
-                     (year, re.match(self.pattern,
-                                     self.last_line.strip()).group().strip())
+        # noise-merged prompt guard: shell prompts or flood noise merged
+        # into a line destroy its leading timestamp; fall back gracefully
+        # instead of crashing the result-line parse (which drops that test).
+        end_match = re.match(self.pattern, message)
+        if end_match:
+            end_time = "%s-%s" % (year, end_match.group().strip())
+        else:
+            ts = re.search(self.pattern, message)
+            if not ts:
+                raise ValueError("no timestamp in result line")
+            end_time = "%s-%s" % (year, ts.group().strip())
+        last_match = re.match(self.pattern, self.last_line.strip())
+        if last_match:
+            start_time = "%s-%s" % (year, last_match.group().strip())
+        else:
+            start_time = end_time  # last line timestamp unreadable: run_time 0
         start_timestamp = int(time.mktime(
             time.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f"))) * 1000 + int(
             start_time.split(".")[-1])
