@@ -270,10 +270,10 @@ def generate_all_custom_summary_reports(report_path, suite_dir="", suite_executi
     if not report_path:
         return
 
-    # Merge execution times from parameters, Scheduler.suite_execution_times, and XML reports
+    # Merge execution times: XML (original report's pure execution time)
+    # takes priority; in-memory wall-clock and caller params serve as fallback
+    # for scenarios where XML is unavailable (e.g. subprocess, retry)
     merged_times = {}
-    parsed_xml_times = parse_execution_times_from_reports(report_path)
-    merged_times.update(parsed_xml_times)
 
     try:
         from _core.executor.scheduler import Scheduler
@@ -284,6 +284,11 @@ def generate_all_custom_summary_reports(report_path, suite_dir="", suite_executi
 
     if suite_execution_times:
         merged_times.update(suite_execution_times)
+
+    # XML times override: align with the original report's counting
+    # (pure module execution time, excluding kit setup / install overhead)
+    parsed_xml_times = parse_execution_times_from_reports(report_path)
+    merged_times.update(parsed_xml_times)
 
     whitelist_suites = UserConfigManager.load_prio_sched_suites(suite_dir)
     time_threshold = UserConfigManager.load_sched_config(suite_dir)

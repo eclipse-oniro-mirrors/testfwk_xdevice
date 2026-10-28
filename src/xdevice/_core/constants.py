@@ -331,7 +331,7 @@ class ConfigConst(object):
     tag_hdc = "hdc"
 
     # Ignore testcase path
-    ignore_testcases_path = "__pycache__|.git|.svn|.idea|.test"
+    ignore_testcases_path = "__pycache__|.git|.svn|.idea|.test|config"
 
     screenshot_on_failure = "screenshot_on_failure"
     report_plus = "report_plus"
