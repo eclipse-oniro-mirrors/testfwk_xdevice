@@ -168,7 +168,6 @@ class Scheduler(BaseScheduler):
         try:
             self.run_in_loop(task, run_func=self.run_dynamic_concurrent)
         finally:
-            self._do_taskkit_teardown(self.used_devices, [])
             Scheduler.__reset_environment__(self.used_devices)
 
     def _host_test_execute(self, task, ):

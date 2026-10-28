@@ -230,6 +230,24 @@ class DriversThread(threading.Thread):
         else:
             execute_message.set_state(ExecuteMessage.DEVICE_FINISH)
 
+        # tear down task kits on this environment's devices before freeing,
+        # so each module starts with a clean device state (no cross-module
+        # pollution from pushed files / installed HAPs / shell side effects)
+        if self.environment:
+            try:
+                for device in self.environment.devices:
+                    if getattr(device, ConfigConst.need_kit_setup, True):
+                        continue
+                    for kit in getattr(device, ConfigConst.task_kits, []):
+                        try:
+                            kit.__teardown__(device)
+                        except Exception as error:
+                            LOG.debug("Do task kit teardown: %s" % error)
+                    setattr(device, ConfigConst.task_kits, [])
+                    setattr(device, ConfigConst.need_kit_setup, True)
+            except Exception as error:
+                LOG.debug("Task kit teardown in handle_finally: %s" % error)
+
         # free environment
         if self.environment:
             LOG.debug("Thread %s free environment", execute_message.get_thread_name())
