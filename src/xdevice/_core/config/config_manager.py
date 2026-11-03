@@ -465,49 +465,6 @@ class UserConfigManager(object):
         value = int(self.taskargs.get("max_driver_threads"))
         return value if value > 0 else 8
 
-    @classmethod
-    def _find_suite_config_file(cls, suite_dir, filename):
-        candidate_paths = []
-        if suite_dir:
-            if os.path.isfile(suite_dir):
-                if os.path.basename(suite_dir) == filename:
-                    return os.path.abspath(suite_dir)
-                dir_name = os.path.dirname(suite_dir)
-            else:
-                dir_name = suite_dir
-            candidate_paths.extend([
-                os.path.join(dir_name, "testcases", "config", filename),
-                os.path.join(dir_name, "config", filename),
-                os.path.join(dir_name, filename),
-            ])
-        try:
-            from xdevice import Variables
-            if hasattr(Variables, "config") and Variables.config:
-                tc_dir = Variables.config.get_testcases_dir()
-                if tc_dir:
-                    candidate_paths.extend([
-                        os.path.join(tc_dir, "config", filename),
-                        os.path.join(os.path.dirname(tc_dir), "testcases", "config", filename),
-                        os.path.join(tc_dir, filename),
-                    ])
-            if getattr(Variables, "exec_dir", ""):
-                candidate_paths.extend([
-                    os.path.join(Variables.exec_dir, "testcases", "config", filename),
-                    os.path.join(Variables.exec_dir, "config", filename),
-                ])
-            if getattr(Variables, "top_dir", ""):
-                candidate_paths.extend([
-                    os.path.join(Variables.top_dir, "testcases", "config", filename),
-                    os.path.join(Variables.top_dir, "config", filename),
-                ])
-        except Exception as e:
-            LOG.debug("Error retrieving candidate paths from Variables: %s" % e)
-
-        for path in candidate_paths:
-            if os.path.isfile(path):
-                return os.path.abspath(path)
-        return ""
-
     def get_time_threshold(self):
         """Read time_threshold (seconds) from user_config.xml <taskargs>.
         Returns int > 0, or None when not configured or invalid."""
@@ -520,56 +477,6 @@ class UserConfigManager(object):
                         % self.taskargs.get("time_threshold"))
             return None
         return value if value > 0 else None
-
-    @classmethod
-    def load_prio_sched_suites(cls, suite_dir=""):
-        """
-        Load prioritized scheduling suites from testcases/prio_sched_suites.json.
-        Format: [{"module_name": "suiteA", "duration": 7200}, ...]
-        Returns an ordered dict {module_name: duration_seconds}.
-        Returns {} safely on missing file, corrupted JSON, or invalid format.
-        Duplicate module_name keeps the first occurrence with a warning.
-        Invalid duration (non-int / negative) entries are skipped with a warning.
-        """
-        file_path = cls._find_suite_config_file(suite_dir, "prio_sched_suites.json")
-        if not file_path or not os.path.exists(file_path):
-            LOG.debug("prio_sched_suites.json not found")
-            return {}
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, list):
-                LOG.warning("prio_sched_suites.json content is not a list")
-                return {}
-            suites = {}
-            for item in data:
-                if not isinstance(item, dict) or not item:
-                    continue
-                name = str(item.get("module_name", "") or "").strip()
-                duration = item.get("duration", None)
-                if not name:
-                    LOG.warning("Missing module_name in prio_sched_suites.json entry: %s"
-                                % item)
-                    continue
-                if name in suites:
-                    LOG.warning("Duplicate module %s in prio_sched_suites.json, "
-                                "keep the first occurrence" % name)
-                    continue
-                try:
-                    duration_int = int(duration)
-                except (ValueError, TypeError):
-                    LOG.warning("Invalid duration for module %s: %s"
-                                % (name, duration))
-                    continue
-                if duration_int < 0:
-                    LOG.warning("Negative duration for module %s: %s"
-                                % (name, duration))
-                    continue
-                suites[name] = duration_int
-            return suites
-        except Exception as e:
-            LOG.warning("Failed to load prio_sched_suites.json: %s" % e)
-            return {}
 
 
 ConfigManager = UserConfigManager

@@ -20,7 +20,7 @@ import html
 import os
 from xml.etree import ElementTree
 from _core.logger import platform_logger
-from _core.config.config_manager import UserConfigManager
+from _core.executor.source import load_prio_sched_suites
 
 LOG = platform_logger("CustomSummaryReporter")
 
@@ -304,7 +304,7 @@ def generate_all_custom_summary_reports(report_path, suite_dir="",
     merged_times.update(parsed_xml_times)
 
     # Load all configured modules with durations
-    all_suites = UserConfigManager.load_prio_sched_suites(suite_dir)
+    all_suites = load_prio_sched_suites(suite_dir)
 
     # Long-task set: duration >= threshold, sorted by duration descending
     # (this order matches the actual dispatch order of LongTaskFirstPolicy)
