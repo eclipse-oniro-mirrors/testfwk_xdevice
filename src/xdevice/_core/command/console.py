@@ -407,7 +407,7 @@ class Console(object):
                                 type=str,
                                 default="default",
                                 help="Select different scheduling schemes. "
-                                     "--scheduler module / --scheduler prio")
+                                     "--scheduler module / --scheduler long_task_first")
 
             self._params_pre_processing(para_list)
             (options, unparsed) = parser.parse_known_args(para_list)

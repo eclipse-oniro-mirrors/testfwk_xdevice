@@ -24,7 +24,7 @@ from _core.logger import platform_logger
 LOG = platform_logger("LongTaskFirstPolicy")
 
 
-@register_policy("prio")
+@register_policy("long_task_first")
 class LongTaskFirstPolicy(ISchedulingPolicy, IReportablePolicy):
     """Long-task-first scheduling policy (LPT: Longest Processing Time first).
 
