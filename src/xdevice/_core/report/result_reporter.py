@@ -146,7 +146,7 @@ class ResultReporter(IReporter):
 
             # generate independent custom summary reports before copying,
             # so they are included in the reports/latest snapshot
-            self._generate_custom_summary_reports()
+            self._generate_custom_summary_reports(kwargs.get("task"))
 
             # copy reports to reports/latest folder
             self._copy_report()
@@ -158,13 +158,13 @@ class ResultReporter(IReporter):
         LOG.info("")
         show_current_environment()
 
-    def _generate_custom_summary_reports(self):
+    def _generate_custom_summary_reports(self, task=None):
         try:
-            from _core.report.custom_summary_reporter import generate_all_custom_summary_reports
-            from _core.executor.scheduler import Scheduler
-            generate_all_custom_summary_reports(
-                self.report_path,
-                suite_dir=getattr(Scheduler, "task_testcases_dir", ""))
+            from _core.executor.policy import IReportablePolicy
+            policy = getattr(task, "sched_policy", None)
+            if not isinstance(policy, IReportablePolicy):
+                return
+            policy.generate_reports(self.report_path, task=task)
         except Exception as e:
             LOG.warning("Failed to generate custom summary reports: %s" % e)
 

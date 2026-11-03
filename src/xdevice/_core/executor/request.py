@@ -72,6 +72,7 @@ class Task:
         self.root = root
         self.test_drivers = drivers or []
         self.config = config or Config()
+        self.sched_policy = None
 
     def init(self, config):
         from xdevice import Variables
