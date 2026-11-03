@@ -98,38 +98,26 @@ class Scheduler(BaseScheduler):
         with cls._times_lock:
             cls.suite_execution_times[suite_name] = round(float(duration_seconds), 2)
 
-    def _prioritize_test_drivers(self, task):
-        from _core.config.config_manager import UserConfigManager
-        testcases_dir = getattr(task.config, ConfigConst.testcases_path, "")
-        whitelist = UserConfigManager.load_prio_sched_suites(testcases_dir)
-        if not whitelist or not getattr(task, "test_drivers", None):
+    def _apply_scheduling_policy(self, task):
+        """Create scheduling policy via factory and reorder test drivers.
+        Unknown or unconfigured policy names fall back to FIFO with a warning.
+        Policy instance is bound to the task (task.sched_policy) so reports
+        can gate on it later in the pipeline."""
+        from _core.executor.policy import create_policy
+        from _core.constants import SchedulerType
+        name = str(getattr(task.config, ConfigConst.scheduler, "") or "")
+        policy = create_policy(name)
+        task.sched_policy = policy
+        if policy is None:
+            if name and name not in ("default", SchedulerType.module,
+                                     SchedulerType.synchronize):
+                LOG.warning("Unknown scheduler policy '%s', fallback to FIFO",
+                            name)
             return
-        whitelist_names = list(dict.fromkeys(item[0] for item in whitelist))
-
-        whitelist_map = {name: [] for name in whitelist_names}
-        other_drivers = []
-
-        for driver in task.test_drivers:
-            module_name = ""
-            if len(driver) > 1 and hasattr(driver[1], "source"):
-                module_name = getattr(driver[1].source, "module_name", "") or getattr(driver[1].source, "test_name", "")
-            if not module_name and len(driver) > 1:
-                module_name = getattr(driver[1], "name", "")
-
-            if module_name in whitelist_map:
-                whitelist_map[module_name].append(driver)
-            else:
-                other_drivers.append(driver)
-
-        prioritized = []
-        for name in whitelist_names:
-            prioritized.extend(whitelist_map[name])
-        prioritized.extend(other_drivers)
-
-        task.test_drivers = prioritized
+        if not getattr(task, "test_drivers", None):
+            return
+        task.test_drivers = policy.sort_test_drivers(task.test_drivers)
         self.test_number = len(task.test_drivers)
-        LOG.info("Whitelist prioritized %d suites to front of execution queue",
-                 len(task.test_drivers) - len(other_drivers))
 
     def _do_execute_(self, task):
         Scheduler.used_devices.clear()
@@ -137,7 +125,7 @@ class Scheduler(BaseScheduler):
             task.config, ConfigConst.testcases_path, "")
         with Scheduler._times_lock:
             Scheduler.suite_execution_times.clear()
-        self._prioritize_test_drivers(task)
+        self._apply_scheduling_policy(task)
         if task.config.exectype == TestExecType.device_test:
             self._device_test_execute(task)
         elif task.config.exectype == TestExecType.host_test:

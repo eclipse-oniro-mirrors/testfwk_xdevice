@@ -220,8 +220,11 @@ class BaseScheduler(Sub, ABC):
     @staticmethod
     def _get_sched_event():
         try:
-            from _core.executor.scheduler import Scheduler
-            return Scheduler.sched_event
+            from _core.context.center import Context
+            scheduler = Context.get_scheduler()
+            if scheduler:
+                return scheduler.sched_event
+            return None
         except Exception as error:
             LOG.debug("Get sched event failed: %s" % error)
             return None

@@ -234,8 +234,9 @@ class DriversThread(threading.Thread):
             module_name = getattr(test.source, "module_name", "") or getattr(test.source, "test_name", "")
             if module_name:
                 try:
-                    from _core.executor.scheduler import Scheduler
-                    Scheduler.record_suite_time(module_name, duration)
+                    scheduler = Context.get_scheduler()
+                    if scheduler:
+                        scheduler.record_suite_time(module_name, duration)
                 except Exception as e:
                     LOG.debug("Record suite time error: %s" % e)
 
@@ -673,8 +674,10 @@ class DriversDryRunThread(threading.Thread):
 
 def _get_sched_event():
     try:
-        from _core.executor.scheduler import Scheduler
-        return Scheduler.sched_event
+        scheduler = Context.get_scheduler()
+        if scheduler:
+            return scheduler.sched_event
+        return None
     except Exception as error:
         LOG.debug("Get sched event failed: %s" % error)
         return None

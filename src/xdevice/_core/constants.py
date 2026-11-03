@@ -359,6 +359,7 @@ class ConfigConst(object):
         kill_uitest = "kill_uitest"
         max_log_line_in_html = "max_log_line_in_html"
         max_driver_threads = "max_driver_threads"
+        time_threshold = "time_threshold"
         pass_through = "pass_through"
         repeat = "repeat"
         screenrecorder = "screenrecorder"

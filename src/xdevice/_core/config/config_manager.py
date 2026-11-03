@@ -508,75 +508,68 @@ class UserConfigManager(object):
                 return os.path.abspath(path)
         return ""
 
+    def get_time_threshold(self):
+        """Read time_threshold (seconds) from user_config.xml <taskargs>.
+        Returns int > 0, or None when not configured or invalid."""
+        if not self.taskargs or not self.taskargs.get("time_threshold"):
+            return None
+        try:
+            value = int(self.taskargs.get("time_threshold"))
+        except (ValueError, TypeError):
+            LOG.warning("Invalid time_threshold in user_config.xml: %s"
+                        % self.taskargs.get("time_threshold"))
+            return None
+        return value if value > 0 else None
+
     @classmethod
     def load_prio_sched_suites(cls, suite_dir=""):
         """
-        Load prioritized scheduling suites whitelist from testcases/config/prio_sched_suites.json.
-        Format: [{"suite_name": duration}, ...]
-        Returns a list of tuples: [(suite_name, duration_seconds), ...]
-        Returns [] safely on missing file, corrupted JSON, or invalid format.
+        Load prioritized scheduling suites from testcases/prio_sched_suites.json.
+        Format: [{"module_name": "suiteA", "duration": 7200}, ...]
+        Returns an ordered dict {module_name: duration_seconds}.
+        Returns {} safely on missing file, corrupted JSON, or invalid format.
+        Duplicate module_name keeps the first occurrence with a warning.
+        Invalid duration (non-int / negative) entries are skipped with a warning.
         """
         file_path = cls._find_suite_config_file(suite_dir, "prio_sched_suites.json")
         if not file_path or not os.path.exists(file_path):
             LOG.debug("prio_sched_suites.json not found")
-            return []
+            return {}
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 LOG.warning("prio_sched_suites.json content is not a list")
-                return []
-            suites = []
-            seen_names = set()
+                return {}
+            suites = {}
             for item in data:
                 if not isinstance(item, dict) or not item:
                     continue
-                for suite_name, duration in item.items():
-                    try:
-                        duration_int = int(duration)
-                        if duration_int >= 0:
-                            name = str(suite_name).strip()
-                            if name in seen_names:
-                                LOG.warning("Duplicate suite %s in prio_sched_suites.json, "
-                                            "keep the first occurrence" % name)
-                                continue
-                            seen_names.add(name)
-                            suites.append((name, duration_int))
-                    except (ValueError, TypeError):
-                        LOG.warning("Invalid duration for suite %s: %s" % (suite_name, duration))
+                name = str(item.get("module_name", "") or "").strip()
+                duration = item.get("duration", None)
+                if not name:
+                    LOG.warning("Missing module_name in prio_sched_suites.json entry: %s"
+                                % item)
+                    continue
+                if name in suites:
+                    LOG.warning("Duplicate module %s in prio_sched_suites.json, "
+                                "keep the first occurrence" % name)
+                    continue
+                try:
+                    duration_int = int(duration)
+                except (ValueError, TypeError):
+                    LOG.warning("Invalid duration for module %s: %s"
+                                % (name, duration))
+                    continue
+                if duration_int < 0:
+                    LOG.warning("Negative duration for module %s: %s"
+                                % (name, duration))
+                    continue
+                suites[name] = duration_int
             return suites
         except Exception as e:
             LOG.warning("Failed to load prio_sched_suites.json: %s" % e)
-            return []
-
-    @classmethod
-    def load_sched_config(cls, suite_dir=""):
-        """
-        Load universal schedule configuration from testcases/config/sched_config.json.
-        Format: {"time_threshold": 3600}
-        Returns integer time_threshold in seconds, or None on missing/invalid config.
-        """
-        file_path = cls._find_suite_config_file(suite_dir, "sched_config.json")
-        if not file_path or not os.path.exists(file_path):
-            LOG.debug("sched_config.json not found")
-            return None
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                LOG.warning("sched_config.json content is not a dict")
-                return None
-            if "time_threshold" not in data:
-                LOG.warning("time_threshold not found in sched_config.json")
-                return None
-            threshold = int(data["time_threshold"])
-            if threshold <= 0:
-                LOG.warning("Invalid time_threshold: %s" % threshold)
-                return None
-            return threshold
-        except Exception as e:
-            LOG.warning("Failed to load sched_config.json: %s" % e)
-            return None
+            return {}
 
 
 ConfigManager = UserConfigManager

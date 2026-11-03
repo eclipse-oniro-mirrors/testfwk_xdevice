@@ -137,29 +137,29 @@ def parse_execution_times_from_reports(report_path):
     return execution_times
 
 
-def generate_prio_sched_suites_report(report_path, whitelist_suites, suite_execution_times):
+def generate_prio_sched_suites_report(report_path, long_task_suites, suite_execution_times):
     """
-    Generate prio_sched_suites_report.html.
+    Generate prio_sched_suites_report.html (long-task-first dispatch report).
     Columns (exact 5 columns in order):
-    1. 白名单排位
+    1. 调度排位
     2. 测试套名称
-    3. 白名单配置时长
+    3. 预估时长
     4. 实际执行时长
     5. 执行时长排位
-    Displayed in order of whitelist ranking.
+    Displayed in dispatch order (duration descending among long tasks).
     Unexecuted suites show NULL for actual time and are excluded from ranking.
     """
-    if not whitelist_suites:
+    if not long_task_suites:
         return ""
 
-    headers = ["白名单排位", "测试套名称", "白名单配置时长", "实际执行时长", "执行时长排位"]
+    headers = ["调度排位", "测试套名称", "预估时长", "实际执行时长", "执行时长排位"]
 
     # 1. Gather all suites with their actual times (None means not executed)
     suite_data = []
-    for rank, (name, config_time) in enumerate(whitelist_suites, 1):
+    for rank, (name, config_time) in enumerate(long_task_suites, 1):
         actual_time = suite_execution_times.get(name)
         suite_data.append({
-            "whitelist_rank": rank,
+            "dispatch_rank": rank,
             "name": name,
             "config_time": config_time,
             "actual_time": actual_time,
@@ -173,7 +173,7 @@ def generate_prio_sched_suites_report(report_path, whitelist_suites, suite_execu
     for exec_rank, item in enumerate(sorted_by_duration, 1):
         item["exec_rank"] = exec_rank
 
-    # 3. Format table rows in whitelist order
+    # 3. Format table rows in dispatch order
     rows_html_list = []
     for item in suite_data:
         if item["actual_time"] is None:
@@ -186,7 +186,7 @@ def generate_prio_sched_suites_report(report_path, whitelist_suites, suite_execu
         exec_rank_str = "NULL" if item["exec_rank"] is None else str(item["exec_rank"])
         row_html = (
             f"<tr>"
-            f"<td>{item['whitelist_rank']}</td>"
+            f"<td>{item['dispatch_rank']}</td>"
             f"<td>{html.escape(str(item['name']))}</td>"
             f"<td>{config_str}</td>"
             f"<td>{actual_str}</td>"
@@ -196,7 +196,7 @@ def generate_prio_sched_suites_report(report_path, whitelist_suites, suite_execu
         rows_html_list.append(row_html)
 
     html_content = _get_html_template(
-        title="白名单执行情况汇总报告",
+        title="长任务优先调度执行报告",
         table_headers=headers,
         table_rows_html="\n                ".join(rows_html_list)
     )
@@ -209,23 +209,23 @@ def generate_prio_sched_suites_report(report_path, whitelist_suites, suite_execu
     return out_file
 
 
-def generate_tle_suites_report(report_path, time_threshold, whitelist_names, suite_execution_times):
+def generate_tle_suites_report(report_path, time_threshold, long_task_names, suite_execution_times):
     """
     Generate tle_suites_report.html.
     Columns (exact 2 columns):
     1. 测试套名称
     2. 执行时长
-    Lists non-whitelist suites exceeding time_threshold, sorted descending by actual execution time.
+    Lists non-long-task suites exceeding time_threshold, sorted descending by actual execution time.
     """
     if time_threshold is None or time_threshold <= 0:
         return ""
 
     headers = ["测试套名称", "执行时长"]
-    whitelist_set = set(whitelist_names or [])
+    long_task_set = set(long_task_names or [])
 
     overtime_suites = []
     for name, actual_time in suite_execution_times.items():
-        if name in whitelist_set:
+        if name in long_task_set:
             continue
         if actual_time > time_threshold:
             overtime_suites.append({"name": name, "actual_time": actual_time})
@@ -248,7 +248,7 @@ def generate_tle_suites_report(report_path, time_threshold, whitelist_names, sui
         title="超时测试套执行汇总报告",
         table_headers=headers,
         table_rows_html="\n                ".join(rows_html_list),
-        empty_message="无超时（非白名单）测试套件"
+        empty_message="无超时（非长任务）测试套件"
     )
 
     out_file = os.path.join(report_path, TLE_REPORT_NAME)
@@ -259,15 +259,27 @@ def generate_tle_suites_report(report_path, time_threshold, whitelist_names, sui
     return out_file
 
 
-def generate_all_custom_summary_reports(report_path, suite_dir="", suite_execution_times=None):
+def generate_all_custom_summary_reports(report_path, suite_dir="",
+                                       suite_execution_times=None):
     """
-    Load configurations and generate independent summary reports accordingly.
-    - If prio_sched_suites.json is valid: generate prio_sched_suites_report.html.
-    - If sched_config.json (time_threshold) is valid: generate tle_suites_report.html.
-    - If either is missing/invalid: do not generate that report.
+    Generate independent summary reports for the long-task-first scheduling
+    policy. Only called when the active policy implements IReportablePolicy.
+
+    - Long-task set: modules in prio_sched_suites.json with duration >=
+      time_threshold (from user_config.xml <taskargs>), sorted by duration
+      descending → prio_sched_suites_report.html (report order = dispatch order).
+    - TLE report: modules NOT in the long-task set whose actual time exceeds
+      time_threshold, sorted descending → tle_suites_report.html.
+    - If either configuration is missing/invalid, that report is not generated.
     - Original test reports remain completely untouched.
     """
     if not report_path:
+        return
+
+    from xdevice import Variables
+    time_threshold = Variables.config.get_time_threshold()
+    if time_threshold is None:
+        LOG.debug("time_threshold not configured; skipping both reports")
         return
 
     # Merge execution times: XML (original report's pure execution time)
@@ -276,9 +288,10 @@ def generate_all_custom_summary_reports(report_path, suite_dir="", suite_executi
     merged_times = {}
 
     try:
-        from _core.executor.scheduler import Scheduler
-        if hasattr(Scheduler, "suite_execution_times") and Scheduler.suite_execution_times:
-            merged_times.update(Scheduler.suite_execution_times)
+        from _core.context.center import Context
+        scheduler = Context.get_scheduler()
+        if scheduler and getattr(scheduler, "suite_execution_times", None):
+            merged_times.update(scheduler.suite_execution_times)
     except Exception as e:
         LOG.debug("Scheduler suite_execution_times not available: %s" % e)
 
@@ -290,18 +303,25 @@ def generate_all_custom_summary_reports(report_path, suite_dir="", suite_executi
     parsed_xml_times = parse_execution_times_from_reports(report_path)
     merged_times.update(parsed_xml_times)
 
-    whitelist_suites = UserConfigManager.load_prio_sched_suites(suite_dir)
-    time_threshold = UserConfigManager.load_sched_config(suite_dir)
+    # Load all configured modules with durations
+    all_suites = UserConfigManager.load_prio_sched_suites(suite_dir)
 
-    # 1. Whitelist report
-    if whitelist_suites:
-        generate_prio_sched_suites_report(report_path, whitelist_suites, merged_times)
-    else:
-        LOG.debug("prio_sched_suites.json is missing or invalid; skipping %s", PRIO_SCHED_REPORT_NAME)
+    # Long-task set: duration >= threshold, sorted by duration descending
+    # (this order matches the actual dispatch order of LongTaskFirstPolicy)
+    long_task_suites = [
+        (name, duration) for name, duration in all_suites.items()
+        if isinstance(duration, int) and duration >= time_threshold
+    ]
 
-    # 2. TLE report
-    if time_threshold is not None and time_threshold > 0:
-        whitelist_names = [s[0] for s in whitelist_suites] if whitelist_suites else []
-        generate_tle_suites_report(report_path, time_threshold, whitelist_names, merged_times)
+    # 1. Long-task-first dispatch report
+    if long_task_suites:
+        generate_prio_sched_suites_report(report_path, long_task_suites,
+                                          merged_times)
     else:
-        LOG.debug("sched_config.json is missing or invalid; skipping %s", TLE_REPORT_NAME)
+        LOG.debug("No long-task suites (duration >= %ds); skipping %s",
+                  time_threshold, PRIO_SCHED_REPORT_NAME)
+
+    # 2. TLE report: non-long-task modules whose actual time exceeds threshold
+    long_task_names = set(name for name, _ in long_task_suites)
+    generate_tle_suites_report(report_path, time_threshold, long_task_names,
+                                merged_times)
