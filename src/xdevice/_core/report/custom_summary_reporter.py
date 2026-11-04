@@ -20,15 +20,15 @@ import html
 import os
 from xml.etree import ElementTree
 from _core.logger import platform_logger
-from _core.executor.source import load_prio_sched_suites
+from _core.executor.source import load_prio_sched_modules
 
 LOG = platform_logger("CustomSummaryReporter")
 
-PRIO_SCHED_REPORT_NAME = "prio_sched_suites_report.html"
-TLE_REPORT_NAME = "tle_suites_report.html"
+PRIO_SCHED_REPORT_NAME = "prio_sched_modules_report.html"
+TLE_REPORT_NAME = "tle_modules_report.html"
 
 
-def _get_html_template(title, table_headers, table_rows_html, empty_message="暂无数据"):
+def _get_html_template(title, table_headers, table_rows_html, empty_message="None"):
     headers_html = "".join([f"<th>{h}</th>" for h in table_headers])
     if not table_rows_html:
         content_html = f"<tr><td colspan='{len(table_headers)}' class='empty-tip'>{empty_message}</td></tr>"
@@ -137,28 +137,28 @@ def parse_execution_times_from_reports(report_path):
     return execution_times
 
 
-def generate_prio_sched_suites_report(report_path, long_task_suites, suite_execution_times):
+def generate_prio_sched_modules_report(report_path, long_task_modules, suite_execution_times):
     """
-    Generate prio_sched_suites_report.html (long-task-first dispatch report).
+    Generate prio_sched_modules_report.html (long-task-first dispatch report).
     Columns (exact 5 columns in order):
-    1. 调度排位
-    2. 测试套名称
-    3. 预估时长
-    4. 实际执行时长
-    5. 执行时长排位
+    1. Dispatch Order
+    2. Module
+    3. Estimated Time
+    4. Actual Time
+    5. Time Order (Desc)
     Displayed in dispatch order (duration descending among long tasks).
-    Unexecuted suites show NULL for actual time and are excluded from ranking.
+    Unexecuted modules show NULL for actual time and are excluded from ranking.
     """
-    if not long_task_suites:
+    if not long_task_modules:
         return ""
 
-    headers = ["调度排位", "测试套名称", "预估时长", "实际执行时长", "执行时长排位"]
+    headers = ["Dispatch Order", "Module", "Estimated Time(s)", "Actual Time(s)", "Time Order (Desc)"]
 
-    # 1. Gather all suites with their actual times (None means not executed)
-    suite_data = []
-    for rank, (name, config_time) in enumerate(long_task_suites, 1):
+    # 1. Gather all modules with their actual times (None means not executed)
+    module_data = []
+    for rank, (name, config_time) in enumerate(long_task_modules, 1):
         actual_time = suite_execution_times.get(name)
-        suite_data.append({
+        module_data.append({
             "dispatch_rank": rank,
             "name": name,
             "config_time": config_time,
@@ -167,22 +167,22 @@ def generate_prio_sched_suites_report(report_path, long_task_suites, suite_execu
         })
 
     # 2. Compute execution time ranking (descending: longest duration is rank 1),
-    #    only executed suites participate in ranking
-    executed_suites = [item for item in suite_data if item["actual_time"] is not None]
-    sorted_by_duration = sorted(executed_suites, key=lambda x: x["actual_time"], reverse=True)
+    #    only executed modules participate in ranking
+    executed_modules = [item for item in module_data if item["actual_time"] is not None]
+    sorted_by_duration = sorted(executed_modules, key=lambda x: x["actual_time"], reverse=True)
     for exec_rank, item in enumerate(sorted_by_duration, 1):
         item["exec_rank"] = exec_rank
 
     # 3. Format table rows in dispatch order
     rows_html_list = []
-    for item in suite_data:
+    for item in module_data:
         if item["actual_time"] is None:
             actual_str = "NULL"
         elif isinstance(item["actual_time"], float):
-            actual_str = f"{item['actual_time']}s"
+            actual_str = f"{item['actual_time']}"
         else:
             actual_str = f"{item['actual_time']}"
-        config_str = f"{item['config_time']}s" if isinstance(item['config_time'], (int, float)) else f"{item['config_time']}"
+        config_str = f"{item['config_time']}" if isinstance(item['config_time'], (int, float)) else f"{item['config_time']}"
         exec_rank_str = "NULL" if item["exec_rank"] is None else str(item["exec_rank"])
         row_html = (
             f"<tr>"
@@ -196,7 +196,7 @@ def generate_prio_sched_suites_report(report_path, long_task_suites, suite_execu
         rows_html_list.append(row_html)
 
     html_content = _get_html_template(
-        title="长任务优先调度执行报告",
+        title="Whitelist Module Dispatch Details",
         table_headers=headers,
         table_rows_html="\n                ".join(rows_html_list)
     )
@@ -205,37 +205,37 @@ def generate_prio_sched_suites_report(report_path, long_task_suites, suite_execu
     os.makedirs(report_path, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(html_content)
-    LOG.info("Generated prio sched suites report: %s", out_file)
+    LOG.info("Generated prio sched modules report: %s", out_file)
     return out_file
 
 
-def generate_tle_suites_report(report_path, time_threshold, long_task_names, suite_execution_times):
+def generate_tle_modules_report(report_path, time_threshold, long_task_names, suite_execution_times):
     """
-    Generate tle_suites_report.html.
+    Generate tle_modules_report.html.
     Columns (exact 2 columns):
-    1. 测试套名称
-    2. 执行时长
-    Lists non-long-task suites exceeding time_threshold, sorted descending by actual execution time.
+    1. Module
+    2. Time(s)
+    Lists non-long-task modules exceeding time_threshold, sorted descending by actual execution time.
     """
     if time_threshold is None or time_threshold <= 0:
         return ""
 
-    headers = ["测试套名称", "执行时长"]
+    headers = ["Module", "Time(s)"]
     long_task_set = set(long_task_names or [])
 
-    overtime_suites = []
+    overtime_modules = []
     for name, actual_time in suite_execution_times.items():
         if name in long_task_set:
             continue
         if actual_time > time_threshold:
-            overtime_suites.append({"name": name, "actual_time": actual_time})
+            overtime_modules.append({"name": name, "actual_time": actual_time})
 
     # Sort descending by actual execution time
-    overtime_suites.sort(key=lambda x: x["actual_time"], reverse=True)
+    overtime_modules.sort(key=lambda x: x["actual_time"], reverse=True)
 
     rows_html_list = []
-    for item in overtime_suites:
-        actual_str = f"{item['actual_time']}s" if isinstance(item['actual_time'], float) else f"{item['actual_time']}"
+    for item in overtime_modules:
+        actual_str = f"{item['actual_time']}" if isinstance(item['actual_time'], float) else f"{item['actual_time']}"
         row_html = (
             f"<tr>"
             f"<td>{html.escape(str(item['name']))}</td>"
@@ -245,17 +245,17 @@ def generate_tle_suites_report(report_path, time_threshold, long_task_names, sui
         rows_html_list.append(row_html)
 
     html_content = _get_html_template(
-        title="超时测试套执行汇总报告",
+        title="Time Limit Exceeded Modules",
         table_headers=headers,
         table_rows_html="\n                ".join(rows_html_list),
-        empty_message="无超时（非长任务）测试套件"
+        empty_message="None"
     )
 
     out_file = os.path.join(report_path, TLE_REPORT_NAME)
     os.makedirs(report_path, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(html_content)
-    LOG.info("Generated TLE suites report: %s", out_file)
+    LOG.info("Generated TLE modules report: %s", out_file)
     return out_file
 
 
@@ -265,11 +265,11 @@ def generate_all_custom_summary_reports(report_path, suite_dir="",
     Generate independent summary reports for the long-task-first scheduling
     policy. Only called when the active policy implements IReportablePolicy.
 
-    - Long-task set: modules in prio_sched_suites.json with duration >=
+    - Long-task set: modules in prio_sched_modules.json with duration >=
       time_threshold (from user_config.xml <taskargs>), sorted by duration
-      descending → prio_sched_suites_report.html (report order = dispatch order).
+      descending → prio_sched_modules_report.html (report order = dispatch order).
     - TLE report: modules NOT in the long-task set whose actual time exceeds
-      time_threshold, sorted descending → tle_suites_report.html.
+      time_threshold, sorted descending → tle_modules_report.html.
     - If either configuration is missing/invalid, that report is not generated.
     - Original test reports remain completely untouched.
     """
@@ -304,24 +304,24 @@ def generate_all_custom_summary_reports(report_path, suite_dir="",
     merged_times.update(parsed_xml_times)
 
     # Load all configured modules with durations
-    all_suites = load_prio_sched_suites(suite_dir)
+    all_modules = load_prio_sched_modules(suite_dir)
 
     # Long-task set: duration >= threshold, sorted by duration descending
     # (this order matches the actual dispatch order of LongTaskFirstPolicy)
-    long_task_suites = [
-        (name, duration) for name, duration in all_suites.items()
+    long_task_modules = [
+        (name, duration) for name, duration in all_modules.items()
         if isinstance(duration, int) and duration >= time_threshold
     ]
 
     # 1. Long-task-first dispatch report
-    if long_task_suites:
-        generate_prio_sched_suites_report(report_path, long_task_suites,
+    if long_task_modules:
+        generate_prio_sched_modules_report(report_path, long_task_modules,
                                           merged_times)
     else:
-        LOG.debug("No long-task suites (duration >= %ds); skipping %s",
+        LOG.debug("No long-task modules (duration >= %ds); skipping %s",
                   time_threshold, PRIO_SCHED_REPORT_NAME)
 
     # 2. TLE report: non-long-task modules whose actual time exceeds threshold
-    long_task_names = set(name for name, _ in long_task_suites)
-    generate_tle_suites_report(report_path, time_threshold, long_task_names,
+    long_task_names = set(name for name, _ in long_task_modules)
+    generate_tle_modules_report(report_path, time_threshold, long_task_names,
                                 merged_times)
