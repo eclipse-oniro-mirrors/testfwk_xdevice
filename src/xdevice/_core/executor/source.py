@@ -240,7 +240,7 @@ def _get_test_sources(config, testcases_dirs):
     return test_sources
 
 
-IGNORE_TEST_FILE_NAMES = frozenset(["prio_sched_suites.json"])
+IGNORE_TEST_FILE_NAMES = frozenset(["prio_sched_modules.json"])
 
 
 def _append_module_test_source(testcases_path, test_sources):
@@ -398,37 +398,37 @@ def _find_suite_config_file(suite_dir, filename):
     return ""
 
 
-def load_prio_sched_suites(suite_dir=""):
+def load_prio_sched_modules(suite_dir=""):
     """
-    Load prioritized scheduling suites from testcases/prio_sched_suites.json.
+    Load prioritized scheduling modules from testcases/prio_sched_modules.json.
     Format: [{"module_name": "suiteA", "duration": 7200}, ...]
     Returns an ordered dict {module_name: duration_seconds}.
     Returns {} safely on missing file, corrupted JSON, or invalid format.
     Duplicate module_name keeps the first occurrence with a warning.
     Invalid duration (non-int / negative) entries are skipped with a warning.
     """
-    file_path = _find_suite_config_file(suite_dir, "prio_sched_suites.json")
+    file_path = _find_suite_config_file(suite_dir, "prio_sched_modules.json")
     if not file_path or not os.path.exists(file_path):
-        LOG.debug("prio_sched_suites.json not found")
+        LOG.debug("prio_sched_modules.json not found")
         return {}
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, list):
-            LOG.warning("prio_sched_suites.json content is not a list")
+            LOG.warning("prio_sched_modules.json content is not a list")
             return {}
-        suites = {}
+        modules = {}
         for item in data:
             if not isinstance(item, dict) or not item:
                 continue
             name = str(item.get("module_name", "") or "").strip()
             duration = item.get("duration", None)
             if not name:
-                LOG.warning("Missing module_name in prio_sched_suites.json entry: %s"
+                LOG.warning("Missing module_name in prio_sched_modules.json entry: %s"
                             % item)
                 continue
-            if name in suites:
-                LOG.warning("Duplicate module %s in prio_sched_suites.json, "
+            if name in modules:
+                LOG.warning("Duplicate module %s in prio_sched_modules.json, "
                             "keep the first occurrence" % name)
                 continue
             try:
@@ -439,19 +439,19 @@ def load_prio_sched_suites(suite_dir=""):
             if duration_int < 0:
                 LOG.warning("Negative duration for module %s: %s" % (name, duration))
                 continue
-            suites[name] = duration_int
-        return suites
+            modules[name] = duration_int
+        return modules
     except Exception as e:
-        LOG.warning("Failed to load prio_sched_suites.json: %s" % e)
+        LOG.warning("Failed to load prio_sched_modules.json: %s" % e)
         return {}
 
 
 def _load_duration_map(config):
-    """Load {module_name: duration} from prio_sched_suites.json. Returns {} on
+    """Load {module_name: duration} from prio_sched_modules.json. Returns {} on
     any error (missing file, corrupted json, invalid entries)."""
     testcases_dir = getattr(config, ConfigConst.testcases_path, "")
     try:
-        return load_prio_sched_suites(testcases_dir)
+        return load_prio_sched_modules(testcases_dir)
     except Exception as error:
         LOG.debug("Failed to load duration map: %s", error)
         return {}
