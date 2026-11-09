@@ -17,6 +17,7 @@
 #
 
 import html
+import json
 import os
 from xml.etree import ElementTree
 from _core.logger import platform_logger
@@ -24,8 +25,73 @@ from _core.executor.source import load_prio_sched_modules
 
 LOG = platform_logger("CustomSummaryReporter")
 
-PRIO_SCHED_REPORT_NAME = "prio_sched_modules_report.html"
-TLE_REPORT_NAME = "tle_modules_report.html"
+PRIO_SCHED_REPORT_NAME = "prio_sched_modules.html"
+PRIO_SCHED_REPORT_LINK = "details/" + PRIO_SCHED_REPORT_NAME
+_DATA_JS_PREFIX = "window.reportData = "
+_LEGACY_REPORT_NAME = "summary_report.html"
+_LEGACY_EXTENDED_REPORT_MARKER = "<!--{exec_info.extended_report_row}-->"
+_LEGACY_EXTENDED_REPORT_ROW = (
+    "        <tr>\n"
+    "            <td class=\"normal first\">Extended Reports:</td>\n"
+    "            <td class=\"normal second\" colspan=\"3\">"
+    "<a href='{link}' target='_blank'>{name}</a></td>\n"
+    "        </tr>"
+)
+
+
+def _update_summary_data_js(report_path, relative_link):
+    """
+    Inject the extended report link into static/data.js (summary page data)
+    so the Extended Reports entry is shown only when the report exists.
+    """
+    data_js = os.path.join(report_path, "static", "data.js")
+    if not os.path.isfile(data_js):
+        LOG.debug("data.js not found; skip extended report link injection")
+        return
+    try:
+        with open(data_js, "r", encoding="utf-8") as f:
+            content = f.read()
+        if not content.startswith(_DATA_JS_PREFIX):
+            LOG.debug("data.js has unexpected format; skip link injection")
+            return
+        data = json.loads(content[len(_DATA_JS_PREFIX):])
+        exec_info = data.get("exec_info")
+        if not isinstance(exec_info, dict):
+            LOG.debug("exec_info missing in data.js; skip link injection")
+            return
+        exec_info["extended_report"] = relative_link
+        new_content = json.dumps(data, separators=(",", ":"))
+        with open(data_js, "w", encoding="utf-8") as f:
+            f.write(_DATA_JS_PREFIX + new_content)
+        LOG.debug("Injected extended report link into data.js: %s", relative_link)
+    except Exception as e:
+        LOG.warning("Failed to inject extended report link into data.js: %s" % e)
+
+
+def _update_legacy_summary_report(report_path):
+    """
+    Replace the extended report marker in the legacy (fallback) summary
+    report with the report link row. No-op for the new vue report (the
+    marker only exists when the legacy template was rendered).
+    """
+    summary_report = os.path.join(report_path, _LEGACY_REPORT_NAME)
+    if not os.path.isfile(summary_report):
+        LOG.debug("legacy summary report not found; skip link injection")
+        return
+    try:
+        with open(summary_report, "r", encoding="utf-8") as f:
+            content = f.read()
+        if _LEGACY_EXTENDED_REPORT_MARKER not in content:
+            return
+        row_html = _LEGACY_EXTENDED_REPORT_ROW.format(
+            link=PRIO_SCHED_REPORT_LINK, name=PRIO_SCHED_REPORT_NAME)
+        content = content.replace(_LEGACY_EXTENDED_REPORT_MARKER, row_html)
+        with open(summary_report, "w", encoding="utf-8") as f:
+            f.write(content)
+        LOG.debug("Injected extended report link into legacy summary report")
+    except Exception as e:
+        LOG.warning("Failed to inject extended report link into "
+                    "legacy summary report: %s" % e)
 
 
 def _get_html_template(title, table_headers, table_rows_html, empty_message="None"):
@@ -137,17 +203,12 @@ def parse_execution_times_from_reports(report_path):
     return execution_times
 
 
-def generate_prio_sched_modules_report(report_path, long_task_modules, suite_execution_times):
+def generate_prio_sched_modules_report(report_path, long_task_modules,
+                                      suite_execution_times, time_threshold=None):
     """
-    Generate prio_sched_modules_report.html (long-task-first dispatch report).
-    Columns (exact 5 columns in order):
-    1. Dispatch Order
-    2. Module
-    3. Estimated Time
-    4. Actual Time
-    5. Time Order (Desc)
-    Displayed in dispatch order (duration descending among long tasks).
-    Unexecuted modules show NULL for actual time and are excluded from ranking.
+    Generate prio_sched_modules.html (combined long-task-first dispatch report).
+    Table 1: Whitelist Module Dispatch Details (5 columns, dispatch order)
+    Table 2: Time Limit Exceeded Modules (2 columns, time descending, appended below)
     """
     if not long_task_modules:
         return ""
@@ -195,68 +256,82 @@ def generate_prio_sched_modules_report(report_path, long_task_modules, suite_exe
         )
         rows_html_list.append(row_html)
 
-    html_content = _get_html_template(
-        title="Whitelist Module Dispatch Details",
-        table_headers=headers,
-        table_rows_html="\n                ".join(rows_html_list)
-    )
-
-    out_file = os.path.join(report_path, PRIO_SCHED_REPORT_NAME)
-    os.makedirs(report_path, exist_ok=True)
-    with open(out_file, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    LOG.info("Generated prio sched modules report: %s", out_file)
-    return out_file
-
-
-def generate_tle_modules_report(report_path, time_threshold, long_task_names, suite_execution_times):
-    """
-    Generate tle_modules_report.html.
-    Columns (exact 2 columns):
-    1. Module
-    2. Time(s)
-    Lists non-long-task modules exceeding time_threshold, sorted descending by actual execution time.
-    """
-    if time_threshold is None or time_threshold <= 0:
-        return ""
-
-    headers = ["Module", "Time(s)"]
-    long_task_set = set(long_task_names or [])
-
+    # Build TLE table HTML (appended below the dispatch details table)
+    tle_headers = ["Module", "Time(s)"]
+    long_task_set = set(name for name, _ in long_task_modules)
     overtime_modules = []
     for name, actual_time in suite_execution_times.items():
         if name in long_task_set:
             continue
-        if actual_time > time_threshold:
+        if time_threshold and actual_time > time_threshold:
             overtime_modules.append({"name": name, "actual_time": actual_time})
-
-    # Sort descending by actual execution time
     overtime_modules.sort(key=lambda x: x["actual_time"], reverse=True)
 
-    rows_html_list = []
+    tle_rows = []
     for item in overtime_modules:
-        actual_str = f"{item['actual_time']}" if isinstance(item['actual_time'], float) else f"{item['actual_time']}"
-        row_html = (
-            f"<tr>"
-            f"<td>{html.escape(str(item['name']))}</td>"
-            f"<td>{actual_str}</td>"
-            f"</tr>"
+        tle_rows.append(
+            f"<tr><td>{html.escape(str(item['name']))}</td>"
+            f"<td>{item['actual_time']}</td></tr>"
         )
-        rows_html_list.append(row_html)
+    tle_rows_html = "\n                ".join(tle_rows)
 
-    html_content = _get_html_template(
-        title="Time Limit Exceeded Modules",
-        table_headers=headers,
-        table_rows_html="\n                ".join(rows_html_list),
-        empty_message="None"
-    )
+    # Build combined HTML: two tables in one page
+    table1_headers_html = "".join([f"<th>{h}</th>" for h in headers])
+    table2_headers_html = "".join([f"<th>{h}</th>" for h in tle_headers])
+    table1_rows = "\n                ".join(rows_html_list)
+    table2_rows = tle_rows_html if tle_rows_html else f"<tr><td colspan='2' class='empty-tip'>None</td></tr>"
 
-    out_file = os.path.join(report_path, TLE_REPORT_NAME)
-    os.makedirs(report_path, exist_ok=True)
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whitelist Module Dispatch Details</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 30px; background-color: #f4f6f9; color: #333333; }}
+        .container {{ max-width: 1000px; margin: 0 auto; background-color: #ffffff; padding: 24px 32px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }}
+        h2 {{ color: #1a365d; margin-top: 0; padding-bottom: 12px; border-bottom: 2px solid #3182ce; }}
+        h3 {{ color: #1a365d; margin-top: 32px; padding-bottom: 10px; border-bottom: 1px solid #cbd5e0; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 18px; }}
+        th, td {{ padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+        th {{ background-color: #edf2f7; font-weight: 600; color: #2d3748; }}
+        tr:hover {{ background-color: #f7fafc; }}
+        .empty-tip {{ text-align: center; color: #718096; padding: 24px; font-style: italic; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Whitelist Module Dispatch Details</h2>
+        <table>
+            <thead><tr>{table1_headers_html}</tr></thead>
+            <tbody>
+                {table1_rows}
+            </tbody>
+        </table>
+        <h3>Time Limit Exceeded Modules</h3>
+        <table>
+            <thead><tr>{table2_headers_html}</tr></thead>
+            <tbody>
+                {table2_rows}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+"""
+
+    details_dir = os.path.join(report_path, "details")
+    os.makedirs(details_dir, exist_ok=True)
+    out_file = os.path.join(details_dir, PRIO_SCHED_REPORT_NAME)
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(html_content)
-    LOG.info("Generated TLE modules report: %s", out_file)
+    LOG.info("Generated prio sched modules report: %s", out_file)
+
+    # link the report from the summary page (Extended Reports entry)
+    _update_summary_data_js(report_path, PRIO_SCHED_REPORT_LINK)
+    _update_legacy_summary_report(report_path)
     return out_file
+
 
 
 def generate_all_custom_summary_reports(report_path, suite_dir="",
@@ -313,15 +388,10 @@ def generate_all_custom_summary_reports(report_path, suite_dir="",
         if isinstance(duration, int) and duration >= time_threshold
     ]
 
-    # 1. Long-task-first dispatch report
+    # Generate combined report (dispatch details + TLE in one file)
     if long_task_modules:
         generate_prio_sched_modules_report(report_path, long_task_modules,
-                                          merged_times)
+                                          merged_times, time_threshold)
     else:
         LOG.debug("No long-task modules (duration >= %ds); skipping %s",
                   time_threshold, PRIO_SCHED_REPORT_NAME)
-
-    # 2. TLE report: non-long-task modules whose actual time exceeds threshold
-    long_task_names = set(name for name, _ in long_task_modules)
-    generate_tle_modules_report(report_path, time_threshold, long_task_names,
-                                merged_times)
