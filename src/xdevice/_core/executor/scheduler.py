@@ -85,9 +85,47 @@ class Scheduler(BaseScheduler):
     lock = threading.Lock()
     terminate_result = queue.Queue()
     used_devices = {}
+    suite_execution_times = {}
+    sched_event = threading.Condition()
+    _times_lock = threading.Lock()
+    _probe_offset = 0
+    task_testcases_dir = ""
+
+    @classmethod
+    def record_suite_time(cls, suite_name, duration_seconds):
+        if not suite_name:
+            return
+        with cls._times_lock:
+            cls.suite_execution_times[suite_name] = round(float(duration_seconds), 2)
+
+    def _apply_scheduling_policy(self, task):
+        """Create scheduling policy via factory and reorder test drivers.
+        Unknown or unconfigured policy names fall back to FIFO with a warning.
+        Policy instance is bound to the task (task.sched_policy) so reports
+        can gate on it later in the pipeline."""
+        from _core.executor.policy import create_policy
+        from _core.constants import SchedulerType
+        name = str(getattr(task.config, ConfigConst.scheduler, "") or "")
+        policy = create_policy(name)
+        task.sched_policy = policy
+        if policy is None:
+            if name and name not in ("default", SchedulerType.module,
+                                     SchedulerType.synchronize):
+                LOG.warning("Unknown scheduler policy '%s', fallback to FIFO",
+                            name)
+            return
+        if not getattr(task, "test_drivers", None):
+            return
+        task.test_drivers = policy.sort_test_drivers(task.test_drivers)
+        self.test_number = len(task.test_drivers)
 
     def _do_execute_(self, task):
         Scheduler.used_devices.clear()
+        Scheduler.task_testcases_dir = getattr(
+            task.config, ConfigConst.testcases_path, "")
+        with Scheduler._times_lock:
+            Scheduler.suite_execution_times.clear()
+        self._apply_scheduling_policy(task)
         if task.config.exectype == TestExecType.device_test:
             self._device_test_execute(task)
         elif task.config.exectype == TestExecType.host_test:
@@ -176,36 +214,12 @@ class Scheduler(BaseScheduler):
             task_info.user_id = user_id[0]
         return task_info
 
-    def __allocate_environment__(self, options, test_driver):
-        device_options = get_device_options(options, test_driver[1].source)
-        environment = None
-        env_manager = EnvironmentManager()
-        while True:
-            if not self.is_executing():
-                break
-            if not self.is_monitor_alive():
-                LOG.error("Queue monitor thread is dead.")
-                break
-            environment = env_manager.apply_environment(device_options)
-            applied_device_cnt = len(environment.devices)
-            required_device_cnt = len(device_options)
-            if applied_device_cnt == required_device_cnt:
-                return environment
-            else:
-                env_manager.release_environment(environment)
-                LOG.debug("'%s' is waiting available device",
-                          test_driver[1].source.test_name)
-                if env_manager.check_device_exist(device_options):
-                    continue
-                else:
-                    raise DeviceError(ErrorMessage.Common.Code_0101021.format(required_device_cnt, applied_device_cnt))
-
-        return environment
-
     @classmethod
     def __free_environment__(cls, environment):
         env_manager = EnvironmentManager()
         env_manager.release_environment(environment)
+        with cls.sched_event:
+            cls.sched_event.notify_all()
 
     @staticmethod
     def __reset_environment__(used_devices):
@@ -290,66 +304,151 @@ class Scheduler(BaseScheduler):
                 setattr(task, ConfigConst.product_info, product_info)
         return True
 
+    @classmethod
+    def _select_allocatable_driver(cls, task, test_drivers, max_probe_count=8):
+        """
+        Probe for an immediately dispatchable driver and return its fully
+        allocated environment, which is held for reuse by the caller.
+        The queue head is probed first (FIFO order preserved when it is
+        allocatable); otherwise a bounded scan with a rotating start offset
+        promotes the first allocatable candidate to the front.
+        Returns None when no driver can be fully allocated right now;
+        partial probe environments are released before returning.
+        """
+        env_manager = EnvironmentManager()
+        first_driver = test_drivers[0]
+        first_options = get_device_options(task.config.__dict__, first_driver[1].source)
+        first_env = env_manager.apply_environment(first_options)
+        if len(first_env.devices) == len(first_options):
+            return first_env
+        env_manager.release_environment(first_env)
+
+        span = len(test_drivers) - 1
+        if span <= 0:
+            return None
+        start = cls._probe_offset % span
+        cls._probe_offset = (cls._probe_offset + 1) % span
+        for probe_idx in range(min(span, max_probe_count)):
+            idx = (start + probe_idx) % span + 1
+            candidate = test_drivers[idx]
+            cand_options = get_device_options(task.config.__dict__, candidate[1].source)
+            cand_env = env_manager.apply_environment(cand_options)
+            if len(cand_env.devices) == len(cand_options):
+                driver_to_move = test_drivers.pop(idx)
+                test_drivers.insert(0, driver_to_move)
+                LOG.debug("Dispatched test driver %s at index %d to front for idle device",
+                          candidate[1].source.module_name, idx)
+                return cand_env
+            env_manager.release_environment(cand_env)
+        return None
+
+    def __allocate_environment__(self, options, test_driver):
+        """
+        Try to allocate the environment required by test_driver exactly
+        once, without blocking; also implements the IScheduler interface
+        contract (interface.py). Returns the environment on success, None
+        when the required devices exist but are all busy right now, and
+        raises DeviceError when no matching device exists at all.
+        """
+        device_options = get_device_options(options, test_driver[1].source)
+        env_manager = EnvironmentManager()
+        environment = env_manager.apply_environment(device_options)
+        if len(environment.devices) == len(device_options):
+            return environment
+        env_manager.release_environment(environment)
+        if not env_manager.check_device_exist(device_options):
+            raise DeviceError(ErrorMessage.Common.Code_0101021.format(
+                len(device_options), len(environment.devices)))
+        LOG.debug("'%s' is waiting available device",
+                  test_driver[1].source.test_name)
+        return None
+
     def run_dynamic_concurrent(self, task, test_drivers, current_driver_threads, message_queue):
+        """
+        Dispatch the queue head without blocking on busy devices.
+        Returns True when the head is consumed (dispatched, skipped under
+        retry mode, or handled after DeviceError); returns False when its
+        required devices are all busy right now, leaving it queued for a
+        retry on the next device-available wakeup.
+        """
         task_unused_env = []
-        test_driver = test_drivers[0]
-        self.notify_stage(CaseStart(test_driver[1].source.module_name, test_driver))
+        environment = None
+        with Scheduler.lock:
+            environment = self._select_allocatable_driver(task, test_drivers)
+            test_driver = test_drivers[0]
 
-        if getattr(task.config, ConfigConst.history_report_path, ""):
-            module_name = test_driver[1].source.module_name
-            if not self._is_module_need_retry(task, module_name):
-                self._display_executing_process(None, test_driver,
-                                                test_drivers)
-                LOG.info("%s are passed, no need to retry" % module_name)
-                self._append_history_result(task, module_name)
-                LOG.info("")
-                return
-
-        if getattr(task.config, ConfigConst.component_mapper, ""):
-            module_name = test_driver[1].source.module_name
-            self._component_task_setup(task, module_name)
-
-        # get environment
         try:
-            environment = self.__allocate_environment__(
-                task.config.__dict__, test_driver)
-        except DeviceError as exception:
-            self._handle_device_error(exception, task, test_drivers)
-            self.notify_stage(CaseEnd(test_driver[1].source.module_name, "Failed", exception.args))
-            return
-        if not self.is_executing():
-            if environment:
-                Scheduler.__free_environment__(environment)
+            self.notify_stage(CaseStart(test_driver[1].source.module_name, test_driver))
 
-        if check_mode(ModeType.decc) or getattr(
-                task.config, ConfigConst.check_device, False):
-            LOG.info("Start to check environment: %s" %
-                     environment.__get_serial__())
-            status = self._decc_task_setup(environment, task)
-            if not status:
-                self.__free_environment__(environment)
-                task_unused_env.append(environment)
-                error_message = "Load Error[00116]"
-                report_not_executed(task.config.report_path, [test_driver],
-                                    error_message, task)
-                return
+            if getattr(task.config, ConfigConst.history_report_path, ""):
+                module_name = test_driver[1].source.module_name
+                if not self._is_module_need_retry(task, module_name):
+                    if environment is not None:
+                        Scheduler.__free_environment__(environment)
+                    self._display_executing_process(None, test_driver,
+                                                    test_drivers)
+                    LOG.info("%s are passed, no need to retry" % module_name)
+                    self._append_history_result(task, module_name)
+                    LOG.info("")
+                    return True
 
-            else:
-                LOG.info("Environment %s check success",
+            if getattr(task.config, ConfigConst.component_mapper, ""):
+                module_name = test_driver[1].source.module_name
+                self._component_task_setup(task, module_name)
+
+            # get environment: reuse the one held by the selection probe,
+            # otherwise try exactly once without blocking
+            if environment is None:
+                try:
+                    environment = self.__allocate_environment__(
+                        task.config.__dict__, test_driver)
+                except DeviceError as exception:
+                    self._handle_device_error(exception, task, test_drivers)
+                    self.notify_stage(CaseEnd(
+                        test_driver[1].source.module_name, "Failed", exception.args))
+                    return True
+                if environment is None:
+                    return False
+            if not self.is_executing():
+                if environment:
+                    Scheduler.__free_environment__(environment)
+
+            if check_mode(ModeType.decc) or getattr(
+                    task.config, ConfigConst.check_device, False):
+                LOG.info("Start to check environment: %s" %
                          environment.__get_serial__())
+                status = self._decc_task_setup(environment, task)
+                if not status:
+                    self.__free_environment__(environment)
+                    task_unused_env.append(environment)
+                    environment = None
+                    error_message = "Load Error[00116]"
+                    report_not_executed(task.config.report_path, [test_driver],
+                                        error_message, task)
+                    return True
 
-        # display executing progress
-        self._display_executing_process(environment, test_driver,
-                                        test_drivers)
+                else:
+                    LOG.info("Environment %s check success",
+                             environment.__get_serial__())
 
-        # add to used devices and set need_kit_setup attribute
-        self._append_used_devices(environment, self.used_devices)
+            # display executing progress
+            self._display_executing_process(environment, test_driver,
+                                            test_drivers)
 
-        # start driver thread
-        self._start_driver_thread(current_driver_threads, (
-            environment, message_queue, task, test_driver))
+            # add to used devices and set need_kit_setup attribute
+            self._append_used_devices(environment, self.used_devices)
 
-        self._do_taskkit_teardown(self.used_devices, task_unused_env)
+            # start driver thread
+            self._start_driver_thread(current_driver_threads, (
+                environment, message_queue, task, test_driver))
+        except Exception:
+            if environment is not None:
+                try:
+                    Scheduler.__free_environment__(environment)
+                except Exception as error:
+                    LOG.debug("Release environment on dispatch error failed: %s" % error)
+            raise
+        return True
 
     @classmethod
     def _append_history_result(cls, task, module_name):

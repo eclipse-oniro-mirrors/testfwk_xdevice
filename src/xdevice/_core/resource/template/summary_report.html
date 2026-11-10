@@ -44,6 +44,13 @@
               </el-link>
             </div>
           </el-descriptions-item>
+          <el-descriptions-item label="Extended Reports" v-if="summary.extended_report">
+            <div>
+              <el-link :href="summary.extended_report" target="_blank" type="primary">
+                prio_sched_modules.html
+              </el-link>
+            </div>
+          </el-descriptions-item>
         </el-descriptions>
       </div>
       <div class="statistic" v-if="statistics">

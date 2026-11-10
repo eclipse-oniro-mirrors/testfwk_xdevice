@@ -191,7 +191,8 @@ class ReportEventListener(AbsReportListener, ABC):
         else:
             reporter = reporter[0]
         reporter.__generate_reports__(self.report_path,
-                                      task_info=test_result)
+                                      task_info=test_result,
+                                      task=kwargs.get("task"))
 
     def _handle_case_end(self, test_result):
         test = self._get_test_result(test_result=test_result, create=False)

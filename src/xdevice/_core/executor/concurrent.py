@@ -191,6 +191,7 @@ class DriversThread(threading.Thread):
     def _handle_finally(self, driver, test, execute_message):
         source_content = test.source.source_file or test.source.source_string
         end_time = time.time()
+        duration = round(end_time - self.start_time, 2)
         LOG.info("Executed: %s, Execution Time: %s" % (
             source_content, calculate_elapsed_time(self.start_time, end_time)))
 
@@ -229,10 +230,40 @@ class DriversThread(threading.Thread):
         else:
             execute_message.set_state(ExecuteMessage.DEVICE_FINISH)
 
+        # tear down task kits on this environment's devices before freeing,
+        # so each module starts with a clean device state (no cross-module
+        # pollution from pushed files / installed HAPs / shell side effects)
+        if self.environment:
+            try:
+                for device in self.environment.devices:
+                    if getattr(device, ConfigConst.need_kit_setup, True):
+                        continue
+                    for kit in getattr(device, ConfigConst.task_kits, []):
+                        try:
+                            kit.__teardown__(device)
+                        except Exception as error:
+                            LOG.debug("Do task kit teardown: %s" % error)
+                    setattr(device, ConfigConst.task_kits, [])
+                    setattr(device, ConfigConst.need_kit_setup, True)
+            except Exception as error:
+                LOG.debug("Task kit teardown in handle_finally: %s" % error)
+
         # free environment
         if self.environment:
             LOG.debug("Thread %s free environment", execute_message.get_thread_name())
             Context.get_scheduler().__free_environment__(execute_message.get_environment())
+
+        # record suite time after the environment is released, so the
+        # device-available wakeup is never delayed by bookkeeping
+        if test and hasattr(test, "source"):
+            module_name = getattr(test.source, "module_name", "") or getattr(test.source, "test_name", "")
+            if module_name:
+                try:
+                    scheduler = Context.get_scheduler()
+                    if scheduler:
+                        scheduler.record_suite_time(module_name, duration)
+                except Exception as e:
+                    LOG.debug("Record suite time error: %s" % e)
 
         LOG.debug("Thread %s put result", self.name)
         self.message_queue.put(execute_message)
@@ -663,6 +694,34 @@ class DriversDryRunThread(threading.Thread):
         return driver_request
 
 
+def _get_sched_event():
+    try:
+        scheduler = Context.get_scheduler()
+        if scheduler:
+            return scheduler.sched_event
+        return None
+    except Exception as error:
+        LOG.debug("Get sched event failed: %s" % error)
+        return None
+
+
+def _wait_sched_event(timeout):
+    sched_event = _get_sched_event()
+    if sched_event is None:
+        time.sleep(timeout)
+        return
+    with sched_event:
+        sched_event.wait(timeout)
+
+
+def _notify_sched_event():
+    sched_event = _get_sched_event()
+    if sched_event is None:
+        return
+    with sched_event:
+        sched_event.notify_all()
+
+
 class QueueMonitorThread(threading.Thread):
 
     def __init__(self, message_queue, current_driver_threads, test_drivers):
@@ -683,11 +742,12 @@ class QueueMonitorThread(threading.Thread):
         LOG.debug("Queue monitor thread start")
         while self.test_drivers or self.current_driver_threads:
             if not self.current_driver_threads:
-                time.sleep(3)
+                _wait_sched_event(3)
                 continue
             execute_message = self.message_queue.get()
 
             self.current_driver_threads.pop(execute_message.get_thread_name())
+            _notify_sched_event()
 
             if execute_message.get_state() == ExecuteMessage.DEVICE_FINISH:
                 LOG.debug("Thread %s execute finished" % execute_message.get_thread_name())

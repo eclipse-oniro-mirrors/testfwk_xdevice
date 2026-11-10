@@ -29,7 +29,7 @@ from _core.utils import get_local_ip
 from _core.constants import ConfigConst
 from _core.constants import Cluster
 
-__all__ = ["UserConfigManager"]
+__all__ = ["UserConfigManager", "ConfigManager"]
 LOG = platform_logger("ConfigManager")
 
 
@@ -464,3 +464,19 @@ class UserConfigManager(object):
             return 8
         value = int(self.taskargs.get("max_driver_threads"))
         return value if value > 0 else 8
+
+    def get_time_threshold(self):
+        """Read time_threshold (seconds) from user_config.xml <taskargs>.
+        Returns int > 0, or None when not configured or invalid."""
+        if not self.taskargs or not self.taskargs.get("time_threshold"):
+            return None
+        try:
+            value = int(self.taskargs.get("time_threshold"))
+        except (ValueError, TypeError):
+            LOG.warning("Invalid time_threshold in user_config.xml: %s"
+                        % self.taskargs.get("time_threshold"))
+            return None
+        return value if value > 0 else None
+
+
+ConfigManager = UserConfigManager
