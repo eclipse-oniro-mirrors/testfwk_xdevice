@@ -21,6 +21,7 @@ import json
 import copy
 import stat
 from collections import namedtuple
+from dataclasses import dataclass
 
 from _core.constants import DeviceTestType
 from _core.constants import SchedulerType
@@ -44,8 +45,18 @@ __all__ = ["TestSetSource", "TestSource", "find_test_descriptors",
            "find_testdict_descriptors", "TestDictSource"]
 
 TestSetSource = namedtuple('TestSetSource', 'set')
-TestSource = namedtuple('TestSource', 'source_file source_string config_file '
-                                      'test_name test_type module_name module_subsystem')
+
+
+@dataclass
+class TestSource:
+    source_file: str
+    source_string: str
+    config_file: str
+    test_name: str
+    test_type: str
+    module_name: str
+    module_subsystem: str
+    duration: int = 0
 
 TEST_TYPE_DICT = {"DEX": DeviceTestType.dex_test,
                   "HAP": DeviceTestType.hap_test,
@@ -132,6 +143,7 @@ def find_testdict_descriptors(config):
         return None
     testdict = config.testdict
     test_descriptors = []
+    duration_map = _load_duration_map(config)
     for test_type_key, files in testdict.items():
         for file_name in files:
             if not os.path.isabs(file_name):
@@ -139,7 +151,8 @@ def find_testdict_descriptors(config):
             if os.path.isfile(file_name) and test_type_key in \
                     TestDictSource.test_type.keys():
                 desc = _make_test_descriptor(os.path.abspath(file_name),
-                                             test_type_key)
+                                             test_type_key,
+                                             duration_map=duration_map)
                 if desc is not None:
                     test_descriptors.append(desc)
     if not test_descriptors:
@@ -227,11 +240,16 @@ def _get_test_sources(config, testcases_dirs):
     return test_sources
 
 
+IGNORE_TEST_FILE_NAMES = frozenset(["prio_sched_modules.json"])
+
+
 def _append_module_test_source(testcases_path, test_sources):
     if not os.path.isdir(testcases_path):
         return
     for item in os.listdir(testcases_path):
         if not item.endswith(MODULE_CONFIG_SUFFIX):
+            continue
+        if item in IGNORE_TEST_FILE_NAMES:
             continue
         item_path = os.path.join(testcases_path, item)
         if os.path.isfile(item_path):
@@ -307,7 +325,7 @@ def _append_norm_test_source(norm_test_sources, test_source, testcases_dir,
     return False
 
 
-def _make_test_descriptor(file_path, test_type_key):
+def _make_test_descriptor(file_path, test_type_key, duration_map=None):
     from _core.executor.request import Descriptor
     if test_type_key is None:
         return None
@@ -324,10 +342,12 @@ def _make_test_descriptor(file_path, test_type_key):
         module_info = _get_module_info(config_file)
 
     module_name = _parse_module_name(config_file, filename)
+    duration = _get_duration_from_map(duration_map, module_name)
     # make test descriptor
     desc = Descriptor(uuid=uid, name=filename,
                       source=TestSource(file_path, "", config_file, filename,
-                                        test_type, module_name, module_info))
+                                        test_type, module_name, module_info,
+                                        duration))
     return desc
 
 
@@ -335,8 +355,117 @@ def _get_test_driver(test_source):
     return JsonParser(test_source).get_driver_type()
 
 
+def _find_suite_config_file(suite_dir, filename):
+    candidate_paths = []
+    if suite_dir:
+        if os.path.isfile(suite_dir):
+            if os.path.basename(suite_dir) == filename:
+                return os.path.abspath(suite_dir)
+            dir_name = os.path.dirname(suite_dir)
+        else:
+            dir_name = suite_dir
+        candidate_paths.extend([
+            os.path.join(dir_name, "testcases", "config", filename),
+            os.path.join(dir_name, "config", filename),
+            os.path.join(dir_name, filename),
+        ])
+    try:
+        from xdevice import Variables
+        if hasattr(Variables, "config") and Variables.config:
+            tc_dir = Variables.config.get_testcases_dir()
+            if tc_dir:
+                candidate_paths.extend([
+                    os.path.join(tc_dir, "config", filename),
+                    os.path.join(os.path.dirname(tc_dir), "testcases", "config", filename),
+                    os.path.join(tc_dir, filename),
+                ])
+        if getattr(Variables, "exec_dir", ""):
+            candidate_paths.extend([
+                os.path.join(Variables.exec_dir, "testcases", "config", filename),
+                os.path.join(Variables.exec_dir, "config", filename),
+            ])
+        if getattr(Variables, "top_dir", ""):
+            candidate_paths.extend([
+                os.path.join(Variables.top_dir, "testcases", "config", filename),
+                os.path.join(Variables.top_dir, "config", filename),
+            ])
+    except Exception as e:
+        LOG.debug("Error retrieving candidate paths from Variables: %s" % e)
+
+    for path in candidate_paths:
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return ""
+
+
+def load_prio_sched_modules(suite_dir=""):
+    """
+    Load prioritized scheduling modules from testcases/prio_sched_modules.json.
+    Format: [{"module_name": "suiteA", "duration": 7200}, ...]
+    Returns an ordered dict {module_name: duration_seconds}.
+    Returns {} safely on missing file, corrupted JSON, or invalid format.
+    Duplicate module_name keeps the first occurrence with a warning.
+    Invalid duration (non-int / negative) entries are skipped with a warning.
+    """
+    file_path = _find_suite_config_file(suite_dir, "prio_sched_modules.json")
+    if not file_path or not os.path.exists(file_path):
+        LOG.debug("prio_sched_modules.json not found")
+        return {}
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            LOG.warning("prio_sched_modules.json content is not a list")
+            return {}
+        modules = {}
+        for item in data:
+            if not isinstance(item, dict) or not item:
+                continue
+            name = str(item.get("module_name", "") or "").strip()
+            duration = item.get("duration", None)
+            if not name:
+                LOG.warning("Missing module_name in prio_sched_modules.json entry: %s"
+                            % item)
+                continue
+            if name in modules:
+                LOG.warning("Duplicate module %s in prio_sched_modules.json, "
+                            "keep the first occurrence" % name)
+                continue
+            try:
+                duration_int = int(duration)
+            except (ValueError, TypeError):
+                LOG.warning("Invalid duration for module %s: %s" % (name, duration))
+                continue
+            if duration_int < 0:
+                LOG.warning("Negative duration for module %s: %s" % (name, duration))
+                continue
+            modules[name] = duration_int
+        return modules
+    except Exception as e:
+        LOG.warning("Failed to load prio_sched_modules.json: %s" % e)
+        return {}
+
+
+def _load_duration_map(config):
+    """Load {module_name: duration} from prio_sched_modules.json. Returns {} on
+    any error (missing file, corrupted json, invalid entries)."""
+    testcases_dir = getattr(config, ConfigConst.testcases_path, "")
+    try:
+        return load_prio_sched_modules(testcases_dir)
+    except Exception as error:
+        LOG.debug("Failed to load duration map: %s", error)
+        return {}
+
+
+def _get_duration_from_map(duration_map, module_name):
+    if not duration_map or not module_name:
+        return 0
+    return int(duration_map.get(module_name, 0))
+
+
 def _make_test_descriptors_from_testsources(test_sources, config):
     test_descriptors = []
+    duration_map = _load_duration_map(config)
 
     for test_source in test_sources:
         filename, ext = test_source.split()[0], "str"
@@ -377,7 +506,8 @@ def _make_test_descriptors_from_testsources(test_sources, config):
         if config.scheduler == SchedulerType.module and config_file:
             module_info = _get_module_info(config_file)
         desc = _create_descriptor(config_file, filename, test_source,
-                                  test_type, config, module_info)
+                                  test_type, config, module_info,
+                                  duration_map=duration_map)
         if desc:
             test_descriptors.append(desc)
 
@@ -396,7 +526,8 @@ def _get_module_info(config_file):
         return NO_MODULE_SUBSYSTEM
 
 
-def _create_descriptor(config_file, filename, test_source, test_type, config, module_info):
+def _create_descriptor(config_file, filename, test_source, test_type, config,
+                       module_info, duration_map=None):
     from _core.executor.request import Descriptor
 
     error_message = ""
@@ -409,9 +540,11 @@ def _create_descriptor(config_file, filename, test_source, test_type, config, mo
     # create Descriptor
     uid = unique_id("TestSource", filename)
     module_name = _parse_module_name(config_file, filename)
+    duration = _get_duration_from_map(duration_map, module_name)
     desc = Descriptor(uuid=uid, name=filename,
                       source=TestSource(test_source, "", config_file,
-                                        filename, test_type, module_name, module_info))
+                                        filename, test_type, module_name,
+                                        module_info, duration))
     if not os.path.isfile(test_source):
         if is_config_str(test_source):
             desc = Descriptor(uuid=uid, name=filename,

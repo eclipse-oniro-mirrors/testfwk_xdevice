@@ -34,6 +34,7 @@ setup(
         'xdevice._core.driver',
         'xdevice._core.environment',
         'xdevice._core.executor',
+        'xdevice._core.executor.policy',
         'xdevice._core.report',
         'xdevice._core.testkit',
         'xdevice._core.context',

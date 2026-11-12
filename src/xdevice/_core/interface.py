@@ -20,8 +20,13 @@ from abc import ABC
 from abc import abstractmethod
 from enum import Enum
 from typing import List
+from typing import Optional
+from typing import TYPE_CHECKING
 
 from _core.constants import DeviceProperties
+
+if TYPE_CHECKING:
+    from _core.environment.manager_env import Environment
 
 __all__ = ["LifeCycle", "IDevice", "IDriver", "IListener", "IShellReceiver",
            "IParser", "ITestKit", "IScheduler", "IDeviceManager", "IReporter",
@@ -227,9 +232,8 @@ class IScheduler(ABC):
         Execute tests according to the request.
         """
 
-    @classmethod
     @abstractmethod
-    def __allocate_environment__(cls, options, test_driver):
+    def __allocate_environment__(self, options, test_driver) -> Optional["Environment"]:
         """
         Allocate environment according to the request.
         """

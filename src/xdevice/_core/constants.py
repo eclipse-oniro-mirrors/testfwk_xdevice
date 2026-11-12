@@ -331,7 +331,7 @@ class ConfigConst(object):
     tag_hdc = "hdc"
 
     # Ignore testcase path
-    ignore_testcases_path = "__pycache__|.git|.svn|.idea|.test"
+    ignore_testcases_path = "__pycache__|.git|.svn|.idea|.test|config"
 
     screenshot_on_failure = "screenshot_on_failure"
     report_plus = "report_plus"
@@ -359,6 +359,7 @@ class ConfigConst(object):
         kill_uitest = "kill_uitest"
         max_log_line_in_html = "max_log_line_in_html"
         max_driver_threads = "max_driver_threads"
+        time_threshold = "time_threshold"
         pass_through = "pass_through"
         repeat = "repeat"
         screenrecorder = "screenrecorder"
